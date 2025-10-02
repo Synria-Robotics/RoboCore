@@ -32,8 +32,8 @@ class IKSolverNumPy:
         max_iters: int = 100,
         pos_tol: float = 1e-3,
         ori_tol: float = 1e-3,
-        min_damping: float = 1e-4,
-        max_damping: float = 5e-2,
+        min_damping: float = 1e-6,
+        max_damping: float = 1e-2,
         base_step: float = 1.0,
     ):
         """Initialize IK solver.
@@ -69,6 +69,7 @@ class IKSolverNumPy:
         use_analytic_jacobian: bool = False,
         method: str = "dls",
         transpose_gain: float | None = None,
+        max_step_norm: float = 0.3,
         refine: bool = False,
         refine_iters: int = 10,
         refine_pos_tol: float | None = None,
@@ -207,24 +208,39 @@ class IKSolverNumPy:
             elif method == "pinv":
                 dq = self._solve_pinv(J, err, damping)
             else:  # transpose
+                # Jacobian Transpose 方法
+                # 使用自适应增益：alpha = ||err||² / ||J @ J.T @ err||²
                 if transpose_gain is not None:
                     alpha = transpose_gain
                 else:
-                    try:
-                        smax = np.linalg.svd(J, compute_uv=False)[0]
-                    except Exception:
-                        smax = 1.0
-                    alpha = 0.9 / (smax * smax + 1e-9)
+                    # 自适应增益计算（更稳定的收敛）
+                    J_err = J.T @ err
+                    JJt_err = J @ J_err
+                    err_norm_sq = np.dot(err, err)
+                    JJt_err_norm_sq = np.dot(JJt_err, JJt_err)
+                    if JJt_err_norm_sq > 1e-12:
+                        alpha_raw = err_norm_sq / JJt_err_norm_sq
+                    else:
+                        # 回退到固定增益
+                        alpha_raw = 0.01
+                    # 限制 alpha 范围避免步长过大
+                    alpha = np.clip(alpha_raw, 0.001, 0.5)
                 dq = alpha * (J.T @ err)
 
-            # Step scaling
-            if adaptive_step:
+            # Step scaling (transpose 方法的 alpha 已经是最优步长，不需要额外缩放)
+            if method != "transpose" and adaptive_step:
                 step = self._compute_adaptive_step(pos_err_norm, ori_err_norm)
             else:
-                step = self.base_step
+                step = 1.0 if method == "transpose" else self.base_step
+
+            dq_step = step * dq
+            # 添加步长限制（与 Torch solver 一致）
+            dq_norm = np.linalg.norm(dq_step)
+            if dq_norm > max_step_norm:
+                dq_step = dq_step * (max_step_norm / (dq_norm + 1e-15))
             
             # Update joint angles
-            q += step * dq
+            q += dq_step
             
             # Apply joint limits
             q = self._apply_joint_limits(q)

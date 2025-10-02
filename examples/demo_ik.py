@@ -57,10 +57,10 @@ def summarize(name, stats):
 
 def main():
     parser = argparse.ArgumentParser(description="IK methods comparison")
-    parser.add_argument('--samples', type=int, default=12, help='Number of test samples')
+    parser.add_argument('--samples', type=int, default=4, help='Number of test samples')
     parser.add_argument('--seed', type=int, default=123, help='Random seed')
-    parser.add_argument('--methods', nargs='+', default=['pinv', 'dls', 'transpose'],
-                        help='IK methods to test')
+    parser.add_argument('--methods', nargs='+', default=['pinv', 'dls'],
+                        help='IK methods to test (pinv, dls, transpose). Note: transpose is slow')
     parser.add_argument('--backends', nargs='+', default=['numpy', 'torch'],
                         help='Backends to test')
     parser.add_argument('--multi-start', type=int, default=0,
@@ -71,7 +71,7 @@ def main():
                         help='Position tolerance (m)')
     parser.add_argument('--ori-tol', type=float, default=1e-4,
                         help='Orientation tolerance (rad)')
-    parser.add_argument('--torch-device', type=str, default=None,
+    parser.add_argument('--torch-device', type=str, default='cpu',
                         help='PyTorch device (cpu, cuda, mps)')
     parser.add_argument('--torch-dtype', type=str, default=None,
                         help='PyTorch dtype (float32, float64)')

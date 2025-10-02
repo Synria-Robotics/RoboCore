@@ -54,9 +54,12 @@ class IKSolverTorch:
         self.max_damping = max_damping
         self.base_step = base_step
         self.device = device if device is not None else select_device()
+
+        # MPS 设备特殊处理
+        self.is_mps = str(self.device) == "mps"
         if dtype is None:
             # MPS 对 float64 支持不完善
-            if str(self.device) == "mps":
+            if self.is_mps:
                 self.dtype = torch.float32
             else:
                 self.dtype = torch.float64
@@ -68,6 +71,9 @@ class IKSolverTorch:
         self.fk_solver = FKSolverTorch(model)
         # Initialize Jacobian solver
         self.jacobian_solver = JacobianSolverTorch(model)
+
+        # 预分配常用tensor以减少内存分配开销
+        self._eye6 = torch.eye(6, dtype=self.dtype, device=self.device)
 
     # -------------------- 主求解 --------------------
     def solve(
@@ -84,9 +90,9 @@ class IKSolverTorch:
         use_numeric_jacobian: bool = False,
         use_central_diff: bool = True,
         max_step_norm: float = 0.3,
-        backtrack: bool = True,
-        refine: bool = True,
-        refine_iters: int = 10,
+        backtrack: bool = False,  # 默认关闭以加速
+        refine: bool = False,  # 默认关闭以加速
+        refine_iters: int = 5,  # 减少refine迭代次数
         refine_pos_tol: Optional[float] = None,
         refine_ori_tol: Optional[float] = None,
         # 额外增强参数
@@ -120,10 +126,10 @@ class IKSolverTorch:
 
         def run_one(q_init: Tensor):
             q = q_init.clone()
-            best_q = q.clone()
-            best_err = math.inf
+            best_q = q
+            best_err = torch.tensor(math.inf, dtype=self.dtype, device=self.device)
             plateau_counter = 0
-            prev_err_norm = math.inf
+            prev_err_norm = torch.tensor(math.inf, dtype=self.dtype, device=self.device)
             jac_type_local = "analytic"
             final_pos_err = float('inf')
             final_ori_err = float('inf')
@@ -134,25 +140,29 @@ class IKSolverTorch:
                 p_cur = T_cur[:3, 3]
                 pos_err_v = p_target - p_cur
                 ori_err_v = orientation_error_torch(R_cur, R_target)
-                pos_err_norm = torch.linalg.norm(pos_err_v).item()
-                ori_err_norm = torch.linalg.norm(ori_err_v).item()
-                # 分段动态姿态权重
-                if ori_err_norm > 1.0:
+                pos_err_norm_t = torch.linalg.norm(pos_err_v)  # 保持为tensor
+                ori_err_norm_t = torch.linalg.norm(ori_err_v)  # 保持为tensor
+
+                # 分段动态姿态权重 - 延迟.item()调用
+                ori_err_norm_val = ori_err_norm_t.item()
+                if ori_err_norm_val > 1.0:
                     ori_scale = 0.3
-                elif ori_err_norm > 0.7:
+                elif ori_err_norm_val > 0.7:
                     ori_scale = 0.5
-                elif ori_err_norm > 0.4:
+                elif ori_err_norm_val > 0.4:
                     ori_scale = 0.8
                 else:
                     ori_scale = 1.0
                 ori_weight_dyn = ori_weight * ori_scale
                 err = torch.cat([pos_weight * pos_err_v, ori_weight_dyn * ori_err_v])
-                err_norm = torch.linalg.norm(err).item()
+                err_norm = torch.linalg.norm(err)
+
+                # 更新最优解 - 使用tensor比较
                 if err_norm < best_err:
                     best_err = err_norm
                     best_q = q.clone()
-                    final_pos_err = pos_err_norm
-                    final_ori_err = ori_err_norm
+                    final_pos_err = pos_err_norm_t.item()
+                    final_ori_err = ori_err_norm_val
 
                 if prev_err_norm - err_norm < 1e-8:
                     plateau_counter += 1
@@ -160,7 +170,10 @@ class IKSolverTorch:
                     plateau_counter = 0
                 prev_err_norm = err_norm
 
-                # 收敛
+                # 收敛检查 - 只在这里调用.item()
+                pos_err_norm = pos_err_norm_t.item()
+                ori_err_norm = ori_err_norm_val
+
                 if pos_err_norm < self.pos_tol and ori_err_norm < self.ori_tol:
                     if refine:
                         r_pos_tol = refine_pos_tol or (self.pos_tol * 0.2)
@@ -171,12 +184,14 @@ class IKSolverTorch:
                             p_r = T_r[:3, 3]; R_r = T_r[:3, :3]
                             p_e = p_target - p_r
                             o_e = orientation_error_torch(R_r, R_target)
-                            if torch.linalg.norm(p_e) < r_pos_tol and torch.linalg.norm(o_e) < r_ori_tol:
+                            p_e_norm = torch.linalg.norm(p_e)
+                            o_e_norm = torch.linalg.norm(o_e)
+                            if p_e_norm < r_pos_tol and o_e_norm < r_ori_tol:
                                 q = q_ref
-                                final_pos_err = torch.linalg.norm(p_e).item()
-                                final_ori_err = torch.linalg.norm(o_e).item()
+                                final_pos_err = p_e_norm.item()
+                                final_ori_err = o_e_norm.item()
                                 best_q = q.clone()
-                                best_err = math.sqrt(final_pos_err**2 + final_ori_err**2)
+                                best_err = torch.sqrt(p_e_norm**2 + o_e_norm**2)
                                 break
                             J_ref = self.jacobian_solver.solve(
                                 q_ref,
@@ -198,7 +213,7 @@ class IKSolverTorch:
                         "q": q.detach().cpu().tolist(),
                         "success": True,
                         "iters": it,
-                        "err_norm": float(best_err),
+                        "err_norm": float(best_err.item() if torch.is_tensor(best_err) else best_err),
                         "pos_err": float(final_pos_err),
                         "ori_err": float(final_ori_err),
                         "method": method,
@@ -244,22 +259,32 @@ class IKSolverTorch:
                 elif method == "pinv":
                     dq = self._solve_pinv(J, err, damping)
                 else:
+                    # Jacobian Transpose 方法
+                    # 使用自适应增益：alpha = ||err||² / ||J @ J.T @ err||²
                     if transpose_gain is not None:
                         alpha = transpose_gain
                     else:
-                        try:
-                            smax = torch.linalg.svdvals(J)[0].item()
-                        except Exception:
-                            smax = 1.0
-                        alpha = 0.9 / (smax * smax + 1e-9)
+                        # 自适应增益计算（更稳定的收敛）
+                        J_err = J.transpose(0, 1) @ err
+                        JJt_err = J @ J_err
+                        err_norm_sq = torch.dot(err, err)
+                        JJt_err_norm_sq = torch.dot(JJt_err, JJt_err)
+                        if JJt_err_norm_sq > 1e-12:
+                            alpha_raw = (err_norm_sq / JJt_err_norm_sq).item()
+                        else:
+                            # 回退到固定增益
+                            alpha_raw = 0.01
+                        # 限制 alpha 范围避免步长过大
+                        alpha = max(0.001, min(alpha_raw, 0.5))
                     dq = alpha * (J.transpose(0, 1) @ err)
 
-                # 步长
-                if adaptive_step:
+                # 步长 (transpose 方法的 alpha 已经是最优步长，不需要额外缩放)
+                if method != "transpose" and adaptive_step:
                     step = self._compute_adaptive_step(pos_err_norm, ori_err_norm)
                 else:
-                    step = self.base_step
-                if plateau_counter >= 8:
+                    step = 1.0 if method == "transpose" else self.base_step
+
+                if plateau_counter >= 8 and method != "transpose":
                     step *= 0.5
 
                 dq_step = step * dq
@@ -288,7 +313,7 @@ class IKSolverTorch:
                 "q": best_q.detach().cpu().tolist(),
                 "success": False,
                 "iters": self.max_iters,
-                "err_norm": float(best_err),
+                "err_norm": float(best_err.item() if torch.is_tensor(best_err) else best_err),
                 "method": method,
                 "jacobian": jac_type_local,
                 "pos_err": float(final_pos_err),
@@ -313,7 +338,7 @@ class IKSolverTorch:
 
     # -------------------- helpers --------------------
     def _solve_dls(self, J: Tensor, err: Tensor, damping: float) -> Tensor:
-        A = J @ J.transpose(0, 1) + (damping ** 2) * torch.eye(6, dtype=J.dtype, device=J.device)
+        A = J @ J.transpose(0, 1) + (damping ** 2) * self._eye6
         try:
             y = torch.linalg.solve(A, err)
         except Exception:
@@ -322,15 +347,35 @@ class IKSolverTorch:
         return J.transpose(0, 1) @ y
 
     def _solve_pinv(self, J: Tensor, err: Tensor, damping: float) -> Tensor:
+        # MPS 不支持 SVD，直接在 CPU 上计算
+        if self.is_mps:
+            J_cpu = J.cpu()
+            err_cpu = err.cpu()
+            try:
+                U, S, Vh = torch.linalg.svd(J_cpu, full_matrices=False)
+            except Exception:
+                return self._solve_dls(J, err, damping)
+
+            if damping > 0:
+                S_inv = S / (S * S + damping * damping)
+            else:
+                tol = 1e-9 * max(J_cpu.shape)
+                S_inv = torch.where(S > tol, 1.0 / S, torch.zeros_like(S))
+
+            result = (Vh.transpose(0, 1) * S_inv) @ (U.transpose(0, 1) @ err_cpu)
+            return result.to(J.device)
+
+        # 非 MPS 设备
         try:
             U, S, Vh = torch.linalg.svd(J, full_matrices=False)
         except RuntimeError:
-            # 尝试 CPU 退化
+            # 其他设备的 CPU 回退
             try:
                 Uc, Sc, Vhc = torch.linalg.svd(J.cpu(), full_matrices=False)
                 U, S, Vh = Uc.to(J.device), Sc.to(J.device), Vhc.to(J.device)
             except Exception:
                 return self._solve_dls(J, err, damping)
+
         if damping > 0:
             S_inv = S / (S * S + damping * damping)
         else:
@@ -339,20 +384,20 @@ class IKSolverTorch:
         return (Vh.transpose(0, 1) * S_inv) @ (U.transpose(0, 1) @ err)
 
     def _compute_adaptive_damping(self, J: Tensor, pos_err: float, ori_err: float) -> float:
-        JJt = J @ J.transpose(0, 1)
+        # 使用SVD计算条件数（比特征值分解更快更稳定）
+        # MPS 不支持 svdvals，在 CPU 上计算
         try:
-            eigvals = torch.linalg.eigvalsh(JJt)
+            if self.is_mps:
+                S = torch.linalg.svdvals(J.cpu())
+            else:
+                S = torch.linalg.svdvals(J)
+            s_max = S[0].item()
+            s_min = S[-1].item()
+            cond = s_max / max(s_min, 1e-12)
         except Exception:
-            try:
-                eigvals = torch.linalg.eigvalsh(JJt.cpu()).to(J.device)
-            except Exception:
-                eigvals = None
-        if eigvals is not None:
-            s_max = torch.sqrt(torch.max(eigvals)).item()
-            s_min = torch.sqrt(torch.clamp(torch.min(eigvals), min=1e-12)).item()
-            cond = s_max / s_min
-        else:
+            # 完全回退
             cond = 100.0
+
         err_combo = pos_err + 0.5 * ori_err
         if cond > 200 or err_combo > 0.05:
             return self.max_damping

@@ -163,7 +163,7 @@ class JacobianSolverTorch:
             
             js = self.model._actuated[i]
             if js.joint_type == "revolute":
-                J_geo[:3, i] = torch.cross(z_i, (p_end - p_i))
+                J_geo[:3, i] = torch.linalg.cross(z_i, (p_end - p_i))
                 J_geo[3:6, i] = z_i
             elif js.joint_type == "prismatic":
                 J_geo[:3, i] = z_i
