@@ -13,11 +13,11 @@ from __future__ import annotations
 from typing import Sequence, Dict, Any, Optional, List
 import numpy as np
 
-from .ik_solver_numpy import IKSolverNumPy
+from robocore.kinematics.ik_utils.ik_solver_numpy import IKSolverNumPy
 
 _HAS_TORCH = False
 try:  # pragma: no cover
-    from .ik_solver_torch import IKSolverTorch  # type: ignore
+    from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
     _HAS_TORCH = True
 except Exception:  # noqa: E722
     pass
@@ -100,6 +100,3 @@ def inverse_kinematics(
         return successes[0]
     candidates.sort(key=lambda c: c['err_norm'])
     return candidates[0]
-
-
-__all__ = ["inverse_kinematics"]

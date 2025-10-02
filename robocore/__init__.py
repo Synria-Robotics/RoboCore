@@ -11,7 +11,7 @@ A lightweight robotics library providing:
 __version__ = "0.1.0"
 
 # Core modules
-from . import backend
+from .utils import backend
 from . import modeling
 from . import kinematics
 from . import analysis
@@ -23,8 +23,6 @@ from .kinematics import (
     inverse_kinematics,
     jacobian,
     IKSolverNumPy as IKSolver,  # keep alias for backward style usage (numpy solver)
-    analytic_jacobian_numpy,
-    numeric_jacobian_numpy,
 )
 
 __all__ = [
@@ -38,7 +36,5 @@ __all__ = [
     "forward_kinematics",
     "inverse_kinematics",
     "jacobian",
-    "numeric_jacobian_numpy",
-    "analytic_jacobian_numpy",
 ]
 

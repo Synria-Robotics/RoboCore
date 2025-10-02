@@ -8,12 +8,7 @@ from __future__ import annotations
 from typing import Dict, List, Sequence
 import math
 from robocore.modeling.robot_model import RobotModel
-from robocore.kinematics import numeric_jacobian_numpy
-try:  # optional torch numeric Jacobian
-    from robocore.kinematics import numeric_jacobian_torch  # type: ignore
-    _HAS_TORCH = True
-except Exception:  # pragma: no cover
-    _HAS_TORCH = False
+from robocore.kinematics import jacobian
 from robocore.utils.beauty_logger import beauty_print
 
 
@@ -69,8 +64,8 @@ class SingularityAnalyzer:
             q_np = _np.asarray(q.detach().cpu(), dtype=float)
         else:
             q_np = _np.asarray(q, dtype=float)
-        Jn = numeric_jacobian_numpy(self.model, q_np, use_central_diff=True)
-        # numeric_jacobian_numpy returns 6xN numpy array; convert to list of lists for existing logic
+        Jn = jacobian(self.model, q_np, backend='numpy', method='numeric', use_central_diff=True)
+        # jacobian returns 6xN numpy array; convert to list of lists for existing logic
         J = Jn.tolist()
         # Compute singular values
         sigma = _svd_simple(J)

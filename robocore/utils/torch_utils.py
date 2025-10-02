@@ -15,5 +15,3 @@ def select_device(device=None):
     if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():  # type: ignore[attr-defined]
         return torch.device('mps')
     return torch.device('cpu')
-
-__all__ = ["select_device"]

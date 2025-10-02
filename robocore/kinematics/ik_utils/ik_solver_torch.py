@@ -11,55 +11,26 @@
 from __future__ import annotations
 
 import math
-from typing import Dict, Optional
+from typing import Dict, Optional, TYPE_CHECKING
 
 try:
     import torch
 except ImportError as e:  # pragma: no cover
     raise ImportError("ik_solver_torch 需要 PyTorch, 请先: pip install torch") from e
 
-from .jacobian_analytic_torch import analytic_jacobian_torch
-from .fk_torch import forward_kinematics_torch_end
-from .jacobian_numeric_torch import numeric_jacobian_torch
+from ..jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
+from ..fk_utils.fk_solver_torch import FKSolverTorch
+from robocore.transform.transform_core import orientation_error_torch
 try:  # 可能存在设备选择工具
-    from .torch_utils import select_device  # type: ignore
+    from ...utils.torch_utils import select_device  # type: ignore
 except Exception:  # pragma: no cover
     def select_device():  # 兜底
         return torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
 
+if TYPE_CHECKING:
+    from robocore.modeling.robot_model import RobotModel
+
 Tensor = torch.Tensor
-
-
-def _orientation_error_torch(Ra: Tensor, Rb: Tensor) -> Tensor:
-    """返回从 Ra 旋转到 Rb 的轴角误差向量 (axis * angle)。
-
-    算法：利用 R_err = Ra^T Rb，angle = acos((trace(R_err)-1)/2)，
-    axis 采用标准反对称提取并对 0/π 奇异点做稳健处理。
-    """
-    R_err = Ra.transpose(0, 1) @ Rb
-    trace_val = torch.clamp((torch.trace(R_err) - 1.0) * 0.5, -1.0, 1.0)
-    angle = torch.acos(trace_val)
-    if angle < 1e-12:
-        return torch.zeros(3, dtype=Ra.dtype, device=Ra.device)
-    if angle > math.pi - 1e-6:
-        # 近似 π，使用对角线辅助找轴
-        axis = torch.stack([
-            R_err[2, 1] - R_err[1, 2],
-            R_err[0, 2] - R_err[2, 0],
-            R_err[1, 0] - R_err[0, 1],
-        ])
-        if torch.linalg.norm(axis) < 1e-8:
-            diag = torch.diag(R_err)
-            axis = torch.sqrt(torch.clamp(diag + 1.0, min=0))
-        axis = axis / (torch.linalg.norm(axis) + 1e-15)
-        return axis * angle
-    denom = 2.0 * torch.sin(angle)
-    axis = torch.stack([
-        (R_err[2, 1] - R_err[1, 2]) / (denom + 1e-15),
-        (R_err[0, 2] - R_err[2, 0]) / (denom + 1e-15),
-        (R_err[1, 0] - R_err[0, 1]) / (denom + 1e-15),
-    ])
-    return axis * angle
 
 
 class IKSolverTorch:
@@ -93,6 +64,10 @@ class IKSolverTorch:
             self.dtype = dtype
         # 关节数量（假定 model._actuated 与 numpy 版本一致）
         self.n = len(getattr(model, "_actuated"))
+        # Initialize FK solver
+        self.fk_solver = FKSolverTorch(model)
+        # Initialize Jacobian solver
+        self.jacobian_solver = JacobianSolverTorch(model)
 
     # -------------------- 主求解 --------------------
     def solve(
@@ -154,11 +129,11 @@ class IKSolverTorch:
             final_ori_err = float('inf')
 
             for it in range(1, self.max_iters + 1):
-                T_cur = forward_kinematics_torch_end(self.model, q, device=self.device, dtype=self.dtype)
+                T_cur = self.fk_solver.solve(q, return_end_only=True, device=self.device, dtype=self.dtype)["end"]
                 R_cur = T_cur[:3, :3]
                 p_cur = T_cur[:3, 3]
                 pos_err_v = p_target - p_cur
-                ori_err_v = _orientation_error_torch(R_cur, R_target)
+                ori_err_v = orientation_error_torch(R_cur, R_target)
                 pos_err_norm = torch.linalg.norm(pos_err_v).item()
                 ori_err_norm = torch.linalg.norm(ori_err_v).item()
                 # 分段动态姿态权重
@@ -192,10 +167,10 @@ class IKSolverTorch:
                         r_ori_tol = refine_ori_tol or (self.ori_tol * 0.2)
                         q_ref = q.clone()
                         for _ in range(refine_iters):
-                            T_r = forward_kinematics_torch_end(self.model, q_ref, device=self.device, dtype=self.dtype)
+                            T_r = self.fk_solver.solve(q_ref, return_end_only=True, device=self.device, dtype=self.dtype)["end"]
                             p_r = T_r[:3, 3]; R_r = T_r[:3, :3]
                             p_e = p_target - p_r
-                            o_e = _orientation_error_torch(R_r, R_target)
+                            o_e = orientation_error_torch(R_r, R_target)
                             if torch.linalg.norm(p_e) < r_pos_tol and torch.linalg.norm(o_e) < r_ori_tol:
                                 q = q_ref
                                 final_pos_err = torch.linalg.norm(p_e).item()
@@ -203,7 +178,12 @@ class IKSolverTorch:
                                 best_q = q.clone()
                                 best_err = math.sqrt(final_pos_err**2 + final_ori_err**2)
                                 break
-                            J_ref = analytic_jacobian_torch(self.model, q_ref, device=self.device, dtype=self.dtype)
+                            J_ref = self.jacobian_solver.solve(
+                                q_ref,
+                                method="analytic",
+                                device=self.device,
+                                dtype=self.dtype
+                            )
                             if pos_weight != 1.0:
                                 J_ref[:3, :] *= pos_weight
                             if ori_weight != 1.0:
@@ -225,12 +205,23 @@ class IKSolverTorch:
                         "jacobian": jac_type_local,
                     }
 
-                # Jacobian
+                # Jacobian using solver
                 if use_numeric_jacobian:
-                    J = numeric_jacobian_torch(self.model, q, use_central_diff=use_central_diff, device=self.device, dtype=self.dtype)
+                    J = self.jacobian_solver.solve(
+                        q,
+                        method="numeric",
+                        use_central_diff=use_central_diff,
+                        device=self.device,
+                        dtype=self.dtype
+                    )
                     jac_type_local = "numeric_central" if use_central_diff else "numeric_forward"
                 else:
-                    J = analytic_jacobian_torch(self.model, q, device=self.device, dtype=self.dtype)
+                    J = self.jacobian_solver.solve(
+                        q,
+                        method="analytic",
+                        device=self.device,
+                        dtype=self.dtype
+                    )
                     jac_type_local = "analytic"
                 if pos_weight != 1.0:
                     J[:3, :] *= pos_weight
@@ -280,10 +271,10 @@ class IKSolverTorch:
                 if backtrack:
                     prev_total = err_norm
                     for _bt in range(3):
-                        T_bt = forward_kinematics_torch_end(self.model, new_q, device=self.device, dtype=self.dtype)
+                        T_bt = self.fk_solver.solve(new_q, return_end_only=True, device=self.device, dtype=self.dtype)["end"]
                         p_bt = T_bt[:3, 3]; R_bt = T_bt[:3, :3]
                         pos_bt = torch.linalg.norm(p_target - p_bt).item()
-                        ori_bt = torch.linalg.norm(_orientation_error_torch(R_bt, R_target)).item()
+                        ori_bt = torch.linalg.norm(orientation_error_torch(R_bt, R_target)).item()
                         total_bt = pos_bt + ori_bt
                         if total_bt <= prev_total:
                             break
@@ -393,10 +384,3 @@ class IKSolverTorch:
                 if hi is not None:
                     out[js.index] = torch.clamp(out[js.index], max=float(hi))
         return out
-
-
-def inverse_kinematics_torch(model, target_pose, q0, **kwargs):
-    solver = IKSolverTorch(model)
-    return solver.solve(target_pose, q0, **kwargs)
-
-__all__ = ["IKSolverTorch", "inverse_kinematics_torch"]

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict
 import numpy as np
-from .jacobian_numpy import numeric_jacobian_numpy, _orientation_error_numpy
-from .jacobian_analytic_numpy import analytic_jacobian_numpy  # Added: analytic jacobian optional import
+from ..jacobian_utils.jacobian_solver_numpy import JacobianSolverNumPy
+from robocore.transform.transform_core import orientation_error_numpy
 
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
@@ -54,6 +54,8 @@ class IKSolverNumPy:
         self.max_damping = max_damping
         self.base_step = base_step
         self.n = model.dof()
+        # Initialize Jacobian solver
+        self.jacobian_solver = JacobianSolverNumPy(model)
 
     def solve(
         self,
@@ -111,7 +113,7 @@ class IKSolverNumPy:
 
             # Compute errors
             pos_err = p_target - p_current
-            ori_err = _orientation_error_numpy(R_current, R_target)
+            ori_err = orientation_error_numpy(R_current, R_target)
 
             pos_err_norm = np.linalg.norm(pos_err)
             ori_err_norm = np.linalg.norm(ori_err)
@@ -142,7 +144,7 @@ class IKSolverNumPy:
                             R_r = np.array([row[:3] for row in fk_r[:3]], dtype=np.float64)
                             p_r = np.array([fk_r[0][3], fk_r[1][3], fk_r[2][3]], dtype=np.float64)
                         p_err_r = p_target - p_r
-                        o_err_r = _orientation_error_numpy(R_r, R_target)
+                        o_err_r = orientation_error_numpy(R_r, R_target)
                         if np.linalg.norm(p_err_r) < r_pos_tol and np.linalg.norm(o_err_r) < r_ori_tol:
                             q = q_ref
                             pos_err_norm = np.linalg.norm(p_err_r)
@@ -151,7 +153,7 @@ class IKSolverNumPy:
                             err_norm = np.linalg.norm(err)
                             break
                         # Always use analytic Jacobian for refinement & pseudoinverse
-                        J_ref = analytic_jacobian_numpy(self.model, q_ref)
+                        J_ref = self.jacobian_solver.solve(q_ref, method="analytic")
                         if pos_weight != 1.0:
                             J_ref[:3, :] *= pos_weight
                         if ori_weight != 1.0:
@@ -176,12 +178,16 @@ class IKSolverNumPy:
                     "jacobian": "analytic" if use_analytic_jacobian else ("numeric_central" if use_central_diff else "numeric_forward"),
                 }
             
-            # Compute Jacobian (numeric / analytic)
+            # Compute Jacobian using solver
             if use_analytic_jacobian:
-                J = analytic_jacobian_numpy(self.model, q)
+                J = self.jacobian_solver.solve(q, method="analytic")
                 jac_type = "analytic"
             else:
-                J = numeric_jacobian_numpy(self.model, q, use_central_diff=use_central_diff)
+                J = self.jacobian_solver.solve(
+                    q, 
+                    method="numeric",
+                    use_central_diff=use_central_diff
+                )
                 jac_type = "numeric_central" if use_central_diff else "numeric_forward"
 
             if pos_weight != 1.0:
@@ -233,7 +239,7 @@ class IKSolverNumPy:
                 R_best = np.array([row[:3] for row in fk_best[:3]], dtype=np.float64)
                 p_best = np.array([fk_best[0][3], fk_best[1][3], fk_best[2][3]], dtype=np.float64)
             best_pos_err = float(np.linalg.norm(p_target - p_best))
-            best_ori_err = float(np.linalg.norm(_orientation_error_numpy(R_best, R_target)))
+            best_ori_err = float(np.linalg.norm(orientation_error_numpy(R_best, R_target)))
         return {
             "q": best_q.tolist(),
             "success": False,
@@ -321,24 +327,3 @@ class IKSolverNumPy:
                 if js.limit[1] is not None:
                     q_clamped[js.index] = min(js.limit[1], q_clamped[js.index])
         return q_clamped
-
-
-def inverse_kinematics_numpy(
-    model: "RobotModel",
-    target_pose: np.ndarray,
-    q0: np.ndarray,
-    **kwargs,
-) -> Dict[str, object]:
-    """Convenience wrapper for NumPy IK solver.
-
-    :param model: robot model.
-    :param target_pose: 4×4 target pose matrix.
-    :param q0: initial joint configuration.
-    :param kwargs: additional arguments for IKSolverNumPy.solve().
-    :return: result dict.
-    """
-    solver = IKSolverNumPy(model)
-    return solver.solve(target_pose, q0, **kwargs)
-
-
-__all__ = ["IKSolverNumPy", "inverse_kinematics_numpy"]

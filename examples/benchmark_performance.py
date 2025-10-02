@@ -5,12 +5,11 @@ Compares FK, Jacobian, and IK across backends.
 import time, argparse, numpy as np
 from pathlib import Path
 from robocore import RobotModel
-from robocore.kinematics import forward_kinematics, inverse_kinematics, numeric_jacobian_numpy, analytic_jacobian_numpy
+from robocore.kinematics import forward_kinematics, inverse_kinematics, jacobian
 from robocore.utils.beauty_logger import beauty_print
 
 try:
     import torch
-    from robocore.kinematics import numeric_jacobian_torch, analytic_jacobian_torch
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False

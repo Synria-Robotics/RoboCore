@@ -14,15 +14,16 @@ from __future__ import annotations
 
 from typing import Sequence, Dict, Any, Union
 
-from .fk_numpy import forward_kinematics_numpy as _fk_np
+from robocore.kinematics.fk_utils.fk_solver_numpy import FKSolverNumPy
 
 _HAS_TORCH = False
 try:  # pragma: no cover
-    from .fk_torch import forward_kinematics_torch as _fk_torch  # type: ignore
+    from robocore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch  # type: ignore
     import torch  # type: ignore
     _HAS_TORCH = True
 except Exception:  # noqa: E722
     torch = None  # type: ignore
+    FKSolverTorch = None  # type: ignore
 
 
 def _select_backend(backend: str) -> str:
@@ -68,9 +69,13 @@ def forward_kinematics(
     """
     b = _select_backend(backend)
     if b == 'numpy':
-        poses = _fk_np(model._chain_joints, model._actuated, model.base_link, model.end_link, q)  # type: ignore[attr-defined]
+        solver = FKSolverNumPy(model)
+        poses = solver.solve(q, return_end_only=return_end)
         return poses['end'] if return_end else poses
+
     # torch path
+    solver_torch = FKSolverTorch(model)  # type: ignore[misc]
+
     # Decide dtype default
     if dtype is None and _HAS_TORCH:  # pragma: no branch
         if device is not None and str(device).startswith('mps'):
@@ -78,15 +83,8 @@ def forward_kinematics(
             dtype = torch.float32  # type: ignore[attr-defined]
         else:
             dtype = torch.float64  # type: ignore[attr-defined]
-    poses = _fk_torch(
-        model._chain_joints,  # type: ignore[attr-defined]
-        model._actuated,      # type: ignore[attr-defined]
-        model.base_link,      # type: ignore[attr-defined]
-        model.end_link,       # type: ignore[attr-defined]
-        q,
-        device=device,
-        dtype=dtype,
-    )
+
+    poses = solver_torch.solve(q, return_end_only=return_end, device=device, dtype=dtype)
     return poses['end'] if return_end else poses
 
 

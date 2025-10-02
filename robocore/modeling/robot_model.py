@@ -10,13 +10,13 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 from .parser.urdf_parser import load_urdf, URDFJoint
-from robocore import backend as B
+from robocore.utils import backend as B
 import math
 
 # Optional NumPy acceleration
 try:
     import numpy as np
-    from robocore.kinematics.fk_numpy import forward_kinematics_numpy
+    from robocore.kinematics.fk_utils.fk_solver_numpy import forward_kinematics_numpy
     _HAS_NUMPY = True
 except ImportError:
     _HAS_NUMPY = False

@@ -12,18 +12,16 @@ Returns 6×n geometric Jacobian matrix (position + orientation derivatives).
 from __future__ import annotations
 from typing import Any, Sequence, Union
 
-from .jacobian_numpy import numeric_jacobian_numpy
-from .jacobian_analytic_numpy import analytic_jacobian_numpy
+from robocore.kinematics.jacobian_utils.jacobian_solver_numpy import JacobianSolverNumPy
 
 _HAS_TORCH = False
 try:  # pragma: no cover
-    from .jacobian_analytic_torch import analytic_jacobian_torch  # type: ignore
-    from .jacobian_numeric_torch import numeric_jacobian_torch  # type: ignore
-    from .jacobian_autograd_torch import autograd_geometric_jacobian_torch  # type: ignore
+    from robocore.kinematics.jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
     import torch  # type: ignore
     _HAS_TORCH = True
 except Exception:  # noqa: E722
     torch = None  # type: ignore
+    JacobianSolverTorch = None  # type: ignore
 
 
 def _select_backend(backend: str) -> str:
@@ -111,44 +109,33 @@ def jacobian(
 
     if b == 'numpy':
         # NumPy backend
-        if method == 'analytic':
-            return analytic_jacobian_numpy(model, q)
-        elif method == 'numeric':
-            return numeric_jacobian_numpy(model, q, epsilon=epsilon, use_central_diff=use_central_diff)
+        solver = JacobianSolverNumPy(model)
+        if method in ('analytic', 'numeric'):
+            return solver.solve(q, method=method, epsilon=epsilon, use_central_diff=use_central_diff)
         elif method == 'autograd':
             raise ValueError("Autograd method requires torch backend")
         else:
             raise ValueError(f"Unknown method '{method}' for numpy backend. Use 'analytic' or 'numeric'.")
 
     # Torch backend
-    if method == 'analytic':
-        # Decide dtype default
-        if dtype is None and _HAS_TORCH:  # pragma: no branch
-            if device is not None and str(device).startswith('mps'):
-                dtype = torch.float32  # type: ignore[attr-defined]
-            else:
-                dtype = torch.float64  # type: ignore[attr-defined]
-        return analytic_jacobian_torch(model, q, device=device, dtype=dtype)
-    elif method == 'numeric':
-        if dtype is None and _HAS_TORCH:  # pragma: no branch
-            if device is not None and str(device).startswith('mps'):
-                dtype = torch.float32  # type: ignore[attr-defined]
-            else:
-                dtype = torch.float64  # type: ignore[attr-defined]
-        return numeric_jacobian_torch(
-            model, q,
+    solver_torch = JacobianSolverTorch(model)  # type: ignore[misc]
+    
+    # Decide dtype default
+    if dtype is None and _HAS_TORCH:  # pragma: no branch
+        if device is not None and str(device).startswith('mps'):
+            dtype = torch.float32  # type: ignore[attr-defined]
+        else:
+            dtype = torch.float64  # type: ignore[attr-defined]
+    
+    if method in ('analytic', 'numeric', 'autograd'):
+        return solver_torch.solve(
+            q,
+            method=method,
             epsilon=epsilon,
             use_central_diff=use_central_diff,
             device=device,
             dtype=dtype,
         )
-    elif method == 'autograd':
-        if dtype is None and _HAS_TORCH:  # pragma: no branch
-            if device is not None and str(device).startswith('mps'):
-                dtype = torch.float32  # type: ignore[attr-defined]
-            else:
-                dtype = torch.float64  # type: ignore[attr-defined]
-        return autograd_geometric_jacobian_torch(model, q, device=device, dtype=dtype)
     else:
         raise ValueError(f"Unknown method '{method}'. Use 'analytic', 'numeric', or 'autograd'.")
 
