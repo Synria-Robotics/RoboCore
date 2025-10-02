@@ -381,8 +381,7 @@ def main():
         '--device',
         type=str,
         default='cpu',
-        choices=['cpu', 'cuda', 'mps'],
-        help='PyTorch device (cpu/cuda/mps)'
+        help='PyTorch device (cpu/cuda/cuda:0/cuda:1/mps)'
     )
     parser.add_argument(
         '--seed',
@@ -404,14 +403,29 @@ def main():
         print("⚠️  Warning: PyTorch not available. Running NumPy benchmarks only.")
         args.numpy_only = True
     
-    # Check device availability
+    # Check device availability and normalize device string
     if not args.numpy_only and _HAS_TORCH:
-        if args.device == 'cuda' and not torch.cuda.is_available():
-            print(f"⚠️  Warning: CUDA not available. Using CPU instead.")
-            args.device = 'cpu'
-        elif args.device == 'mps' and not (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()):
-            print(f"⚠️  Warning: MPS not available. Using CPU instead.")
-            args.device = 'cpu'
+        device_type = args.device.split(':')[0]  # Extract 'cuda' from 'cuda:1'
+        
+        if device_type == 'cuda':
+            if not torch.cuda.is_available():
+                print(f"⚠️  Warning: CUDA not available. Using CPU instead.")
+                args.device = 'cpu'
+            else:
+                # Check if specific GPU ID is specified
+                if ':' in args.device:
+                    gpu_id = int(args.device.split(':')[1])
+                    if gpu_id >= torch.cuda.device_count():
+                        print(f"⚠️  Warning: GPU {gpu_id} not available (only {torch.cuda.device_count()} GPU(s) found).")
+                        print(f"    Using cuda:0 instead.")
+                        args.device = 'cuda:0'
+                else:
+                    # Default to cuda:0 if just 'cuda' is specified
+                    args.device = 'cuda:0'
+        elif device_type == 'mps':
+            if not (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()):
+                print(f"⚠️  Warning: MPS not available. Using CPU instead.")
+                args.device = 'cpu'
     
     # Print configuration
     print_header("Parallel FK/IK Performance Benchmark (TRUE BATCH MODE)")
@@ -423,8 +437,9 @@ def main():
     print(f"  Seed: {args.seed}")
     if not args.numpy_only:
         print(f"  PyTorch Device: {args.device.upper()}")
-        if args.device == 'cuda':
-            print(f"  CUDA Device: {torch.cuda.get_device_name(0)}")
+        if args.device.startswith('cuda'):
+            gpu_id = args.device.split(':')[1] if ':' in args.device else '0'
+            print(f"  CUDA Device {gpu_id}: {torch.cuda.get_device_name(int(gpu_id))}")
         elif args.device == 'mps':
             print(f"  MPS Device: Apple Silicon GPU")
         print(f"  ⚡ TRUE BATCH MODE: All samples processed in parallel!")
