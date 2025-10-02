@@ -77,7 +77,52 @@ Shows the simplest FK and IK usage with the unified API.
   - Convergence analysis
 - **Usage**: `python examples/demo_closure.py`
 
-### 7. `benchmark_performance.py` - Performance Metrics
+### 7. `demo_trajectory.py` - Trajectory Planning
+- **Purpose**: Generate smooth trajectories in joint and Cartesian space
+- **Features**:
+  - Joint space trajectories (quintic polynomial)
+  - Multi-waypoint trajectory planning
+  - Velocity profile generation (trapezoidal, S-curve)
+  - Cartesian space trajectories (linear, circular)
+  - Trajectory visualization
+- **Usage**:
+  ```bash
+  python examples/demo_trajectory.py --robot bessica --arm left
+  python examples/demo_trajectory.py --robot bessica --arm left --plot
+  ```
+
+### 8. `demo_workspace.py` - Workspace Analysis
+- **Purpose**: Analyze robot reachable and dexterous workspace
+- **Features**:
+  - Reachable workspace computation (Monte Carlo, Grid, Sobol sampling)
+  - Dexterous workspace analysis
+  - Volume estimation (convex hull, voxel-based)
+  - Density distribution analysis
+  - Singularity-free region identification
+  - 3D visualization
+- **Usage**:
+  ```bash
+  python examples/demo_workspace.py --robot bessica --arm left --samples 5000
+  python examples/demo_workspace.py --robot bessica --arm left --visualize --singularity
+  ```
+
+### 9. `demo_workspace_trajectory.py` - Workspace-Constrained Planning
+- **Purpose**: Plan trajectories within workspace constraints
+- **Features**:
+  - Workspace analysis + trajectory planning integration
+  - Target selection in reachable/safe regions
+  - Singularity avoidance
+  - Optimal workspace region identification
+  - Trajectory validation against workspace bounds
+  - 3D visualization of workspace + trajectory
+- **Usage**:
+  ```bash
+  python examples/demo_workspace_trajectory.py --robot bessica --arm left
+  python examples/demo_workspace_trajectory.py --robot bessica --arm left --visualize --waypoints 5
+  python examples/demo_workspace_trajectory.py --robot bessica --arm left --target best --no-safe
+  ```
+
+### 10. `benchmark_performance.py` - Performance Metrics
 - **Purpose**: Measure computational performance
 - **Features**:
   - FK timing comparison

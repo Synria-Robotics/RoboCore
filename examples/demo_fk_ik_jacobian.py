@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-FK, IK, and Jacobian Computation Demo
-======================================
+FK, IK, and Jacobian Computation Demo (with OmegaConf Support)
+================================================================
 
 This script demonstrates:
 1. Forward Kinematics (FK): Compute end-effector pose from joint angles
@@ -10,6 +10,7 @@ This script demonstrates:
 3. Jacobian: Compute analytical Jacobian matrix at the end-effector pose
 
 Features:
+- **NEW: OmegaConf configuration support** (see demo_with_config.py for cleaner example)
 - Uses DLS (Damped Least Squares) IK solver
 - Uses analytical Jacobian computation (NumPy backend)
 - Displays detailed kinematics information
@@ -36,6 +37,15 @@ python demo_fk_ik_jacobian.py --random --ik-iters 200 --ik-pos-tol 1e-5
 # 6. Quiet mode (minimal output)
 python demo_fk_ik_jacobian.py --quiet --random
 
+# 7. Load configuration from YAML file (NEW)
+python demo_fk_ik_jacobian.py --config robocore/configs/default.yaml
+
+# 8. Override specific config values (NEW)
+python demo_fk_ik_jacobian.py --config robocore/configs/default.yaml \
+    --override robot.end_link=Link7 kinematics.ik.solver.max_iterations=200
+
+NOTE: For a cleaner configuration-focused example, see demo_with_config.py
+
 Author: RoboCore Team
 Date: 2025-10-03
 """
@@ -43,11 +53,19 @@ Date: 2025-10-03
 import numpy as np
 import argparse
 from pathlib import Path
+from typing import Optional
 
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.fk import forward_kinematics
 from robocore.kinematics.ik import inverse_kinematics
 from robocore.kinematics.jacobian import jacobian
+
+try:
+    from robocore.configs import ConfigManager, get_default_config
+    from omegaconf import OmegaConf
+    CONFIG_AVAILABLE = True
+except ImportError:
+    CONFIG_AVAILABLE = False
 from robocore.utils.beauty_logger import beauty_print
 
 
@@ -388,70 +406,133 @@ def main(args):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Compute FK, IK (DLS), and Jacobian (Analytical) for specified joint angles')
-    parser.add_argument(
+    parser = argparse.ArgumentParser(
+        description='Compute FK, IK (DLS), and Jacobian (Analytical) for specified joint angles',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    
+    # Configuration options (NEW)
+    config_group = parser.add_argument_group('Configuration Options (NEW)')
+    config_group.add_argument(
+        '--config', '-c',
+        type=str,
+        default=None,
+        help='Load configuration from YAML file (overrides default values)'
+    )
+    config_group.add_argument(
+        '--override',
+        type=str,
+        nargs='+',
+        default=[],
+        help='Override config values (e.g., robot.end_link=tool0 kinematics.ik.solver.max_iterations=200)'
+    )
+    
+    # Robot options
+    robot_group = parser.add_argument_group('Robot Options')
+    robot_group.add_argument(
         '--urdf',
         type=str,
         # default='robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf',
         default='robocore/assets/robot/urdf/Bessica-D_v1_0/BessicaDCodver.urdf',
         help='Path to URDF file'
     )
-    parser.add_argument(
+    robot_group.add_argument(
         '--end-link',
         type=str,
         # default='tool0',
         default="left_arm_gripper_left_finger",
         help='End-effector link name (default: tool0)'
     )
-    parser.add_argument(
+    
+    # Joint angle options
+    joints_group = parser.add_argument_group('Joint Angle Options')
+    joints_group.add_argument(
         '--joints',
         type=float,
         nargs='+',
         default=None,
         help='Joint angles in radians (space-separated)'
     )
-    parser.add_argument(
+    joints_group.add_argument(
         '--joints-deg',
         type=float,
         nargs='+',
         default=None,
         help='Joint angles in degrees (space-separated)'
     )
-    parser.add_argument(
+    joints_group.add_argument(
         '--random',
         action='store_true',
         help='Use random joint angles'
     )
-    parser.add_argument(
+    joints_group.add_argument(
         '--seed',
         type=int,
         default=42,
         help='Random seed'
     )
-    parser.add_argument(
+    
+    # IK options
+    ik_group = parser.add_argument_group('IK Solver Options')
+    ik_group.add_argument(
         '--ik-iters',
         type=int,
         default=100,
         help='Maximum IK iterations'
     )
-    parser.add_argument(
+    ik_group.add_argument(
         '--ik-pos-tol',
         type=float,
         default=1e-4,
         help='IK position tolerance (m)'
     )
-    parser.add_argument(
+    ik_group.add_argument(
         '--ik-ori-tol',
         type=float,
         default=1e-4,
         help='IK orientation tolerance (rad)'
     )
-    parser.add_argument(
+    
+    # Output options
+    output_group = parser.add_argument_group('Output Options')
+    output_group.add_argument(
         '--quiet',
         action='store_true',
         help='Suppress detailed output'
     )
 
     args = parser.parse_args()
+    
+    # Handle configuration if specified
+    if args.config and CONFIG_AVAILABLE:
+        print(f"✓ Loading configuration from: {args.config}")
+        config_manager = ConfigManager(args.config)
+        
+        # Apply overrides
+        if args.override:
+            print("  Applying overrides:")
+            for override in args.override:
+                if '=' in override:
+                    key, value = override.split('=', 1)
+                    try:
+                        value = eval(value)
+                    except:
+                        pass
+                    OmegaConf.update(config_manager.cfg, key, value, merge=True)
+                    print(f"    {key} = {value}")
+        
+        # Override args with config values
+        args.urdf = config_manager.cfg.robot.urdf_path
+        args.end_link = config_manager.cfg.robot.end_link
+        args.ik_iters = config_manager.cfg.kinematics.ik.solver.max_iterations
+        args.ik_pos_tol = config_manager.cfg.kinematics.ik.solver.position_tolerance
+        args.ik_ori_tol = config_manager.cfg.kinematics.ik.solver.orientation_tolerance
+        if config_manager.cfg.seed is not None:
+            args.seed = config_manager.cfg.seed
+        
+        print()
+    elif args.config and not CONFIG_AVAILABLE:
+        print("⚠️  OmegaConf not available. Install with: pip install omegaconf")
+        print("    Falling back to command-line arguments.\n")
 
     main(args)
