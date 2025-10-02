@@ -8,6 +8,7 @@ Usage:
     python examples/demo_ik.py --methods pinv dls --torch-device cpu
 """
 from __future__ import annotations
+import os
 import argparse
 import time
 import numpy as np
@@ -55,33 +56,12 @@ def summarize(name, stats):
     )
 
 
-def main():
-    parser = argparse.ArgumentParser(description="IK methods comparison")
-    parser.add_argument('--samples', type=int, default=4, help='Number of test samples')
-    parser.add_argument('--seed', type=int, default=123, help='Random seed')
-    parser.add_argument('--methods', nargs='+', default=['pinv', 'dls'],
-                        help='IK methods to test (pinv, dls, transpose). Note: transpose is slow')
-    parser.add_argument('--backends', nargs='+', default=['numpy', 'torch'],
-                        help='Backends to test')
-    parser.add_argument('--multi-start', type=int, default=0,
-                        help='Number of random restarts (0 to disable)')
-    parser.add_argument('--multi-noise', type=float, default=0.3,
-                        help='Noise scale for restarts (radians)')
-    parser.add_argument('--pos-tol', type=float, default=1e-4,
-                        help='Position tolerance (m)')
-    parser.add_argument('--ori-tol', type=float, default=1e-4,
-                        help='Orientation tolerance (rad)')
-    parser.add_argument('--torch-device', type=str, default='cpu',
-                        help='PyTorch device (cpu, cuda, mps)')
-    parser.add_argument('--torch-dtype', type=str, default=None,
-                        help='PyTorch dtype (float32, float64)')
-    args = parser.parse_args()
-    
+def main(args):
     rng = np.random.default_rng(args.seed)
     
     # Load model
     base = Path(__file__).resolve().parents[1]
-    urdf = base / 'robocore' / 'assets' / 'robot' / 'urdf' / 'Alicia-D_v5_4' / 'alicia_duo_with_gripper.urdf'
+    urdf = os.path.join(base, "robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
     model = RobotModel(str(urdf), end_link='tool0')
     
     beauty_print(f"IK Comparison: {model.name} ({model.dof()} DOF)", type="module")
@@ -160,4 +140,24 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description="IK methods comparison")
+    parser.add_argument('--samples', type=int, default=10, help='Number of test samples')
+    parser.add_argument('--seed', type=int, default=77, help='Random seed')
+    parser.add_argument('--methods', nargs='+', default=['pinv', 'dls'],
+                        help='IK methods to test (pinv, dls, transpose). Note: transpose is slow')
+    parser.add_argument('--backends', nargs='+', default=['numpy', 'torch'],
+                        help='Backends to test')
+    parser.add_argument('--multi-start', type=int, default=0,
+                        help='Number of random restarts (0 to disable)')
+    parser.add_argument('--multi-noise', type=float, default=0.3,
+                        help='Noise scale for restarts (radians)')
+    parser.add_argument('--pos-tol', type=float, default=1e-4,
+                        help='Position tolerance (m)')
+    parser.add_argument('--ori-tol', type=float, default=1e-4,
+                        help='Orientation tolerance (rad)')
+    parser.add_argument('--torch-device', type=str, default='cpu',
+                        help='PyTorch device (cpu, cuda, mps)')
+    parser.add_argument('--torch-dtype', type=str, default=None,
+                        help='PyTorch dtype (float32, float64)')
+    args = parser.parse_args()
+    main(args)

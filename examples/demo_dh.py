@@ -13,6 +13,7 @@ Usage:
     python examples/demo_dh.py --mode quality --samples 100
 """
 from __future__ import annotations
+import os
 import argparse
 from pathlib import Path
 import numpy as np
@@ -131,18 +132,10 @@ def mode_quality(model: RobotModel, samples: int = 80, seed: int = 123):
     beauty_print(f"Orientation error (rad): mean={mean_a:.3e}, median={med_a:.3e}, max={max_a:.3e}")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="DH parameter demonstration")
-    parser.add_argument('--mode', choices=['extract', 'compare', 'quality'],
-                        default='extract', help='Demonstration mode')
-    parser.add_argument('--samples', type=int, default=5,
-                        help='Number of samples (for compare/quality modes)')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed')
-    args = parser.parse_args()
-    
+def main(args):
     # Load model
     base = Path(__file__).resolve().parents[1]
-    urdf = base / "robocore" / "assets" / "robot" / "urdf" / "Alicia-D_v5_4" / "alicia_duo_with_gripper.urdf"
+    urdf = os.path.join(base, "robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
     model = RobotModel(str(urdf), end_link="tool0")
     
     if args.mode == 'extract':
@@ -156,4 +149,12 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="DH parameter demonstration")
+    parser.add_argument('--mode', choices=['extract', 'compare', 'quality'],
+                        default='extract', help='Demonstration mode')
+    parser.add_argument('--samples', type=int, default=5,
+                        help='Number of samples (for compare/quality modes)')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    args = parser.parse_args()
+    
+    main(args)

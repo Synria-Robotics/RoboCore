@@ -10,6 +10,7 @@
 而是在构造函数里指定 `max_iters`，收敛阈值由 `pos_tol`, `ori_tol` 控制，阻尼自适应。
 """
 
+import os
 from pathlib import Path
 import random
 import math
@@ -55,7 +56,7 @@ def pose_to_str(T):
 def main():
     random.seed(42)
     base = Path(__file__).resolve().parents[1]
-    urdf = base / "robocore" / "assets" / "robot" / "urdf" / "Alicia-D_v5_4" / "alicia_duo_with_gripper.urdf"
+    urdf = os.path.join(base, "robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
     model = RobotModel(str(urdf), end_link="tool0")
 
     # 目标姿态

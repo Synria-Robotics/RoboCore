@@ -5,6 +5,7 @@ Shows the most straightforward usage of RoboCore for forward and inverse kinemat
 Usage:
     python examples/demo_basic.py
 """
+import os
 from pathlib import Path
 import numpy as np
 from robocore import RobotModel
@@ -15,7 +16,7 @@ from robocore.utils.beauty_logger import beauty_print
 def main():
     # Load robot model
     base = Path(__file__).resolve().parents[1]
-    urdf = base / "robocore" / "assets" / "robot" / "urdf" / "Alicia-D_v5_4" / "alicia_duo_with_gripper.urdf"
+    urdf = os.path.join(base, "robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
     model = RobotModel(str(urdf), end_link="tool0")
     
     beauty_print(f"Basic FK/IK Demo: {model.name}", type="module")
