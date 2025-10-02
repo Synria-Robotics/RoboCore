@@ -165,6 +165,10 @@ def compute_fk_ik_jacobian(
         print(f"  rpy = {format_array(np.rad2deg(euler_fk))}")
         print(f"\nEnd-Effector Orientation (Quaternion xyzw):")
         print(f"  quat = {format_array(quat_fk, precision=6)}")
+        # Add note about quaternion sign ambiguity
+        quat_neg = -quat_fk
+        print(f"  Note: q and -q represent the same rotation")
+        print(f"  -quat = {format_array(quat_neg, precision=6)} (equivalent)")
         print(f"\nRotation Matrix:")
         print(format_array(rotation_fk, precision=6))
         print(f"\nHomogeneous Transformation Matrix:")
@@ -388,13 +392,15 @@ if __name__ == '__main__':
     parser.add_argument(
         '--urdf',
         type=str,
-        default='robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf',
+        # default='robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf',
+        default='robocore/assets/robot/urdf/Bessica-D_v1_0/BessicaDCodver.urdf',
         help='Path to URDF file'
     )
     parser.add_argument(
         '--end-link',
         type=str,
-        default='tool0',
+        # default='tool0',
+        default="left_arm_gripper_left_finger",
         help='End-effector link name (default: tool0)'
     )
     parser.add_argument(
