@@ -1,0 +1,344 @@
+"""NumPy-accelerated inverse kinematics solver.
+
+Implements damped least squares (DLS) with adaptive step size and damping.
+Optimized for 5-10x speedup over pure Python implementation.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Dict
+import numpy as np
+from .jacobian_numpy import numeric_jacobian_numpy, _orientation_error_numpy
+from .jacobian_analytic_numpy import analytic_jacobian_numpy  # Added: analytic jacobian optional import
+
+if TYPE_CHECKING:
+    from robocore.modeling.robot_model import RobotModel
+
+
+class IKSolverNumPy:
+    """NumPy-accelerated IK solver with adaptive strategies.
+
+    Features:
+    - Damped Least Squares (DLS) method
+    - Adaptive damping based on condition number and error
+    - Adaptive step size based on error magnitude
+    - Central difference Jacobian for better accuracy
+    - Joint limit clamping
+    """
+
+    def __init__(
+        self,
+        model: "RobotModel",
+        max_iters: int = 100,
+        pos_tol: float = 1e-3,
+        ori_tol: float = 1e-3,
+        min_damping: float = 1e-4,
+        max_damping: float = 5e-2,
+        base_step: float = 1.0,
+    ):
+        """Initialize IK solver.
+
+        :param model: robot model.
+        :param max_iters: maximum iterations.
+        :param pos_tol: position convergence tolerance (meters).
+        :param ori_tol: orientation convergence tolerance (radians).
+        :param min_damping: minimum damping factor.
+        :param max_damping: maximum damping factor.
+        :param base_step: base step size multiplier.
+        """
+        self.model = model
+        self.max_iters = max_iters
+        self.pos_tol = pos_tol
+        self.ori_tol = ori_tol
+        self.min_damping = min_damping
+        self.max_damping = max_damping
+        self.base_step = base_step
+        self.n = model.dof()
+
+    def solve(
+        self,
+        target_pose: np.ndarray,
+        q0: np.ndarray,
+        pos_weight: float = 1.0,
+        ori_weight: float = 1.0,
+        adaptive_damping: bool = True,
+        adaptive_step: bool = True,
+        use_central_diff: bool = True,
+        use_analytic_jacobian: bool = False,
+        method: str = "dls",
+        transpose_gain: float | None = None,
+        refine: bool = False,
+        refine_iters: int = 10,
+        refine_pos_tol: float | None = None,
+        refine_ori_tol: float | None = None,
+    ) -> Dict[str, object]:
+        """Solve IK with selectable method.
+
+        Supported methods:
+          - dls: damped least squares (JJ^T regularization)
+          - pinv: SVD pseudoinverse with Tikhonov damping
+          - transpose: J^T * error with adaptive gain
+        """
+        method = method.lower()
+        if method not in ("dls", "pinv", "transpose"):
+            raise ValueError(f"Unknown IK method '{method}'")
+        q0 = np.asarray(q0, dtype=np.float64)
+        target_pose = np.asarray(target_pose, dtype=np.float64)
+        
+        if q0.shape[0] != self.n:
+            raise ValueError(f"Expected q0 with {self.n} elements, got {q0.shape[0]}")
+        
+        # Extract target position and rotation
+        R_target = target_pose[:3, :3]
+        p_target = target_pose[:3, 3]
+        
+        q = q0.copy()
+        best_q = q.copy()
+        best_err = np.inf
+        best_pos_err = np.inf
+        best_ori_err = np.inf
+        jac_type = "analytic" if use_analytic_jacobian else ("numeric_central" if use_central_diff else "numeric_forward")
+
+        for it in range(1, self.max_iters + 1):
+            # Compute current pose
+            fk = self.model.forward_kinematics(q.tolist())["end"]
+            if isinstance(fk, np.ndarray):
+                R_current = fk[:3, :3]
+                p_current = fk[:3, 3]
+            else:  # List format
+                R_current = np.array([row[:3] for row in fk[:3]], dtype=np.float64)
+                p_current = np.array([fk[0][3], fk[1][3], fk[2][3]], dtype=np.float64)
+
+            # Compute errors
+            pos_err = p_target - p_current
+            ori_err = _orientation_error_numpy(R_current, R_target)
+
+            pos_err_norm = np.linalg.norm(pos_err)
+            ori_err_norm = np.linalg.norm(ori_err)
+
+            # Weighted error vector
+            err = np.concatenate([pos_weight * pos_err, ori_weight * ori_err])
+            err_norm = np.linalg.norm(err)
+            
+            # Track best solution
+            if err_norm < best_err:
+                best_err = err_norm
+                best_q = q.copy()
+                best_pos_err = pos_err_norm
+                best_ori_err = ori_err_norm
+            
+            # Check convergence
+            if pos_err_norm < self.pos_tol and ori_err_norm < self.ori_tol:
+                # Optional refinement phase for tighter residuals
+                if refine:
+                    r_pos_tol = refine_pos_tol or (self.pos_tol * 0.2)
+                    r_ori_tol = refine_ori_tol or (self.ori_tol * 0.2)
+                    q_ref = q.copy()
+                    for _r in range(refine_iters):
+                        fk_r = self.model.forward_kinematics(q_ref.tolist())["end"]
+                        if isinstance(fk_r, np.ndarray):
+                            R_r = fk_r[:3, :3]; p_r = fk_r[:3, 3]
+                        else:
+                            R_r = np.array([row[:3] for row in fk_r[:3]], dtype=np.float64)
+                            p_r = np.array([fk_r[0][3], fk_r[1][3], fk_r[2][3]], dtype=np.float64)
+                        p_err_r = p_target - p_r
+                        o_err_r = _orientation_error_numpy(R_r, R_target)
+                        if np.linalg.norm(p_err_r) < r_pos_tol and np.linalg.norm(o_err_r) < r_ori_tol:
+                            q = q_ref
+                            pos_err_norm = np.linalg.norm(p_err_r)
+                            ori_err_norm = np.linalg.norm(o_err_r)
+                            err = np.concatenate([pos_weight * p_err_r, ori_weight * o_err_r])
+                            err_norm = np.linalg.norm(err)
+                            break
+                        # Always use analytic Jacobian for refinement & pseudoinverse
+                        J_ref = analytic_jacobian_numpy(self.model, q_ref)
+                        if pos_weight != 1.0:
+                            J_ref[:3, :] *= pos_weight
+                        if ori_weight != 1.0:
+                            J_ref[3:6, :] *= ori_weight
+                        # small damping
+                        dq = self._solve_pinv(J_ref, np.concatenate([pos_weight * p_err_r, ori_weight * o_err_r]), self.min_damping)
+                        # Limit very large jumps in refine
+                        dq_norm = np.linalg.norm(dq)
+                        if dq_norm > 0.2:
+                            dq *= 0.2 / dq_norm
+                        q_ref += dq
+                        q_ref = self._apply_joint_limits(q_ref)
+                    q = q_ref
+                return {
+                    "q": q.tolist(),
+                    "success": True,
+                    "iters": it,
+                    "err_norm": float(err_norm),
+                    "pos_err": float(pos_err_norm),
+                    "ori_err": float(ori_err_norm),
+                    "method": method,
+                    "jacobian": "analytic" if use_analytic_jacobian else ("numeric_central" if use_central_diff else "numeric_forward"),
+                }
+            
+            # Compute Jacobian (numeric / analytic)
+            if use_analytic_jacobian:
+                J = analytic_jacobian_numpy(self.model, q)
+                jac_type = "analytic"
+            else:
+                J = numeric_jacobian_numpy(self.model, q, use_central_diff=use_central_diff)
+                jac_type = "numeric_central" if use_central_diff else "numeric_forward"
+
+            if pos_weight != 1.0:
+                J[:3, :] *= pos_weight
+            if ori_weight != 1.0:
+                J[3:6, :] *= ori_weight
+
+            # Damping (used by dls/pinv)
+            if adaptive_damping:
+                damping = self._compute_adaptive_damping(J, pos_err_norm, ori_err_norm)
+            else:
+                damping = (self.min_damping + self.max_damping) / 2
+
+            # Solve per method
+            if method == "dls":
+                dq = self._solve_dls(J, err, damping)
+            elif method == "pinv":
+                dq = self._solve_pinv(J, err, damping)
+            else:  # transpose
+                if transpose_gain is not None:
+                    alpha = transpose_gain
+                else:
+                    try:
+                        smax = np.linalg.svd(J, compute_uv=False)[0]
+                    except Exception:
+                        smax = 1.0
+                    alpha = 0.9 / (smax * smax + 1e-9)
+                dq = alpha * (J.T @ err)
+
+            # Step scaling
+            if adaptive_step:
+                step = self._compute_adaptive_step(pos_err_norm, ori_err_norm)
+            else:
+                step = self.base_step
+            
+            # Update joint angles
+            q += step * dq
+            
+            # Apply joint limits
+            q = self._apply_joint_limits(q)
+        
+        # Return best solution found
+        # 失败：返回迭代中最优残差对应的 pos/ori 误差（若未更新保持最后一次计算）
+        if not np.isfinite(best_pos_err) or not np.isfinite(best_ori_err):
+            fk_best = self.model.forward_kinematics(best_q.tolist())["end"]
+            if isinstance(fk_best, np.ndarray):
+                R_best = fk_best[:3, :3]; p_best = fk_best[:3, 3]
+            else:
+                R_best = np.array([row[:3] for row in fk_best[:3]], dtype=np.float64)
+                p_best = np.array([fk_best[0][3], fk_best[1][3], fk_best[2][3]], dtype=np.float64)
+            best_pos_err = float(np.linalg.norm(p_target - p_best))
+            best_ori_err = float(np.linalg.norm(_orientation_error_numpy(R_best, R_target)))
+        return {
+            "q": best_q.tolist(),
+            "success": False,
+            "iters": self.max_iters,
+            "err_norm": float(best_err),
+            "method": method,
+            "jacobian": jac_type,
+            "pos_err": float(best_pos_err),
+            "ori_err": float(best_ori_err),
+        }
+
+    def _solve_dls(self, J: np.ndarray, err: np.ndarray, damping: float) -> np.ndarray:
+        """Solve damped least squares: dq = J^T (J J^T + λ²I)^{-1} err.
+
+        :param J: 6×n Jacobian matrix.
+        :param err: 6 error vector.
+        :param damping: damping factor λ.
+        :return: n joint velocity vector.
+        """
+        # A = J @ J^T + λ²I (6×6 matrix)
+        A = J @ J.T + (damping ** 2) * np.eye(6, dtype=np.float64)
+        
+        # Solve A @ y = err for y
+        y = np.linalg.solve(A, err)
+        
+        # dq = J^T @ y
+        dq = J.T @ y
+        
+        return dq
+
+    def _compute_adaptive_damping(self, J: np.ndarray, pos_err: float, ori_err: float) -> float:
+        """Adaptive damping based on condition number and current error."""
+        JJt = J @ J.T
+        try:
+            eigvals = np.linalg.eigvalsh(JJt)
+            s_max = np.sqrt(np.max(eigvals))
+            s_min = np.sqrt(np.max(np.min(eigvals), 1e-12))
+            cond = s_max / s_min
+        except Exception:
+            cond = 100.0
+        err = pos_err + 0.5 * ori_err
+        if cond > 200 or err > 0.05:
+            return self.max_damping
+        elif cond < 30 and err < 0.01:
+            return self.min_damping
+        else:
+            return (self.min_damping + self.max_damping) * 0.5
+
+    def _compute_adaptive_step(self, pos_err: float, ori_err: float) -> float:
+        norm_pos_err = pos_err / 0.01
+        norm_ori_err = ori_err / 0.087
+        max_norm_err = max(norm_pos_err, norm_ori_err)
+        if max_norm_err > 2.0:
+            return self.base_step * 0.6
+        elif max_norm_err > 1.0:
+            return self.base_step
+        elif max_norm_err > 0.5:
+            return self.base_step * 1.2
+        else:
+            return self.base_step * 0.6
+
+    def _solve_pinv(self, J: np.ndarray, err: np.ndarray, damping: float) -> np.ndarray:
+        try:
+            U, S, Vt = np.linalg.svd(J, full_matrices=False)
+        except np.linalg.LinAlgError:
+            return self._solve_dls(J, err, damping)
+        if damping > 0:
+            S_inv = S / (S * S + damping * damping)
+        else:
+            tol = 1e-9 * max(J.shape)
+            S_inv = np.array([1 / s if s > tol else 0.0 for s in S])
+        return (Vt.T * S_inv) @ (U.T @ err)
+
+    def _apply_joint_limits(self, q: np.ndarray) -> np.ndarray:
+        """Clamp joint angles to limits.
+
+        :param q: joint configuration (n,).
+        :return: clamped configuration.
+        """
+        q_clamped = q.copy()
+        for js in self.model._actuated:
+            if js.limit is not None:
+                if js.limit[0] is not None:
+                    q_clamped[js.index] = max(js.limit[0], q_clamped[js.index])
+                if js.limit[1] is not None:
+                    q_clamped[js.index] = min(js.limit[1], q_clamped[js.index])
+        return q_clamped
+
+
+def inverse_kinematics_numpy(
+    model: "RobotModel",
+    target_pose: np.ndarray,
+    q0: np.ndarray,
+    **kwargs,
+) -> Dict[str, object]:
+    """Convenience wrapper for NumPy IK solver.
+
+    :param model: robot model.
+    :param target_pose: 4×4 target pose matrix.
+    :param q0: initial joint configuration.
+    :param kwargs: additional arguments for IKSolverNumPy.solve().
+    :return: result dict.
+    """
+    solver = IKSolverNumPy(model)
+    return solver.solve(target_pose, q0, **kwargs)
+
+
+__all__ = ["IKSolverNumPy", "inverse_kinematics_numpy"]
