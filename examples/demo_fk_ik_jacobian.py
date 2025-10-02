@@ -314,74 +314,7 @@ def compute_fk_ik_jacobian(
     return results
 
 
-def main():
-    """Main function."""
-    parser = argparse.ArgumentParser(
-        description='Compute FK, IK (DLS), and Jacobian (Analytical) for specified joint angles'
-    )
-    parser.add_argument(
-        '--urdf',
-        type=str,
-        default='robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf',
-        help='Path to URDF file'
-    )
-    parser.add_argument(
-        '--end-link',
-        type=str,
-        default='tool0',
-        help='End-effector link name (default: tool0)'
-    )
-    parser.add_argument(
-        '--joints',
-        type=float,
-        nargs='+',
-        default=None,
-        help='Joint angles in radians (space-separated)'
-    )
-    parser.add_argument(
-        '--joints-deg',
-        type=float,
-        nargs='+',
-        default=None,
-        help='Joint angles in degrees (space-separated)'
-    )
-    parser.add_argument(
-        '--random',
-        action='store_true',
-        help='Use random joint angles'
-    )
-    parser.add_argument(
-        '--seed',
-        type=int,
-        default=42,
-        help='Random seed'
-    )
-    parser.add_argument(
-        '--ik-iters',
-        type=int,
-        default=100,
-        help='Maximum IK iterations'
-    )
-    parser.add_argument(
-        '--ik-pos-tol',
-        type=float,
-        default=1e-4,
-        help='IK position tolerance (m)'
-    )
-    parser.add_argument(
-        '--ik-ori-tol',
-        type=float,
-        default=1e-4,
-        help='IK orientation tolerance (rad)'
-    )
-    parser.add_argument(
-        '--quiet',
-        action='store_true',
-        help='Suppress detailed output'
-    )
-    
-    args = parser.parse_args()
-    
+def main(args):
     # Set random seed
     np.random.seed(args.seed)
     
@@ -451,4 +384,68 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description='Compute FK, IK (DLS), and Jacobian (Analytical) for specified joint angles')
+    parser.add_argument(
+        '--urdf',
+        type=str,
+        default='robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf',
+        help='Path to URDF file'
+    )
+    parser.add_argument(
+        '--end-link',
+        type=str,
+        default='tool0',
+        help='End-effector link name (default: tool0)'
+    )
+    parser.add_argument(
+        '--joints',
+        type=float,
+        nargs='+',
+        default=None,
+        help='Joint angles in radians (space-separated)'
+    )
+    parser.add_argument(
+        '--joints-deg',
+        type=float,
+        nargs='+',
+        default=None,
+        help='Joint angles in degrees (space-separated)'
+    )
+    parser.add_argument(
+        '--random',
+        action='store_true',
+        help='Use random joint angles'
+    )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=42,
+        help='Random seed'
+    )
+    parser.add_argument(
+        '--ik-iters',
+        type=int,
+        default=100,
+        help='Maximum IK iterations'
+    )
+    parser.add_argument(
+        '--ik-pos-tol',
+        type=float,
+        default=1e-4,
+        help='IK position tolerance (m)'
+    )
+    parser.add_argument(
+        '--ik-ori-tol',
+        type=float,
+        default=1e-4,
+        help='IK orientation tolerance (rad)'
+    )
+    parser.add_argument(
+        '--quiet',
+        action='store_true',
+        help='Suppress detailed output'
+    )
+
+    args = parser.parse_args()
+
+    main(args)
