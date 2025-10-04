@@ -72,10 +72,9 @@ def jacobian(
     use_central_diff : bool, default True
         Use central differences for numeric method (more accurate than forward).
     device : torch device, optional
-        PyTorch device for torch backend (e.g., 'cpu', 'cuda', 'mps').
+        PyTorch device for torch backend (e.g., 'cpu', 'cuda').
     dtype : torch dtype, optional
-        PyTorch dtype for torch backend. Defaults to float64 (cpu/cuda) or
-        float32 (mps due to limited float64 support).
+        PyTorch dtype for torch backend. Defaults to float64 if omitted.
 
     Returns
     -------
@@ -122,10 +121,7 @@ def jacobian(
     
     # Decide dtype default
     if dtype is None and _HAS_TORCH:  # pragma: no branch
-        if device is not None and str(device).startswith('mps'):
-            dtype = torch.float32  # type: ignore[attr-defined]
-        else:
-            dtype = torch.float64  # type: ignore[attr-defined]
+        dtype = torch.float64  # type: ignore[attr-defined]
     
     if method in ('analytic', 'numeric', 'autograd'):
         return solver_torch.solve(

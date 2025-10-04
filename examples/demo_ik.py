@@ -156,7 +156,7 @@ if __name__ == '__main__':
     parser.add_argument('--ori-tol', type=float, default=1e-4,
                         help='Orientation tolerance (rad)')
     parser.add_argument('--torch-device', type=str, default='cpu',
-                        help='PyTorch device (cpu, cuda, mps)')
+                        help='PyTorch device (cpu, cuda)')
     parser.add_argument('--torch-dtype', type=str, default=None,
                         help='PyTorch dtype (float32, float64)')
     args = parser.parse_args()

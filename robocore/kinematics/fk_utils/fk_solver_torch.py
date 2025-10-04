@@ -17,7 +17,9 @@ except ImportError as e:  # pragma: no cover
 try:
     from robocore.utils.torch_utils import select_device  # type: ignore
 except Exception:  # pragma: no cover
-    def select_device(d=None):  # fallback
+    def select_device(d=None):  # fallback (cpu/cuda only)
+        if torch.cuda.is_available():
+            return torch.device('cuda')
         return torch.device('cpu')
 
 from robocore.utils.backend import set_backend, get_backend
@@ -60,7 +62,7 @@ class FKSolverTorch:
         q: Sequence[float] | Tensor,
         return_end_only: bool = False,
         device=None,
-        dtype=torch.float32  # Changed default from float64 to float32 for MPS compatibility
+        dtype=torch.float64
     ) -> Dict[str, torch.Tensor] | torch.Tensor:
         """Compute forward kinematics (supports both single and batch).
         
@@ -68,7 +70,7 @@ class FKSolverTorch:
             - Single: shape (n,) → returns dict {link_name: 4x4 tensor}
             - Batch: shape (B, n) → returns tensor [B, 4, 4] (end-effector only)
         :param return_end_only: if True, only return end-effector pose.
-        :param device: torch device ('cpu', 'cuda', 'mps', or None for auto).
+    :param device: torch device ('cpu', 'cuda', or None for auto; MPS removed).
         :param dtype: torch dtype (default: torch.float64).
         :return: 
             - Single mode: dict of link names to 4x4 pose matrices
@@ -119,12 +121,7 @@ class FKSolverTorch:
         
         # Set backend to torch temporarily
         original_backend = get_backend()
-        # MPS doesn't support float64
-        if 'mps' in str(q.device) and dtype == torch.float64:
-            backend_dtype = torch.float32
-        else:
-            backend_dtype = dtype
-        set_backend('torch', device=str(q.device), dtype=backend_dtype)
+        set_backend('torch', device=str(q.device), dtype=dtype)
         
         try:
             for joint in self.joint_chain:

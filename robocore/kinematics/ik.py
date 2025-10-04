@@ -58,7 +58,7 @@ def inverse_kinematics(
     :param multi_start: extra random restarts count (0 disable)
     :param multi_noise: gaussian noise scale (radians) for restarts
     :param random_seed: seed for reproducibility
-    :param torch_device: specify torch device when backend='torch' (e.g. 'cuda', 'mps', 'cpu')
+    :param torch_device: specify torch device when backend='torch' (e.g. 'cpu' or 'cuda')
     :param torch_dtype: specify torch dtype (e.g. torch.float32) when backend='torch'
     :param solver_kwargs: forwarded to concrete solver (e.g. max_iters, pos_tol, ori_tol, ...)
     """
@@ -72,12 +72,14 @@ def inverse_kinematics(
             res['backend'] = 'numpy'
             return res
         # torch backend
+        # 默认强制使用 cpu 除非显式传入 cuda
+        dev = torch_device if torch_device is not None else 'cpu'
         solver = IKSolverTorch(
             model,
             max_iters=solver_kwargs.pop('max_iters', 120),
             pos_tol=solver_kwargs.pop('pos_tol', 1e-4),
             ori_tol=solver_kwargs.pop('ori_tol', 1e-4),
-            device=torch_device,
+            device=dev,
             dtype=torch_dtype,
         )  # type: ignore
         res = solver.solve(np.asarray(target_pose), q_init, method=method, **solver_kwargs)  # type: ignore[arg-type]

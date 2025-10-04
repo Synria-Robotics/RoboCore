@@ -59,8 +59,7 @@ def forward_kinematics(
     return_end : bool, default False
         If True, return only end-effector 4x4 pose instead of full dict.
     device : torch device (torch backend only)
-    dtype : torch dtype (torch backend only). If omitted and device is 'mps',
-        defaults to float32 (due to limited float64 support); else float64.
+    dtype : torch dtype (torch backend only). Defaults to float64 if omitted.
 
     Returns
     -------
@@ -78,11 +77,7 @@ def forward_kinematics(
 
     # Decide dtype default
     if dtype is None and _HAS_TORCH:  # pragma: no branch
-        if device is not None and str(device).startswith('mps'):
-            # MPS float64 不稳定，默认使用 float32
-            dtype = torch.float32  # type: ignore[attr-defined]
-        else:
-            dtype = torch.float64  # type: ignore[attr-defined]
+        dtype = torch.float64  # type: ignore[attr-defined]
 
     poses = solver_torch.solve(q, return_end_only=return_end, device=device, dtype=dtype)
     return poses['end'] if return_end else poses

@@ -51,7 +51,7 @@ class ComputeConfig:
     
     Valid values:
     - backend: "numpy", "torch"
-    - device: "cpu", "cuda", "cuda:0", "cuda:1", "cuda:2", "mps"
+    - device: "cpu", "cuda", "cuda:0", "cuda:1", "cuda:2"  # MPS removed
     - dtype: "float32", "float64"
     """
     backend: str = "numpy"

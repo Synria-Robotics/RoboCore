@@ -8,10 +8,15 @@ except ImportError as e:  # pragma: no cover
 
 
 def select_device(device=None):
+    """Select torch device (cpu/cuda). MPS support removed.
+
+    If user explicitly passes an mps device string, raise to avoid silent misuse.
+    """
     if device is not None:
-        return torch.device(device) if isinstance(device, str) else device
+        d = torch.device(device) if isinstance(device, str) else device
+        if str(d).startswith('mps'):
+            raise ValueError("MPS support has been removed. Please use 'cpu' or 'cuda'.")
+        return d
     if torch.cuda.is_available():
         return torch.device('cuda')
-    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():  # type: ignore[attr-defined]
-        return torch.device('mps')
     return torch.device('cpu')

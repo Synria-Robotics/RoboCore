@@ -165,9 +165,7 @@ def main():
     if torch.cuda.is_available():
         devices.append('cuda')
         print(f"✓ CUDA available: {torch.cuda.get_device_name(0)}")
-    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-        devices.append('mps')
-        print(f"✓ MPS available: Apple Silicon GPU")
+    # MPS support removed
     
     # Test each device
     batch_size = 10
