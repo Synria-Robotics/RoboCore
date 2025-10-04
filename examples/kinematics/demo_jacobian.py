@@ -15,21 +15,13 @@ import numpy as np
 from pathlib import Path
 from robocore import RobotModel, jacobian
 from robocore.utils.beauty_logger import beauty_print
+from robocore.utils.path import get_robocore_path
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Jacobian validation")
-    parser.add_argument('--backend', choices=['numpy', 'torch'], default='numpy',
-                        help='Backend to test')
-    parser.add_argument('--device', default='cpu', help='PyTorch device (if torch backend)')
-    parser.add_argument('--samples', type=int, default=10, help='Number of test configurations')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed')
-    args = parser.parse_args()
-    
+def main(args):
     # Load model
-    base = Path(__file__).resolve().parents[1]
-    urdf = os.path.join(base, "../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
-    model = RobotModel(str(urdf), end_link='tool0')
+    urdf = args.urdf
+    model = RobotModel(urdf, end_link='tool0')
     
     beauty_print(f"Jacobian Validation: {model.name} ({model.dof()} DOF)", type="module")
     beauty_print(f"Backend: {args.backend}", type="info")
@@ -158,4 +150,14 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description="Jacobian validation")
+    parser.add_argument('--urdf', type=str, default=get_robocore_path("assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf"),
+                        help='Path to URDF file (default: Alicia-D)')
+    parser.add_argument('--backend', choices=['numpy', 'torch'], default='numpy',
+                        help='Backend to test')
+    parser.add_argument('--device', default='cpu', help='PyTorch device (if torch backend)')
+    parser.add_argument('--samples', type=int, default=10, help='Number of test configurations')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    args = parser.parse_args()
+
+    main(args)
