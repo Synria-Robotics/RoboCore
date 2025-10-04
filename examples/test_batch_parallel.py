@@ -37,8 +37,19 @@ def test_batch_fk(model, device='cpu', batch_size=10):
     print(f"Testing Batch FK on {device.upper()}")
     print(f"{'='*60}")
     
-    # Generate random joint configurations
-    q_batch = torch.randn(batch_size, model.dof())
+    # Generate random joint configurations within limits (not unbounded randn)
+    import numpy as np
+    rng = np.random.default_rng(42)
+    q_np = np.zeros((batch_size, model.dof()))
+    for i in range(batch_size):
+        for js in model._actuated:
+            lo, hi = -1.0, 1.0
+            if js.limit and js.limit[0] is not None and js.limit[1] is not None:
+                lo, hi = js.limit[0], js.limit[1]
+            mid = 0.5 * (lo + hi)
+            span = 0.25 * (hi - lo)  # Use 50% of range
+            q_np[i, js.index] = rng.uniform(mid - span, mid + span)
+    q_batch = torch.from_numpy(q_np).float()
     print(f"Input shape: {q_batch.shape} (batch_size={batch_size}, dof={model.dof()})")
     
     # Compute batch FK using unified solver
@@ -57,22 +68,37 @@ def test_batch_fk(model, device='cpu', batch_size=10):
     print(f"\nSample [0]:")
     print(f"  Joint config: {q_batch[0].cpu().numpy()}")
     print(f"  Position: {pos_batch[0].cpu().numpy()}")
-    print(f"  Quaternion (xyzw): {quat_batch[0].cpu().numpy()}")
+    if hasattr(quat_batch, 'cpu'):
+        print(f"  Quaternion (xyzw): {quat_batch[0].cpu().numpy()}")
+    else:
+        print(f"  Quaternion (xyzw): {quat_batch[0]}")
     
     return T_batch, pos_batch, quat_batch
 
 
 def test_batch_ik(model, target_poses, device='cpu'):
-    """Test batch inverse kinematics."""
+    """Test batch inverse kinematics using FK results as targets."""
     print(f"\n{'='*60}")
     print(f"Testing Batch IK on {device.upper()}")
     print(f"{'='*60}")
     
     batch_size = target_poses.shape[0]
     print(f"Input shape: {target_poses.shape} (batch_size={batch_size})")
+    print(f"Using FK results as IK targets (guaranteed reachable)")
     
-    # Random initial guess
-    q_init = torch.zeros(batch_size, model.dof())
+    # Generate random initial guesses (different from FK configs)
+    import numpy as np
+    rng = np.random.default_rng(123)
+    q_init_np = np.zeros((batch_size, model.dof()))
+    for i in range(batch_size):
+        for js in model._actuated:
+            lo, hi = -1.0, 1.0
+            if js.limit and js.limit[0] is not None and js.limit[1] is not None:
+                lo, hi = js.limit[0], js.limit[1]
+            mid = 0.5 * (lo + hi)
+            span = 0.25 * (hi - lo)
+            q_init_np[i, js.index] = rng.uniform(mid - span, mid + span)
+    q_init = torch.from_numpy(q_init_np).float()
     
     # Solve IK using unified solver (batch mode)
     ik_solver = IKSolverTorch(model, max_iters=50, pos_tol=1e-4, ori_tol=1e-4)
@@ -124,14 +150,14 @@ def main():
     print("="*60)
     
     # Load model
-    urdf_path = Path(__file__).parent.parent / 'robocore/assets/robot/urdf/alicia_d_v5_4.urdf'
+    urdf_path = Path(__file__).parent.parent / 'robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf'
     if not urdf_path.exists():
         print(f"\n✗ URDF not found: {urdf_path}")
         print("Please update the path in this script.")
         return
     
     print(f"\nLoading model: {urdf_path.name}")
-    model = RobotModel(str(urdf_path), end_link='tool0')
+    model = RobotModel(str(urdf_path), end_link='left_arm_gripper_left_finger')
     print(f"✓ Model loaded: {model.dof()} DOF")
     
     # Detect available devices

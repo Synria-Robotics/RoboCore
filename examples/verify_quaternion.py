@@ -7,12 +7,18 @@
 """
 
 import numpy as np
-from robocore.transform import quaternion_to_matrix
-
 
 def quaternion_to_rotation_matrix(quat_xyzw):
-    """Convert quaternion (xyzw) to rotation matrix using new transform API."""
-    return quaternion_to_matrix(np.array(quat_xyzw))
+    """Convert quaternion (xyzw) to rotation matrix."""
+    qx, qy, qz, qw = quat_xyzw
+    
+    R = np.array([
+        [1 - 2*(qy**2 + qz**2), 2*(qx*qy - qw*qz), 2*(qx*qz + qw*qy)],
+        [2*(qx*qy + qw*qz), 1 - 2*(qx**2 + qz**2), 2*(qy*qz - qw*qx)],
+        [2*(qx*qz - qw*qy), 2*(qy*qz + qw*qx), 1 - 2*(qx**2 + qy**2)]
+    ])
+    
+    return R
 
 def rotation_matrices_equal(R1, R2, tol=1e-4):
     """Check if two rotation matrices are equal within tolerance."""

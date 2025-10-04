@@ -329,71 +329,7 @@ def print_benchmark_results(fk_results: Dict, ik_results: Dict = None):
                     print(f"{backend:<20} {speedup:>10.2f}x")
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description='Benchmark parallel FK/IK performance: NumPy vs PyTorch'
-    )
-    parser.add_argument(
-        '--urdf',
-        type=str,
-        default='robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf',
-        help='Path to URDF file'
-    )
-    parser.add_argument(
-        '--end-link',
-        type=str,
-        default='tool0',
-        help='End-effector link name'
-    )
-    parser.add_argument(
-        '--batch-size',
-        type=int,
-        default=1000,
-        help='Number of configurations to benchmark (default: 1000)'
-    )
-    parser.add_argument(
-        '--fk-only',
-        action='store_true',
-        help='Only benchmark FK (skip IK)'
-    )
-    parser.add_argument(
-        '--ik-only',
-        action='store_true',
-        help='Only benchmark IK (skip FK)'
-    )
-    parser.add_argument(
-        '--ik-iters',
-        type=int,
-        default=100,
-        help='Maximum IK iterations (default: 100)'
-    )
-    parser.add_argument(
-        '--warmup',
-        type=int,
-        default=5,
-        help='Number of warmup iterations (default: 5)'
-    )
-    parser.add_argument(
-        '--device',
-        type=str,
-        default='cpu',
-        help='PyTorch device (cpu/cuda/cuda:0/cuda:1/mps)'
-    )
-    parser.add_argument(
-        '--seed',
-        type=int,
-        default=42,
-        help='Random seed'
-    )
-    parser.add_argument(
-        '--numpy-only',
-        action='store_true',
-        help='Only benchmark NumPy (skip Torch)'
-    )
-    
-    args = parser.parse_args()
-
-    
+def main(args):
     # Check PyTorch availability
     if not args.numpy_only and not _HAS_TORCH:
         print("⚠️  Warning: PyTorch not available. Running NumPy benchmarks only.")
@@ -525,4 +461,67 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(
+        description='Benchmark parallel FK/IK performance: NumPy vs PyTorch'
+    )
+    parser.add_argument(
+        '--urdf',
+        type=str,
+        default='robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf',
+        help='Path to URDF file'
+    )
+    parser.add_argument(
+        '--end-link',
+        type=str,
+        default='tool0',
+        help='End-effector link name'
+    )
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=1000,
+        help='Number of configurations to benchmark (default: 1000)'
+    )
+    parser.add_argument(
+        '--fk-only',
+        action='store_true',
+        help='Only benchmark FK (skip IK)'
+    )
+    parser.add_argument(
+        '--ik-only',
+        action='store_true',
+        help='Only benchmark IK (skip FK)'
+    )
+    parser.add_argument(
+        '--ik-iters',
+        type=int,
+        default=100,
+        help='Maximum IK iterations (default: 100)'
+    )
+    parser.add_argument(
+        '--warmup',
+        type=int,
+        default=5,
+        help='Number of warmup iterations (default: 5)'
+    )
+    parser.add_argument(
+        '--device',
+        type=str,
+        default='cpu',
+        help='PyTorch device (cpu/cuda/cuda:0/cuda:1/mps)'
+    )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=42,
+        help='Random seed'
+    )
+    parser.add_argument(
+        '--numpy-only',
+        action='store_true',
+        help='Only benchmark NumPy (skip Torch)'
+    )
+
+    args = parser.parse_args()
+
+    main(args)

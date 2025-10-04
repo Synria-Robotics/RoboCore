@@ -1,4 +1,4 @@
-<mujoco model="BessicaDCodver">
+<mujoco model="Bessica-D_Covered">
   <compiler angle="radian" meshdir="../../meshes/Bessica-D_v1_0/" />
 
   <asset>

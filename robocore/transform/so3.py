@@ -203,7 +203,13 @@ def axis_angle_to_matrix(axis, angle):
     if bm.is_torch:
         R = I + s.reshape(-1, 1, 1) * K + (1 - c).reshape(-1, 1, 1) * xp.bmm(K, K)
     else:
-        R = I + s.reshape(-1, 1, 1) * K + (1 - c).reshape(-1, 1, 1) * (K @ K.transpose(0, 2, 1))
+        # For batch K: (N, 3, 3), compute K @ K for each element using matmul
+        if K.ndim == 3:
+            # Batch matrix multiplication
+            K_squared = xp.matmul(K, K)
+        else:
+            K_squared = K @ K
+        R = I + s.reshape(-1, 1, 1) * K + (1 - c).reshape(-1, 1, 1) * K_squared
     
     return R if batch else R[0]
 

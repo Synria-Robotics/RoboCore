@@ -12,7 +12,7 @@ Workflow:
     if args.robot == 'alicia':
         urdf_path = Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot' / 'urdf' / 'Alicia-D_v5_4' / 'alicia_duo_with_gripper.urdf'
     else:
-        urdf_path = Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot' / 'urdf' / 'Bessica-D_v1_0' / 'BessicaDCodver.urdf'
+        urdf_path = Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot' / 'urdf' / 'Bessica-D_v1_0' / 'Bessica-D_Covered.urdf'
     
     model = RobotModel(str(urdf_path))
     dof = model.dof()
@@ -256,7 +256,8 @@ def main():
         urdf_path = Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot' / 'urdf' / 'Alicia-D_v5_4' / 'alicia_duo_with_gripper.urdf'
         dof = 6
     else:
-        urdf_path = Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot' / 'urdf' / 'Bessica-D_v1_0' / 'BessicaDCodver.urdf'
+        urdf_path = Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot' / \
+            'urdf' / 'Bessica-D_v1_0' / 'Bessica-D_Covered.urdf'
         dof = 7
     
     model = RobotModel(str(urdf_path))
