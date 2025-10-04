@@ -2,6 +2,7 @@
 
 import os
 import sys
+from typing import Any, Optional
 
 
 class BeautyLogger:
@@ -90,7 +91,7 @@ def beauty_print(content, type: str = None):
         >>> rc.logger.beauty_print("This is a warning message.", type="warning")
 
     :param content: the content to be printed
-    :param type: support "warning", "module", "info", "error"
+    :param type: support "warning", "module", "info", "error", "matrix"
     :return:
     """
     if type is None:
@@ -98,7 +99,9 @@ def beauty_print(content, type: str = None):
     if type == "warning":
         print("\033[1;37m[RoboCore:WARNING] {}\033[0m".format(content))  # For warning (gray)
     elif type == "module":
+        print("\n" + "="*80)
         print("\033[1;33m[RoboCore:MODULE] {}\033[0m".format(content))  # For a new module (light yellow)
+        print("="*80 + "\n")
     elif type == "info":
         print("\033[1;35m[RoboCore:INFO] {}\033[0m".format(content))  # For info (light purple)
     elif type == "error":
@@ -109,4 +112,89 @@ def beauty_print(content, type: str = None):
     else:
         raise ValueError("Invalid level")
 
-__all__ = ["BeautyLogger", "beauty_print"]
+
+def beauty_print_matrix(name: str, data: Any, precision: int = 4, max_batch_items: int = 1, indent: int = 2):
+    """
+    Pretty print a scalar / vector / matrix / batch of matrices with RoboCore style.
+
+    Automatically handles:
+    - torch tensors (moved to cpu and converted to numpy)
+    - numpy arrays / Python lists / scalars
+    - Batch data (N, m, n) where m,n <= 6 treated as matrices batch
+
+    :param name: label of the value
+    :param data: value (scalar / 1D / 2D / 3D)
+    :param precision: number of decimal places
+    :param max_batch_items: number of batch entries to preview
+    :param indent: left indentation (spaces)
+    """
+    # Lazy imports to avoid hard dependency if user does not need them
+    try:
+        import numpy as _np  # type: ignore
+    except Exception:  # pragma: no cover
+        _np = None  # type: ignore
+    try:
+        import torch as _torch  # type: ignore
+    except Exception:  # pragma: no cover
+        _torch = None  # type: ignore
+
+    # Normalize input
+    arr = data
+    if _torch is not None and isinstance(arr, _torch.Tensor):
+        arr = arr.detach().cpu().numpy()
+    elif _np is not None and not isinstance(arr, (int, float)) and not isinstance(arr, str):
+        if not isinstance(arr, _np.ndarray):
+            try:
+                arr = _np.array(arr)
+            except Exception:
+                pass
+
+    # Simple scalar
+    if isinstance(arr, (int, float)) or (hasattr(arr, "ndim") and getattr(arr, "ndim") == 0):
+        print(" " * indent + f"{name} = {float(arr):.{precision}f}")
+
+    # If still something unexpected, just print raw
+    if not hasattr(arr, "ndim"):
+        print(" " * indent + f"{name} = {arr}")
+
+    ndim = arr.ndim  # type: ignore
+    fmt = f"{{:>{precision + 6}.{precision}f}}"
+    pad = " " * indent
+
+    if ndim == 1:
+        # Vector
+        try:
+            line = "  ".join(fmt.format(float(v)) for v in arr)
+            print(pad + f"{name} = [{line}]")
+        except Exception:
+            print(pad + f"{name} = {arr}")
+    elif ndim == 2:
+        # Single matrix
+        print(pad + f"{name} =")
+        for row in arr:
+            try:
+                row_str = "  ".join(fmt.format(float(v)) for v in row)
+            except Exception:
+                row_str = "  ".join(str(v) for v in row)
+            print(pad + "  [" + row_str + "]")
+    elif ndim == 3:
+        n = arr.shape[0]
+        print(pad + f"{name} (batch size={n})")
+        preview = min(max_batch_items, n)
+        for bi in range(preview):
+            if preview > 1:
+                print(pad + f"  [item {bi}]")
+            for row in arr[bi]:
+                try:
+                    row_str = "  ".join(fmt.format(float(v)) for v in row)
+                except Exception:
+                    row_str = "  ".join(str(v) for v in row)
+                print(pad + "    [" + row_str + "]")
+        if preview < n:
+            print(pad + f"  ... ({n - preview} more)")
+    else:
+        # Higher dimension – fallback summary
+        print(pad + f"{name} shape={getattr(arr, 'shape', '?')}")
+
+
+__all__ = ["BeautyLogger", "beauty_print", "beauty_print_matrix"]

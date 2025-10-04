@@ -1,237 +1,259 @@
-"""Backend selection utilities.
+"""
+Backend management for numpy/torch switching with GPU support.
 
-Provide a tiny abstraction layer so code can switch between numpy and torch.
+This module provides a global backend manager that controls whether computations
+use numpy (CPU) or torch (CPU/GPU). All transform operations use this backend.
 """
 
-from __future__ import annotations
+import threading
+from typing import Optional, Literal, Any
+import numpy as np
 
-import importlib
-from typing import Any, Callable, Sequence
-
-_BACKEND_NAME = "numpy"  # default
-_np = importlib.import_module("numpy")
-_torch = None
+# Thread-safe singleton
+_lock = threading.Lock()
+_backend_manager = None
 
 
-def set_backend(name: str) -> None:
-    """Select math backend.
-
-    :param name: 'numpy' or 'torch'.
+class BackendManager:
     """
-    global _BACKEND_NAME, _torch
-    name = name.lower()
-    if name not in ("numpy", "torch"):
-        raise ValueError("Unsupported backend: %s" % name)
-    if name == "torch" and _torch is None:
-        _torch = importlib.import_module("torch")
-    _BACKEND_NAME = name
-
-
-def backend_name() -> str:
-    """Return current backend name.
-
-    :return: backend name.
+    Global backend manager for numpy/torch switching.
+    
+    Supports:
+    - Backend selection: 'numpy' or 'torch'
+    - Device selection: 'cpu', 'cuda', 'cuda:0', etc.
+    - Dtype management: float32, float64
+    - Automatic device placement for torch tensors
     """
-    return _BACKEND_NAME
+    
+    def __init__(self):
+        self._backend: Literal['numpy', 'torch'] = 'numpy'
+        self._device: str = 'cpu'
+        self._dtype = np.float64
+        self._torch_dtype = None
+        self._torch_available = False
+        
+        # Try to import torch
+        try:
+            import torch as _torch
+            self._torch = _torch
+            self._torch_available = True
+            self._torch_dtype = _torch.float64
+        except ImportError:
+            self._torch = None
+    
+    def set_backend(
+        self, 
+        backend: Literal['numpy', 'torch'] = 'numpy',
+        device: str = 'cpu',
+        dtype: Optional[Any] = None
+    ):
+        """
+        Set the global backend.
+        
+        :param backend: 'numpy' or 'torch'
+        :param device: 'cpu', 'cuda', 'cuda:0', etc. (only for torch)
+        :param dtype: numpy.float32/float64 or torch.float32/float64
+        """
+        if backend == 'torch' and not self._torch_available:
+            raise RuntimeError("Torch is not available. Install pytorch first.")
+        
+        self._backend = backend
+        
+        if backend == 'torch':
+            # Validate device
+            if device.startswith('cuda'):
+                if not self._torch.cuda.is_available():
+                    raise RuntimeError("CUDA is not available")
+            self._device = device
+            
+            # Set dtype
+            if dtype is None:
+                self._torch_dtype = self._torch.float64
+                self._dtype = np.float64
+            else:
+                if hasattr(dtype, '__module__') and 'torch' in dtype.__module__:
+                    self._torch_dtype = dtype
+                    # Map torch dtype to numpy
+                    if dtype == self._torch.float32:
+                        self._dtype = np.float32
+                    else:
+                        self._dtype = np.float64
+                else:
+                    self._dtype = dtype
+                    # Map numpy dtype to torch
+                    if dtype == np.float32:
+                        self._torch_dtype = self._torch.float32
+                    else:
+                        self._torch_dtype = self._torch.float64
+        else:
+            self._device = 'cpu'
+            if dtype is not None:
+                self._dtype = dtype
+            else:
+                self._dtype = np.float64
+    
+    def get_backend(self) -> str:
+        """Get current backend name."""
+        return self._backend
+    
+    def get_device(self) -> str:
+        """Get current device."""
+        return self._device
+    
+    def get_dtype(self):
+        """Get current dtype."""
+        if self._backend == 'torch':
+            return self._torch_dtype
+        return self._dtype
+    
+    def ensure_array(self, data):
+        """
+        Convert input to appropriate array type based on current backend.
+        
+        :param data: Input data (list, numpy array, or torch tensor)
+        :return: Array in the current backend format
+        """
+        if self._backend == 'numpy':
+            if isinstance(data, np.ndarray):
+                return data.astype(self._dtype)
+            elif self._torch_available and isinstance(data, self._torch.Tensor):
+                return data.cpu().numpy().astype(self._dtype)
+            else:
+                return np.array(data, dtype=self._dtype)
+        else:  # torch
+            if self._torch_available and isinstance(data, self._torch.Tensor):
+                return data.to(device=self._device, dtype=self._torch_dtype)
+            elif isinstance(data, np.ndarray):
+                return self._torch.from_numpy(data).to(
+                    device=self._device, dtype=self._torch_dtype
+                )
+            else:
+                return self._torch.tensor(
+                    data, device=self._device, dtype=self._torch_dtype
+                )
+    
+    def array(self, data, dtype=None):
+        """
+        Create array with explicit dtype.
+        
+        :param data: Input data
+        :param dtype: Override dtype (optional)
+        :return: Array in current backend format
+        """
+        if self._backend == 'numpy':
+            return np.array(data, dtype=dtype if dtype is not None else self._dtype)
+        else:
+            if dtype is None:
+                dtype = self._torch_dtype
+            return self._torch.tensor(data, device=self._device, dtype=dtype)
+    
+    def zeros(self, shape, dtype=None):
+        """
+        Create zeros array.
+        
+        :param shape: Array shape
+        :param dtype: Override dtype (optional)
+        :return: Zeros array
+        """
+        if self._backend == 'numpy':
+            return np.zeros(shape, dtype=dtype if dtype is not None else self._dtype)
+        else:
+            if dtype is None:
+                dtype = self._torch_dtype
+            return self._torch.zeros(shape, device=self._device, dtype=dtype)
+    
+    def ones(self, shape, dtype=None):
+        """
+        Create ones array.
+        
+        :param shape: Array shape
+        :param dtype: Override dtype (optional)
+        :return: Ones array
+        """
+        if self._backend == 'numpy':
+            return np.ones(shape, dtype=dtype if dtype is not None else self._dtype)
+        else:
+            if dtype is None:
+                dtype = self._torch_dtype
+            return self._torch.ones(shape, device=self._device, dtype=dtype)
+    
+    def eye(self, n, dtype=None):
+        """
+        Create identity matrix.
+        
+        :param n: Matrix size
+        :param dtype: Override dtype (optional)
+        :return: Identity matrix
+        """
+        if self._backend == 'numpy':
+            return np.eye(n, dtype=dtype if dtype is not None else self._dtype)
+        else:
+            if dtype is None:
+                dtype = self._torch_dtype
+            return self._torch.eye(n, device=self._device, dtype=dtype)
+    
+    @property
+    def module(self):
+        """Get the underlying module (numpy or torch)."""
+        if self._backend == 'torch':
+            return self._torch
+        return np
+    
+    @property
+    def is_torch(self) -> bool:
+        """Check if current backend is torch."""
+        return self._backend == 'torch'
+    
+    @property
+    def is_numpy(self) -> bool:
+        """Check if current backend is numpy."""
+        return self._backend == 'numpy'
 
 
-def _lib():  # internal helper
-    return _torch if _BACKEND_NAME == "torch" else _np
-
-
-def array(data: Any) -> Any:
-    """Create array/tensor from data.
-
-    :param data: input (list / sequence / existing tensor).
-    :return: backend array.
+def get_backend_manager() -> BackendManager:
     """
-    lib = _lib()
-    if _BACKEND_NAME == "torch":
-        return data if isinstance(data, lib.Tensor) else lib.tensor(data, dtype=lib.get_default_dtype())
-    return lib.array(data)
-
-
-def zeros(shape: Sequence[int]) -> Any:
-    """Zero array.
-
-    :param shape: shape sequence.
-    :return: zeros array.
+    Get the global backend manager instance (thread-safe singleton).
+    
+    :return: Global BackendManager instance
     """
-    lib = _lib()
-    return lib.zeros(shape)
+    global _backend_manager
+    if _backend_manager is None:
+        with _lock:
+            if _backend_manager is None:
+                _backend_manager = BackendManager()
+    return _backend_manager
 
 
-def eye(n: int) -> Any:
-    """Identity matrix.
-
-    :param n: dimension.
-    :return: identity matrix.
+# Convenience functions
+def set_backend(
+    backend: Literal['numpy', 'torch'] = 'numpy',
+    device: str = 'cpu',
+    dtype: Optional[Any] = None
+):
     """
-    lib = _lib()
-    return lib.eye(n)
-
-
-def sin(x: Any) -> Any:  # convenience wrappers
-    return _lib().sin(x)
-
-
-def cos(x: Any) -> Any:
-    return _lib().cos(x)
-
-
-def stack(xs: Sequence[Any], axis: int = 0) -> Any:
-    lib = _lib()
-    return lib.stack(xs, axis=axis) if _BACKEND_NAME == "torch" else lib.stack(xs, axis=axis)
-
-
-def matmul(a: Any, b: Any) -> Any:
-    lib = _lib()
-    return a @ b if _BACKEND_NAME == "torch" else lib.matmul(a, b)
-
-
-def as_numpy(x: Any):  # for interop
-    """Convert to numpy array if backend is torch.
-
-    :param x: tensor or array.
-    :return: numpy array.
+    Set the global backend.
+    
+    :param backend: 'numpy' or 'torch'
+    :param device: 'cpu', 'cuda', 'cuda:0', etc.
+    :param dtype: Data type for arrays
     """
-    if _BACKEND_NAME == "torch":
-        return x.detach().cpu().numpy()
-    return x
+    get_backend_manager().set_backend(backend, device, dtype)
 
 
-def norm(x: Any, axis: int | None = None) -> Any:
-    """Compute L2 norm.
-
-    :param x: array.
-    :param axis: axis along which to compute norm.
-    :return: norm value(s).
+def get_backend() -> str:
     """
-    lib = _lib()
-    if _BACKEND_NAME == "torch":
-        return lib.norm(x, dim=axis)
-    return lib.linalg.norm(x, axis=axis)
-
-
-def sqrt(x: Any) -> Any:
-    """Square root.
-
-    :param x: array.
-    :return: sqrt(x).
+    Get current backend name.
+    
+    :return: 'numpy' or 'torch'
     """
-    return _lib().sqrt(x)
+    return get_backend_manager().get_backend()
 
 
-def dot(a: Any, b: Any) -> Any:
-    """Dot product / matrix multiplication.
-
-    :param a: first array.
-    :param b: second array.
-    :return: dot product.
+def ensure_array(data):
     """
-    lib = _lib()
-    if _BACKEND_NAME == "torch":
-        return a @ b
-    return lib.dot(a, b) if a.ndim == 1 and b.ndim == 1 else lib.matmul(a, b)
-
-
-def transpose(x: Any) -> Any:
-    """Transpose matrix.
-
-    :param x: array.
-    :return: transposed array.
+    Convert data to current backend format.
+    
+    :param data: Input data
+    :return: Array in current backend format
     """
-    return x.T
-
-
-def inv(x: Any) -> Any:
-    """Matrix inverse.
-
-    :param x: square matrix.
-    :return: inverse.
-    """
-    lib = _lib()
-    if _BACKEND_NAME == "torch":
-        return lib.linalg.inv(x)
-    return lib.linalg.inv(x)
-
-
-def solve(A: Any, b: Any) -> Any:
-    """Solve linear system Ax = b.
-
-    :param A: coefficient matrix.
-    :param b: right-hand side.
-    :return: solution x.
-    """
-    lib = _lib()
-    if _BACKEND_NAME == "torch":
-        return lib.linalg.solve(A, b)
-    return lib.linalg.solve(A, b)
-
-
-def acos(x: Any) -> Any:
-    """Inverse cosine.
-
-    :param x: array.
-    :return: acos(x).
-    """
-    return _lib().arccos(x) if _BACKEND_NAME == "numpy" else _lib().acos(x)
-
-
-def atan2(y: Any, x: Any) -> Any:
-    """Inverse tangent with two arguments.
-
-    :param y: y coordinate.
-    :param x: x coordinate.
-    :return: atan2(y, x).
-    """
-    return _lib().arctan2(y, x) if _BACKEND_NAME == "numpy" else _lib().atan2(y, x)
-
-
-def clip(x: Any, min_val: float, max_val: float) -> Any:
-    """Clip values to range.
-
-    :param x: array.
-    :param min_val: minimum value.
-    :param max_val: maximum value.
-    :return: clipped array.
-    """
-    lib = _lib()
-    if _BACKEND_NAME == "torch":
-        return lib.clamp(x, min_val, max_val)
-    return lib.clip(x, min_val, max_val)
-
-
-def to_list(x: Any) -> list:
-    """Convert array/tensor to Python list.
-
-    :param x: array or tensor.
-    :return: nested Python list.
-    """
-    if _BACKEND_NAME == "torch":
-        return x.detach().cpu().numpy().tolist()
-    return x.tolist() if hasattr(x, 'tolist') else list(x)
-
-
-__all__ = [
-    "set_backend",
-    "backend_name",
-    "array",
-    "zeros",
-    "eye",
-    "sin",
-    "cos",
-    "stack",
-    "matmul",
-    "as_numpy",
-    "norm",
-    "sqrt",
-    "dot",
-    "transpose",
-    "inv",
-    "solve",
-    "acos",
-    "atan2",
-    "clip",
-    "to_list",
-]
+    return get_backend_manager().ensure_array(data)
