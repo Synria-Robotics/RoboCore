@@ -42,15 +42,9 @@ _HAS_TORCH = False
 try:
     import torch
     _HAS_TORCH = True
-    from robocore.kinematics.fk_utils.batch_fk_torch import (
-        batch_forward_kinematics_torch,
-        extract_position_batch,
-        extract_rotation_batch,
-        rotation_matrix_to_quaternion_batch
-    )
-    from robocore.kinematics.ik_utils.batch_ik_torch import (
-        batch_inverse_kinematics_torch
-    )
+    from robocore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
+    from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
+    from robocore.transform import matrix_to_quaternion
 except ImportError:
     pass
 
@@ -129,9 +123,12 @@ def benchmark_fk_torch(model, q_batch: np.ndarray, device: str = 'cpu', warmup: 
     # Convert to torch tensor
     q_torch = torch.from_numpy(q_batch).float()
     
+    # Create solver
+    fk_solver = FKSolverTorch(model)
+    
     # Warmup - process a small batch
     warmup_batch = q_torch[:min(warmup, batch_size)]
-    _ = batch_forward_kinematics_torch(model, warmup_batch, device=device)
+    _ = fk_solver.solve(warmup_batch, device=device, dtype=torch.float32)
     
     if device != 'cpu':
         if device.startswith('cuda'):
@@ -141,7 +138,7 @@ def benchmark_fk_torch(model, q_batch: np.ndarray, device: str = 'cpu', warmup: 
     
     # Benchmark - TRUE BATCH: all samples processed in parallel!
     start_time = time.perf_counter()
-    T_batch = batch_forward_kinematics_torch(model, q_torch, device=device)  # [B, 4, 4]
+    T_batch = fk_solver.solve(q_torch, device=device, dtype=torch.float32)  # [B, 4, 4]
     
     if device != 'cpu':
         if device.startswith('cuda'):
@@ -224,30 +221,29 @@ def benchmark_ik_torch(model, poses: List, q_init_batch: np.ndarray,
     # Convert initial guesses to torch
     q_init_torch = torch.from_numpy(q_init_batch).float()
     
-    # Warmup - process a small batch
-    print(f"  Warming up with {min(warmup, batch_size)} samples...")
-    warmup_poses = poses_tensor[:min(warmup, batch_size)]
-    warmup_q_init = q_init_torch[:min(warmup, batch_size)]
-    _ = batch_inverse_kinematics_torch(
-        model, warmup_poses, warmup_q_init,
-        device=device, max_iterations=max_iters, tolerance=1e-4, damping=0.01
-    )
+    # TODO: Implement batch IK support in IKSolverTorch
+    # For now, use loop (not true batch processing)
+    print(f"  Note: Batch IK not yet implemented in unified solver, using sequential processing...")
     
-    if device != 'cpu':
-        if device.startswith('cuda'):
-            torch.cuda.synchronize()
-        elif device == 'mps':
-            torch.mps.synchronize()
+    ik_solver = IKSolverTorch(model, max_iters=max_iters, pos_tol=1e-4, ori_tol=1e-4)
     
-    # Benchmark - TRUE BATCH: all samples processed in parallel!
-    print(f"  Processing {batch_size} samples in PARALLEL batch mode...")
     start_time = time.perf_counter()
     
-    q_sol_batch, success_batch, iters_batch = batch_inverse_kinematics_torch(
-        model, poses_tensor, q_init_torch,
-        device=device, max_iterations=max_iters, tolerance=1e-4, damping=0.01,
-        verbose=False
-    )
+    q_sol_list = []
+    success_list = []
+    iters_list = []
+    
+    for i in range(batch_size):
+        pose = poses_tensor[i].cpu().numpy().tolist()
+        q_init = q_init_torch[i].cpu().numpy().tolist()
+        result = ik_solver.solve(pose, q_init, method='dls')
+        q_sol_list.append(result['q'])
+        success_list.append(result.get('success', False))
+        iters_list.append(result.get('iters', 0))
+    
+    q_sol_batch = torch.tensor(q_sol_list, device=device)
+    success_batch = torch.tensor(success_list, device=device)
+    iters_batch = torch.tensor(iters_list, device=device)
     
     if device != 'cpu':
         if device.startswith('cuda'):

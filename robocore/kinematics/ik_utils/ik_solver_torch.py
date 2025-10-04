@@ -20,7 +20,8 @@ except ImportError as e:  # pragma: no cover
 
 from ..jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
 from ..fk_utils.fk_solver_torch import FKSolverTorch
-from robocore.transform.transform_core import orientation_error_torch
+from robocore.utils.backend import set_backend, get_backend
+from robocore.transform import rotation_error
 try:  # 可能存在设备选择工具
     from ...utils.torch_utils import select_device  # type: ignore
 except Exception:  # pragma: no cover
@@ -99,23 +100,93 @@ class IKSolverTorch:
         restarts: int = 0,
         restart_noise: float = 0.25,  # 相对随机扰动幅度 (弧度)
         random_seed: Optional[int] = None,
+        verbose: bool = False,  # 批处理模式使用
     ) -> Dict:
-        method = method.lower()
-        if method not in ("dls", "pinv", "transpose"):
-            raise ValueError(f"未知 IK 方法 {method}")
-
+        """Solve inverse kinematics (supports both single and batch modes).
+        
+        Modes:
+        - Single mode: target_pose [4,4], q0 [n] → returns dict with 'q', 'success', etc.
+        - Batch mode: target_pose [B,4,4], q0 [B,n] → returns dict with 'q' [B,n], 'success' [B], etc.
+        """
+        # Convert inputs to tensors
         if not torch.is_tensor(target_pose):
             target_pose = torch.tensor(target_pose, dtype=self.dtype, device=self.device)
         else:
             target_pose = target_pose.to(dtype=self.dtype, device=self.device)
+        
+        if not torch.is_tensor(q0):
+            q0 = torch.tensor(q0, dtype=self.dtype, device=self.device)
+        else:
+            q0 = q0.to(dtype=self.dtype, device=self.device)
+        
+        # Detect batch mode
+        is_batch = target_pose.ndim == 3  # [B, 4, 4]
+        
+        if is_batch:
+            # Batch mode
+            return self._solve_batch(
+                target_pose, q0,
+                method=method,
+                pos_weight=pos_weight,
+                ori_weight=ori_weight,
+                max_step_norm=max_step_norm,
+                verbose=verbose
+            )
+        else:
+            # Single mode - existing implementation
+            return self._solve_single(
+                target_pose, q0,
+                method=method,
+                pos_weight=pos_weight,
+                ori_weight=ori_weight,
+                transpose_gain=transpose_gain,
+                adaptive_damping=adaptive_damping,
+                adaptive_step=adaptive_step,
+                use_numeric_jacobian=use_numeric_jacobian,
+                use_central_diff=use_central_diff,
+                max_step_norm=max_step_norm,
+                backtrack=backtrack,
+                refine=refine,
+                refine_iters=refine_iters,
+                refine_pos_tol=refine_pos_tol,
+                refine_ori_tol=refine_ori_tol,
+                restarts=restarts,
+                restart_noise=restart_noise,
+                random_seed=random_seed
+            )
+    
+    def _solve_single(
+        self,
+        target_pose,
+        q0,
+        *,
+        method: str = "pinv",
+        pos_weight: float = 1.0,
+        ori_weight: float = 1.0,
+        transpose_gain: Optional[float] = None,
+        adaptive_damping: bool = True,
+        adaptive_step: bool = True,
+        use_numeric_jacobian: bool = False,
+        use_central_diff: bool = True,
+        max_step_norm: float = 0.3,
+        backtrack: bool = False,
+        refine: bool = False,
+        refine_iters: int = 5,
+        refine_pos_tol: Optional[float] = None,
+        refine_ori_tol: Optional[float] = None,
+        restarts: int = 0,
+        restart_noise: float = 0.25,
+        random_seed: Optional[int] = None,
+    ) -> Dict:
+        """Single-mode IK solver (original implementation)."""
+        method = method.lower()
+        if method not in ("dls", "pinv", "transpose"):
+            raise ValueError(f"未知 IK 方法 {method}")
 
         if random_seed is not None:
             torch.manual_seed(random_seed)
 
-        if not torch.is_tensor(q0):
-            base_q0 = torch.tensor(q0, dtype=self.dtype, device=self.device)
-        else:
-            base_q0 = q0.clone().to(dtype=self.dtype, device=self.device)
+        base_q0 = q0.clone() if torch.is_tensor(q0) else torch.tensor(q0, dtype=self.dtype, device=self.device)
         if base_q0.numel() != self.n:
             raise ValueError(f"q0 size {base_q0.numel()} != dof {self.n}")
 
@@ -135,11 +206,19 @@ class IKSolverTorch:
             final_ori_err = float('inf')
 
             for it in range(1, self.max_iters + 1):
+                # Set backend to torch for transform operations
+                set_backend("torch", device=str(self.device), dtype=self.dtype)
+                
                 T_cur = self.fk_solver.solve(q, return_end_only=True, device=self.device, dtype=self.dtype)["end"]
                 R_cur = T_cur[:3, :3]
                 p_cur = T_cur[:3, 3]
                 pos_err_v = p_target - p_cur
-                ori_err_v = orientation_error_torch(R_cur, R_target)
+                
+                # Use transform API's rotation_error (now MPS-compatible)
+                ori_err_v = rotation_error(R_cur, R_target)
+                # Ensure consistent dtype and device (transform may return different)
+                ori_err_v = ori_err_v.to(device=self.device, dtype=self.dtype)
+                
                 pos_err_norm_t = torch.linalg.norm(pos_err_v)  # 保持为tensor
                 ori_err_norm_t = torch.linalg.norm(ori_err_v)  # 保持为tensor
 
@@ -180,10 +259,11 @@ class IKSolverTorch:
                         r_ori_tol = refine_ori_tol or (self.ori_tol * 0.2)
                         q_ref = q.clone()
                         for _ in range(refine_iters):
+                            set_backend("torch", device=str(self.device), dtype=self.dtype)
                             T_r = self.fk_solver.solve(q_ref, return_end_only=True, device=self.device, dtype=self.dtype)["end"]
                             p_r = T_r[:3, 3]; R_r = T_r[:3, :3]
                             p_e = p_target - p_r
-                            o_e = orientation_error_torch(R_r, R_target)
+                            o_e = rotation_error(R_r, R_target).to(device=self.device, dtype=self.dtype)
                             p_e_norm = torch.linalg.norm(p_e)
                             o_e_norm = torch.linalg.norm(o_e)
                             if p_e_norm < r_pos_tol and o_e_norm < r_ori_tol:
@@ -296,10 +376,12 @@ class IKSolverTorch:
                 if backtrack:
                     prev_total = err_norm
                     for _bt in range(3):
+                        set_backend("torch", device=str(self.device), dtype=self.dtype)
                         T_bt = self.fk_solver.solve(new_q, return_end_only=True, device=self.device, dtype=self.dtype)["end"]
                         p_bt = T_bt[:3, 3]; R_bt = T_bt[:3, :3]
                         pos_bt = torch.linalg.norm(p_target - p_bt).item()
-                        ori_bt = torch.linalg.norm(orientation_error_torch(R_bt, R_target)).item()
+                        ori_err = rotation_error(R_bt, R_target).to(device=self.device, dtype=self.dtype)
+                        ori_bt = torch.linalg.norm(ori_err).item()
                         total_bt = pos_bt + ori_bt
                         if total_bt <= prev_total:
                             break
@@ -429,3 +511,192 @@ class IKSolverTorch:
                 if hi is not None:
                     out[js.index] = torch.clamp(out[js.index], max=float(hi))
         return out
+    
+    # ==================== Batch Mode IK ====================
+    
+    def _solve_batch(
+        self,
+        target_poses_batch: Tensor,
+        q_init_batch: Tensor,
+        *,
+        method: str = "dls",
+        pos_weight: float = 1.0,
+        ori_weight: float = 1.0,
+        max_step_norm: float = 0.3,
+        verbose: bool = False
+    ) -> Dict:
+        """Batch inverse kinematics using parallel DLS solver.
+        
+        :param target_poses_batch: [B, 4, 4] target poses
+        :param q_init_batch: [B, n] initial joint configurations
+        :param method: only 'dls' supported for batch mode
+        :param pos_weight: position error weight
+        :param ori_weight: orientation error weight
+        :param max_step_norm: maximum step size
+        :param verbose: print convergence info
+        :return: dict with 'q' [B,n], 'success' [B], 'iterations' [B], etc.
+        """
+        if method != "dls":
+            raise NotImplementedError(f"Batch mode only supports 'dls' method, got '{method}'")
+        
+        batch_size = target_poses_batch.shape[0]
+        n_joints = self.n
+        
+        # Validate shapes
+        if q_init_batch.shape != (batch_size, n_joints):
+            raise ValueError(f"q_init_batch shape {q_init_batch.shape} != expected ({batch_size}, {n_joints})")
+        
+        # Initialize
+        q_batch = q_init_batch.clone()
+        success_batch = torch.zeros(batch_size, dtype=torch.bool, device=self.device)
+        iterations_batch = torch.zeros(batch_size, dtype=torch.int32, device=self.device)
+        active_mask = torch.ones(batch_size, dtype=torch.bool, device=self.device)
+        
+        # Extract target positions and rotations
+        R_target_batch = target_poses_batch[:, :3, :3]  # [B, 3, 3]
+        p_target_batch = target_poses_batch[:, :3, 3]  # [B, 3]
+        
+        # Main iteration loop
+        for it in range(1, self.max_iters + 1):
+            if not active_mask.any():
+                break
+            
+            # Compute FK for active samples
+            q_active = q_batch[active_mask]
+            T_current_batch = self.fk_solver.solve(q_active, device=self.device, dtype=self.dtype)  # [B_active, 4, 4]
+            
+            # Extract current pose
+            p_current_batch = T_current_batch[:, :3, 3]  # [B_active, 3]
+            R_current_batch = T_current_batch[:, :3, :3]  # [B_active, 3, 3]
+            
+            # Compute errors
+            p_error = p_target_batch[active_mask] - p_current_batch  # [B_active, 3]
+            R_error = self._batch_rotation_error(R_target_batch[active_mask], R_current_batch)  # [B_active, 3]
+            
+            # Weighted error vector [B_active, 6]
+            error = torch.cat([pos_weight * p_error, ori_weight * R_error], dim=1)
+            
+            # Compute Jacobian for active samples
+            J_batch = self.jacobian_solver.solve(q_active, device=self.device, dtype=self.dtype)  # [B_active, 6, n]
+            
+            # Check convergence
+            pos_err_norm = torch.linalg.norm(p_error, dim=1)  # [B_active]
+            ori_err_norm = torch.linalg.norm(R_error, dim=1)  # [B_active]
+            
+            converged = (pos_err_norm < self.pos_tol) & (ori_err_norm < self.ori_tol)
+            
+            # Update success and iterations for converged samples
+            active_indices = torch.where(active_mask)[0]
+            converged_global_idx = active_indices[converged]
+            success_batch[converged_global_idx] = True
+            iterations_batch[converged_global_idx] = it
+            
+            # Remove converged from active mask
+            active_mask[converged_global_idx] = False
+            
+            if not active_mask.any():
+                break
+            
+            # Compute DLS update for remaining active samples
+            # Need to re-filter after convergence check
+            q_active = q_batch[active_mask]
+            error_active = error[~converged]  # Remove converged from error
+            J_active = J_batch[~converged]  # Remove converged from Jacobian
+            
+            # Damped Least Squares: dq = J^T (JJ^T + λI)^-1 error
+            damping = self.max_damping
+            JJT = torch.bmm(J_active, J_active.transpose(1, 2))  # [B_active, 6, 6]
+            JJT_damped = JJT + damping * torch.eye(6, device=self.device, dtype=self.dtype).unsqueeze(0)  # [B_active, 6, 6]
+            
+            try:
+                # Solve (JJ^T + λI) x = error for x, then dq = J^T x
+                JJT_inv_error = torch.linalg.solve(JJT_damped, error_active.unsqueeze(2)).squeeze(2)  # [B_active, 6]
+                dq = torch.bmm(J_active.transpose(1, 2), JJT_inv_error.unsqueeze(2)).squeeze(2)  # [B_active, n]
+            except RuntimeError:
+                # Fallback to pseudoinverse for problematic samples
+                dq = torch.zeros(active_mask.sum().item(), n_joints, device=self.device, dtype=self.dtype)
+                for b_idx in range(active_mask.sum().item()):
+                    try:
+                        J_pinv = torch.linalg.pinv(J_active[b_idx])  # [n, 6]
+                        dq[b_idx] = J_pinv @ error_active[b_idx]
+                    except RuntimeError:
+                        pass  # Leave as zero
+            
+            # Clip step size
+            dq_norms = torch.linalg.norm(dq, dim=1, keepdim=True)  # [B_active, 1]
+            scale = torch.clamp(max_step_norm / (dq_norms + 1e-12), max=1.0)
+            dq_clipped = dq * scale
+            
+            # Update only active samples
+            q_batch[active_mask] = q_batch[active_mask] + dq_clipped
+        
+        # Mark remaining active samples as failed (max iterations reached)
+        iterations_batch[active_mask] = self.max_iters
+        
+        if verbose:
+            success_rate = success_batch.float().mean().item()
+            avg_iters = iterations_batch[success_batch].float().mean().item() if success_batch.any() else 0
+            print(f"Batch IK: {success_rate:.1%} success, avg {avg_iters:.1f} iterations")
+        
+        return {
+            "q": q_batch,
+            "success": success_batch,
+            "iterations": iterations_batch,
+            "method": method,
+        }
+    
+    @staticmethod
+    def _batch_rotation_error(R_target: Tensor, R_current: Tensor) -> Tensor:
+        """Compute rotation error in angle-axis representation for batch.
+        
+        Error = log(R_target @ R_current^T) converted to angle-axis
+        
+        :param R_target: [B, 3, 3] target rotation matrices
+        :param R_current: [B, 3, 3] current rotation matrices
+        :return: [B, 3] rotation error vectors
+        """
+        # R_error = R_target @ R_current^T
+        R_error = torch.bmm(R_target, R_current.transpose(1, 2))
+        
+        # Convert to angle-axis
+        return IKSolverTorch._batch_rotation_matrix_to_axis_angle(R_error)
+    
+    @staticmethod
+    def _batch_rotation_matrix_to_axis_angle(R: Tensor) -> Tensor:
+        """Convert batch of rotation matrices to axis-angle representation.
+        
+        :param R: [B, 3, 3] rotation matrices
+        :return: [B, 3] axis-angle vectors
+        """
+        batch_size = R.shape[0]
+        device = R.device
+        dtype = R.dtype
+        
+        # Angle from trace: cos(θ) = (trace(R) - 1) / 2
+        trace = R[:, 0, 0] + R[:, 1, 1] + R[:, 2, 2]
+        angle = torch.acos(torch.clamp((trace - 1) / 2, -1.0, 1.0))  # [B]
+        
+        # Axis from skew-symmetric part
+        axis = torch.zeros(batch_size, 3, device=device, dtype=dtype)
+        
+        # Handle small angles (θ ≈ 0) - use linear approximation
+        small_angle = angle < 1e-6
+        if small_angle.any():
+            # For small angles: axis-angle ≈ [R[2,1]-R[1,2], R[0,2]-R[2,0], R[1,0]-R[0,1]] / 2
+            axis[small_angle, 0] = (R[small_angle, 2, 1] - R[small_angle, 1, 2]) / 2
+            axis[small_angle, 1] = (R[small_angle, 0, 2] - R[small_angle, 2, 0]) / 2
+            axis[small_angle, 2] = (R[small_angle, 1, 0] - R[small_angle, 0, 1]) / 2
+        
+        # Handle normal angles
+        normal_angle = ~small_angle
+        if normal_angle.any():
+            # axis = [R[2,1]-R[1,2], R[0,2]-R[2,0], R[1,0]-R[0,1]] / (2*sin(θ))
+            sin_angle = torch.sin(angle[normal_angle])
+            axis[normal_angle, 0] = (R[normal_angle, 2, 1] - R[normal_angle, 1, 2]) / (2 * sin_angle)
+            axis[normal_angle, 1] = (R[normal_angle, 0, 2] - R[normal_angle, 2, 0]) / (2 * sin_angle)
+            axis[normal_angle, 2] = (R[normal_angle, 1, 0] - R[normal_angle, 0, 1]) / (2 * sin_angle)
+        
+        # Axis-angle = angle * axis
+        axis_angle = axis * angle.unsqueeze(1)
+        
+        return axis_angle

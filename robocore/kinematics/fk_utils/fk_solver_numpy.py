@@ -7,11 +7,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict, Sequence
 import numpy as np
-from robocore.transform.transform_core import (
-    rpy_to_rotation_matrix_numpy,
-    axis_angle_to_rotation_matrix_numpy,
-    axis_translation_numpy,
-    make_transform_numpy,
+from robocore.transform import (
+    rpy_to_matrix,
+    axis_angle_to_matrix,
+    make_transform,
 )
 
 if TYPE_CHECKING:
@@ -68,29 +67,27 @@ class FKSolverNumPy:
             parent_pose = poses[joint.parent]
             
             # Joint origin transform (static)
-            T_origin = make_transform_numpy(
-                rpy_to_rotation_matrix_numpy(*joint.origin_rpy),
+            T_origin = make_transform(
+                rpy_to_matrix(*joint.origin_rpy),
                 np.array(joint.origin_xyz, dtype=np.float64)
             )
             
             # Joint motion transform (dynamic)
             if joint.joint_type == "revolute":
-                R_joint = axis_angle_to_rotation_matrix_numpy(
+                R_joint = axis_angle_to_matrix(
                     np.array(joint.axis, dtype=np.float64),
                     q_map.get(joint.name, 0.0)
                 )
                 t_joint = np.zeros(3, dtype=np.float64)
             elif joint.joint_type == "prismatic":
                 R_joint = np.eye(3, dtype=np.float64)
-                t_joint = axis_translation_numpy(
-                    np.array(joint.axis, dtype=np.float64),
-                    q_map.get(joint.name, 0.0)
-                )
+                axis_vec = np.array(joint.axis, dtype=np.float64)
+                t_joint = axis_vec * q_map.get(joint.name, 0.0)
             else:  # fixed
                 R_joint = np.eye(3, dtype=np.float64)
                 t_joint = np.zeros(3, dtype=np.float64)
             
-            T_motion = make_transform_numpy(R_joint, t_joint)
+            T_motion = make_transform(R_joint, t_joint)
             
             # Compose: parent @ T_origin @ T_motion
             child_pose = parent_pose @ T_origin @ T_motion

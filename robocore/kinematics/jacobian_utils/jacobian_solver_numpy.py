@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 import numpy as np
 import math
-from robocore.transform.transform_core import orientation_error_numpy
+from robocore.transform import rotation_error
 
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
@@ -202,8 +202,8 @@ class JacobianSolverNumPy:
                 J[:3, i] = (p_pos - p_neg) / (2 * epsilon)
                 
                 # Orientation derivative
-                err_pos = orientation_error_numpy(R_ref, R_pos)
-                err_neg = orientation_error_numpy(R_ref, R_neg)
+                err_pos = rotation_error(R_ref, R_pos)
+                err_neg = rotation_error(R_ref, R_neg)
                 J[3:6, i] = (err_pos - err_neg) / (2 * epsilon)
         else:
             # Forward difference
@@ -235,7 +235,7 @@ class JacobianSolverNumPy:
                 )
                 
                 J[:3, i] = (p_pert - p_ref) / epsilon
-                err = orientation_error_numpy(R_ref, R_pert)
+                err = rotation_error(R_ref, R_pert)
                 J[3:6, i] = err / epsilon
         
         return J

@@ -20,14 +20,10 @@ from robocore.modeling.robot_model import RobotModel
 try:
     import torch
     HAS_TORCH = True
-    from robocore.kinematics.fk_utils.batch_fk_torch import (
-        batch_forward_kinematics_torch,
-        extract_position_batch,
-        rotation_matrix_to_quaternion_batch
-    )
-    from robocore.kinematics.ik_utils.batch_ik_torch import (
-        batch_inverse_kinematics_torch
-    )
+    from robocore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
+    from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
+    from robocore.kinematics.jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
+    from robocore.transform import matrix_to_quaternion
     print("✓ PyTorch imported successfully")
 except ImportError as e:
     HAS_TORCH = False
@@ -45,13 +41,14 @@ def test_batch_fk(model, device='cpu', batch_size=10):
     q_batch = torch.randn(batch_size, model.dof())
     print(f"Input shape: {q_batch.shape} (batch_size={batch_size}, dof={model.dof()})")
     
-    # Compute batch FK
-    T_batch = batch_forward_kinematics_torch(model, q_batch, device=device)
+    # Compute batch FK using unified solver
+    fk_solver = FKSolverTorch(model)
+    T_batch = fk_solver.solve(q_batch, device=device)  # Auto-detects batch mode
     print(f"Output shape: {T_batch.shape} ✓")
     
     # Extract positions and quaternions
-    pos_batch = extract_position_batch(T_batch)
-    quat_batch = rotation_matrix_to_quaternion_batch(T_batch[:, :3, :3])
+    pos_batch = T_batch[:, :3, 3]
+    quat_batch = matrix_to_quaternion(T_batch[:, :3, :3])
     
     print(f"Positions shape: {pos_batch.shape} ✓")
     print(f"Quaternions shape: {quat_batch.shape} ✓")
@@ -77,15 +74,27 @@ def test_batch_ik(model, target_poses, device='cpu'):
     # Random initial guess
     q_init = torch.zeros(batch_size, model.dof())
     
-    # Solve IK
-    q_sol, success, iters = batch_inverse_kinematics_torch(
-        model, target_poses, q_init,
-        device=device,
-        max_iterations=50,
-        tolerance=1e-4,
-        damping=0.01,
-        verbose=True
-    )
+    # Solve IK using unified solver (batch mode)
+    ik_solver = IKSolverTorch(model, max_iters=50, pos_tol=1e-4, ori_tol=1e-4)
+    # TODO: Need to add batch support to IKSolverTorch.solve()
+    # For now, iterate
+    q_sol_list = []
+    success_list = []
+    iters_list = []
+    
+    for i in range(batch_size):
+        result = ik_solver.solve(
+            target_poses[i].cpu().numpy().tolist(),
+            q_init[i].cpu().numpy().tolist(),
+            method='dls'
+        )
+        q_sol_list.append(result['q'])
+        success_list.append(result.get('success', False))
+        iters_list.append(result.get('iters', 0))
+    
+    q_sol = torch.tensor(q_sol_list, device=device)
+    success = torch.tensor(success_list, device=device)
+    iters = torch.tensor(iters_list, device=device)
     
     print(f"Solution shape: {q_sol.shape} ✓")
     print(f"Success: {success.sum().item()}/{batch_size} ({success.float().mean()*100:.1f}%)")
@@ -97,12 +106,11 @@ def test_batch_ik(model, target_poses, device='cpu'):
         print(f"  Solution: {q_sol[idx].cpu().numpy()}")
         print(f"  Iterations: {iters[idx].item()}")
         
-        # Verify FK
-        T_verify = batch_forward_kinematics_torch(
-            model, q_sol[idx:idx+1], device=device
-        )[0]
-        pos_verify = extract_position_batch(T_verify.unsqueeze(0))[0]
-        pos_target = extract_position_batch(target_poses[idx:idx+1])[0]
+        # Verify FK using unified solver
+        fk_solver = FKSolverTorch(model)
+        T_verify = fk_solver.solve(q_sol[idx:idx+1], device=device)[0]
+        pos_verify = T_verify[:3, 3]
+        pos_target = target_poses[idx, :3, 3]
         error = torch.linalg.norm(pos_verify - pos_target).item()
         print(f"  Position error: {error:.6f} m")
     

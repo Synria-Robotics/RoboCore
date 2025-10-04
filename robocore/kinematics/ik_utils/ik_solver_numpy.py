@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Dict
 import numpy as np
 from ..jacobian_utils.jacobian_solver_numpy import JacobianSolverNumPy
-from robocore.transform.transform_core import orientation_error_numpy
+from robocore.transform import rotation_error
 
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
@@ -32,8 +32,8 @@ class IKSolverNumPy:
         max_iters: int = 100,
         pos_tol: float = 1e-3,
         ori_tol: float = 1e-3,
-        min_damping: float = 1e-6,
-        max_damping: float = 1e-2,
+        min_damping: float = 1e-4,  # 调整: 与JS版本一致 (原来 1e-6)
+        max_damping: float = 5e-2,  # 调整: 与JS版本一致 (原来 1e-2), 对奇异点处理至关重要
         base_step: float = 1.0,
     ):
         """Initialize IK solver.
@@ -69,7 +69,7 @@ class IKSolverNumPy:
         use_analytic_jacobian: bool = False,
         method: str = "dls",
         transpose_gain: float | None = None,
-        max_step_norm: float = 0.3,
+        max_step_norm: float = 0.5,  # Increased from 0.3 for better workspace boundary handling
         refine: bool = False,
         refine_iters: int = 10,
         refine_pos_tol: float | None = None,
@@ -114,7 +114,7 @@ class IKSolverNumPy:
 
             # Compute errors
             pos_err = p_target - p_current
-            ori_err = orientation_error_numpy(R_current, R_target)
+            ori_err = rotation_error(R_current, R_target)
 
             pos_err_norm = np.linalg.norm(pos_err)
             ori_err_norm = np.linalg.norm(ori_err)
@@ -145,7 +145,7 @@ class IKSolverNumPy:
                             R_r = np.array([row[:3] for row in fk_r[:3]], dtype=np.float64)
                             p_r = np.array([fk_r[0][3], fk_r[1][3], fk_r[2][3]], dtype=np.float64)
                         p_err_r = p_target - p_r
-                        o_err_r = orientation_error_numpy(R_r, R_target)
+                        o_err_r = rotation_error(R_r, R_target)
                         if np.linalg.norm(p_err_r) < r_pos_tol and np.linalg.norm(o_err_r) < r_ori_tol:
                             q = q_ref
                             pos_err_norm = np.linalg.norm(p_err_r)
@@ -255,7 +255,7 @@ class IKSolverNumPy:
                 R_best = np.array([row[:3] for row in fk_best[:3]], dtype=np.float64)
                 p_best = np.array([fk_best[0][3], fk_best[1][3], fk_best[2][3]], dtype=np.float64)
             best_pos_err = float(np.linalg.norm(p_target - p_best))
-            best_ori_err = float(np.linalg.norm(orientation_error_numpy(R_best, R_target)))
+            best_ori_err = float(np.linalg.norm(rotation_error(R_best, R_target)))
         return {
             "q": best_q.tolist(),
             "success": False,
@@ -305,17 +305,24 @@ class IKSolverNumPy:
             return (self.min_damping + self.max_damping) * 0.5
 
     def _compute_adaptive_step(self, pos_err: float, ori_err: float) -> float:
+        """Compute adaptive step size based on error magnitude.
+        
+        More aggressive for large errors to escape local minima,
+        matching JS solver behavior for better workspace boundary handling.
+        """
         norm_pos_err = pos_err / 0.01
         norm_ori_err = ori_err / 0.087
         max_norm_err = max(norm_pos_err, norm_ori_err)
         if max_norm_err > 2.0:
-            return self.base_step * 0.6
+            # Large error: be more aggressive (like JS 0.8, not 0.6)
+            return self.base_step * 1.0
         elif max_norm_err > 1.0:
-            return self.base_step
-        elif max_norm_err > 0.5:
             return self.base_step * 1.2
+        elif max_norm_err > 0.5:
+            return self.base_step * 1.0
         else:
-            return self.base_step * 0.6
+            # Near convergence: smaller steps for precision
+            return self.base_step * 0.5
 
     def _solve_pinv(self, J: np.ndarray, err: np.ndarray, damping: float) -> np.ndarray:
         try:

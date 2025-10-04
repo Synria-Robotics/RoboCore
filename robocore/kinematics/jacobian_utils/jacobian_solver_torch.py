@@ -21,7 +21,8 @@ except Exception:
             return torch.device(device)
         return torch.device("cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu"))
 
-from robocore.transform.transform_core import orientation_error_torch
+from robocore.utils.backend import set_backend, get_backend
+from robocore.transform import rotation_error
 
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
@@ -59,15 +60,17 @@ class JacobianSolverTorch:
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
     ) -> Tensor:
-        """Compute 6×n Jacobian matrix.
+        """Compute Jacobian matrix (supports both single and batch modes).
         
-        :param q: joint configuration (n,).
+        :param q: joint configuration(s).
+            - Single mode: (n,) → returns [6, n]
+            - Batch mode: (B, n) → returns [B, 6, n]
         :param method: 'analytic', 'numeric', or 'autograd'.
         :param epsilon: finite difference step size (numeric only).
         :param use_central_diff: use central difference if True (numeric only).
         :param device: torch device.
         :param dtype: torch dtype.
-        :return: 6×n Jacobian matrix as torch tensor.
+        :return: Jacobian matrix as torch tensor.
         """
         device = select_device(device)
         
@@ -75,14 +78,31 @@ class JacobianSolverTorch:
         if dtype is None:
             dtype = torch.float32 if str(device).startswith('mps') else torch.float64
         
-        if method == "analytic":
-            return self._solve_analytic(q, device, dtype)
-        elif method == "numeric":
-            return self._solve_numeric(q, epsilon, use_central_diff, device, dtype)
-        elif method == "autograd":
-            return self._solve_autograd(q, device, dtype)
+        # Convert to tensor
+        if not torch.is_tensor(q):
+            q = torch.tensor(q, dtype=dtype, device=device)
         else:
-            raise ValueError(f"Unknown method '{method}', expected 'analytic', 'numeric', or 'autograd'")
+            q = q.to(dtype=dtype, device=device)
+        
+        # Detect batch mode
+        is_batch = q.ndim == 2
+        
+        if is_batch:
+            # Batch mode: q is [B, n]
+            if method == "analytic":
+                return self._solve_analytic_batch(q, device, dtype)
+            else:
+                raise NotImplementedError(f"Batch mode only supports 'analytic' method, got '{method}'")
+        else:
+            # Single mode: q is (n,)
+            if method == "analytic":
+                return self._solve_analytic(q, device, dtype)
+            elif method == "numeric":
+                return self._solve_numeric(q, epsilon, use_central_diff, device, dtype)
+            elif method == "autograd":
+                return self._solve_autograd(q, device, dtype)
+            else:
+                raise ValueError(f"Unknown method '{method}', expected 'analytic', 'numeric', or 'autograd'")
     
     def _solve_analytic(self, q, device, dtype) -> Tensor:
         """Compute analytic (geometric) Jacobian."""
@@ -206,8 +226,8 @@ class JacobianSolverTorch:
                 
                 J[:3, i] = (p_pos - p_neg) / (2 * epsilon)
                 
-                err_pos = orientation_error_torch(R_ref, R_pos)
-                err_neg = orientation_error_torch(R_ref, R_neg)
+                err_pos = rotation_error(R_ref, R_pos)
+                err_neg = rotation_error(R_ref, R_neg)
                 J[3:6, i] = (err_pos - err_neg) / (2 * epsilon)
         else:
             T_ref = fk_solver.solve(q, return_end_only=True, device=device, dtype=dtype)["end"]
@@ -222,7 +242,7 @@ class JacobianSolverTorch:
                 R_pos = T_pos[:3, :3]
                 
                 J[:3, i] = (p_pos - p_ref) / epsilon
-                err = orientation_error_torch(R_ref, R_pos)
+                err = rotation_error(R_ref, R_pos)
                 J[3:6, i] = err / epsilon
         
         return J
@@ -271,6 +291,198 @@ class JacobianSolverTorch:
             J[3:6, j] = w_end
         
         return J.detach()
+    
+    def _solve_analytic_batch(self, q_batch: Tensor, device, dtype) -> Tensor:
+        """Compute batch geometric Jacobian for multiple configurations in parallel.
+        
+        :param q_batch: batch of joint configurations [B, n]
+        :param device: torch device
+        :param dtype: torch dtype
+        :return: batch of Jacobian matrices [B, 6, n]
+        """
+        from ..fk_utils.fk_solver_torch import FKSolverTorch
+        
+        batch_size = q_batch.shape[0]
+        n_joints = q_batch.shape[1]
+        
+        if n_joints != self.n:
+            raise ValueError(f"Expected {self.n} joints, got {n_joints}")
+        
+        # Initialize Jacobian [B, 6, N]
+        J_batch = torch.zeros(batch_size, 6, n_joints, device=device, dtype=dtype)
+        
+        # Get end-effector position for all samples [B, 4, 4]
+        fk_solver = FKSolverTorch(self.model)
+        T_ee_batch = fk_solver.solve(q_batch, device=device, dtype=dtype)  # auto-detects batch mode
+        p_ee_batch = T_ee_batch[:, :3, 3]  # [B, 3]
+        
+        # Process each joint
+        for js in self.model._actuated:
+            joint_idx = js.index
+            
+            # Compute FK up to this joint for all samples
+            T_joint_batch = self._forward_kinematics_to_joint_batch(
+                q_batch, joint_idx, device, dtype
+            )
+            
+            # Extract position and z-axis
+            p_joint_batch = T_joint_batch[:, :3, 3]  # [B, 3]
+            z_axis_batch = T_joint_batch[:, :3, 2]  # [B, 3] - third column of rotation matrix
+            
+            # For revolute joint:
+            # J_v[i] = z[i] × (p_ee - p[i])  (linear velocity contribution)
+            # J_ω[i] = z[i]                  (angular velocity contribution)
+            
+            if js.joint_type == "revolute":
+                # Linear part: cross product z × (p_ee - p_joint)
+                r = p_ee_batch - p_joint_batch  # [B, 3]
+                J_linear = torch.cross(z_axis_batch, r, dim=1)  # [B, 3]
+                
+                # Angular part: just the z-axis
+                J_angular = z_axis_batch  # [B, 3]
+                
+                # Assemble into Jacobian
+                J_batch[:, :3, joint_idx] = J_linear
+                J_batch[:, 3:6, joint_idx] = J_angular
+            elif js.joint_type == "prismatic":
+                # Prismatic: only linear motion along axis
+                J_batch[:, :3, joint_idx] = z_axis_batch
+        
+        return J_batch
+    
+    def _forward_kinematics_to_joint_batch(
+        self, 
+        q_batch: Tensor, 
+        joint_idx: int,
+        device: torch.device,
+        dtype: torch.dtype
+    ) -> Tensor:
+        """Compute FK up to specific joint for batch of configurations.
+        
+        :param q_batch: batch of joint configs [B, n]
+        :param joint_idx: index of target joint (0-indexed)
+        :param device: torch device
+        :param dtype: torch dtype
+        :return: transformation matrices up to joint [B, 4, 4]
+        """
+        batch_size = q_batch.shape[0]
+        
+        # Initialize batch of identity matrices [B, 4, 4]
+        T_batch = torch.eye(4, device=device, dtype=dtype).unsqueeze(0).repeat(batch_size, 1, 1)
+        
+        # Get joints up to and including target
+        joint_specs = self.model._actuated[:joint_idx + 1]
+        
+        # Process each joint in the chain
+        for js in joint_specs:
+            theta = q_batch[:, js.index]  # [B]
+            
+            # Find corresponding URDF joint
+            urdf_joint = next(j for j in self.model._chain_joints if j.name == js.name)
+            
+            # Build transformation matrix for this joint
+            origin_xyz = torch.tensor(urdf_joint.origin_xyz, device=device, dtype=dtype)
+            origin_rpy = torch.tensor(urdf_joint.origin_rpy, device=device, dtype=dtype)
+            axis = torch.tensor(urdf_joint.axis, device=device, dtype=dtype)
+            
+            # Rotation matrices
+            R_origin = self._rpy_to_rotation_matrix_batch(
+                origin_rpy.unsqueeze(0).repeat(batch_size, 1),
+                device, dtype
+            )  # [B, 3, 3]
+            R_joint = self._axis_angle_to_rotation_matrix_batch(axis, theta, device, dtype)  # [B, 3, 3]
+            R_total = torch.matmul(R_origin, R_joint)  # [B, 3, 3]
+            
+            # Build 4x4 transformation [B, 4, 4]
+            T_joint = torch.eye(4, device=device, dtype=dtype).unsqueeze(0).repeat(batch_size, 1, 1)
+            T_joint[:, :3, :3] = R_total
+            T_joint[:, :3, 3] = origin_xyz  # broadcast to all batches
+            
+            # Accumulate transformation
+            T_batch = torch.matmul(T_batch, T_joint)
+        
+        return T_batch
+    
+    @staticmethod
+    def _rpy_to_rotation_matrix_batch(
+        rpy_batch: Tensor,
+        device: torch.device,
+        dtype: torch.dtype
+    ) -> Tensor:
+        """Convert batch of RPY to rotation matrices.
+        
+        :param rpy_batch: [B, 3] roll-pitch-yaw angles
+        :return: [B, 3, 3] rotation matrices
+        """
+        batch_size = rpy_batch.shape[0]
+        r = rpy_batch[:, 0]  # [B]
+        p = rpy_batch[:, 1]  # [B]
+        y = rpy_batch[:, 2]  # [B]
+        
+        sr, cr = torch.sin(r), torch.cos(r)
+        sp, cp = torch.sin(p), torch.cos(p)
+        sy, cy = torch.sin(y), torch.cos(y)
+        
+        R = torch.zeros(batch_size, 3, 3, device=device, dtype=dtype)
+        R[:, 0, 0] = cy * cp
+        R[:, 0, 1] = cy * sp * sr - sy * cr
+        R[:, 0, 2] = cy * sp * cr + sy * sr
+        R[:, 1, 0] = sy * cp
+        R[:, 1, 1] = sy * sp * sr + cy * cr
+        R[:, 1, 2] = sy * sp * cr - cy * sr
+        R[:, 2, 0] = -sp
+        R[:, 2, 1] = cp * sr
+        R[:, 2, 2] = cp * cr
+        
+        return R
+    
+    @staticmethod
+    def _axis_angle_to_rotation_matrix_batch(
+        axis: Tensor,
+        theta_batch: Tensor,
+        device: torch.device,
+        dtype: torch.dtype
+    ) -> Tensor:
+        """Convert batch of axis-angle to rotation matrices (Rodrigues formula).
+        
+        :param axis: rotation axis [3] (shared across batch)
+        :param theta_batch: rotation angles [B]
+        :return: [B, 3, 3] rotation matrices
+        """
+        batch_size = theta_batch.shape[0]
+        
+        # Normalize axis
+        norm = torch.linalg.norm(axis)
+        if norm < 1e-12:
+            return torch.eye(3, device=device, dtype=dtype).unsqueeze(0).repeat(batch_size, 1, 1)
+        
+        k = axis / norm  # [3]
+        kx, ky, kz = k[0], k[1], k[2]
+        
+        # Precompute trigonometric values
+        cos_theta = torch.cos(theta_batch)  # [B]
+        sin_theta = torch.sin(theta_batch)  # [B]
+        one_minus_cos = 1.0 - cos_theta  # [B]
+        
+        # Build rotation matrices using Rodrigues formula
+        # R = I + sin(θ)K + (1-cos(θ))K²
+        R = torch.zeros(batch_size, 3, 3, device=device, dtype=dtype)
+        
+        # Diagonal: cos(θ) + (1-cos(θ))k_i²
+        R[:, 0, 0] = cos_theta + one_minus_cos * kx * kx
+        R[:, 1, 1] = cos_theta + one_minus_cos * ky * ky
+        R[:, 2, 2] = cos_theta + one_minus_cos * kz * kz
+        
+        # Off-diagonal terms
+        R[:, 0, 1] = one_minus_cos * kx * ky - sin_theta * kz
+        R[:, 0, 2] = one_minus_cos * kx * kz + sin_theta * ky
+        R[:, 1, 0] = one_minus_cos * ky * kx + sin_theta * kz
+        R[:, 1, 2] = one_minus_cos * ky * kz - sin_theta * kx
+        R[:, 2, 0] = one_minus_cos * kz * kx - sin_theta * ky
+        R[:, 2, 1] = one_minus_cos * kz * ky + sin_theta * kx
+        
+        return R
+
     
     # ============================================================================
     # Helper functions

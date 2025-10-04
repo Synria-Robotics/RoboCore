@@ -14,23 +14,23 @@ import os
 from pathlib import Path
 import random
 import math
+import numpy as np
 from robocore import RobotModel, IKSolver  # IKSolver 是 IKSolverNumPy alias
 from time import perf_counter
 from robocore.utils.beauty_logger import beauty_print
+from robocore.transform import get_rotation, rotation_distance
 
 
 def rotation_matrix(T):
     """Extract 3x3 rotation from 4x4 pose."""
-    return [row[:3] for row in T[:3]]
+    return get_rotation(np.array(T))
 
 
 def orientation_angle_deg(R1, R2):
-    """Compute orientation difference in degrees."""
-    # R_diff = R1^T @ R2
-    R1T = [[R1[j][i] for j in range(3)] for i in range(3)]
-    R_diff = [[sum(R1T[i][k] * R2[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
-    trace = R_diff[0][0] + R_diff[1][1] + R_diff[2][2]
-    angle_rad = math.acos(max(-1, min(1, (trace - 1) / 2)))
+    """Compute orientation difference in degrees using new transform API."""
+    R1_np = np.array(R1) if not isinstance(R1, np.ndarray) else R1
+    R2_np = np.array(R2) if not isinstance(R2, np.ndarray) else R2
+    angle_rad = rotation_distance(R1_np, R2_np)
     return math.degrees(angle_rad)
 
 

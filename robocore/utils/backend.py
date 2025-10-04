@@ -121,15 +121,32 @@ class BackendManager:
             else:
                 return np.array(data, dtype=self._dtype)
         else:  # torch
+            # MPS device doesn't support float64, auto-convert to float32
+            target_dtype = self._torch_dtype
+            if 'mps' in str(self._device) and target_dtype == self._torch.float64:
+                target_dtype = self._torch.float32
+            
             if self._torch_available and isinstance(data, self._torch.Tensor):
-                return data.to(device=self._device, dtype=self._torch_dtype)
+                # Handle conversions involving MPS and float64
+                needs_cpu_detour = (
+                    (data.dtype == self._torch.float64 and 'mps' in str(data.device)) or
+                    (target_dtype == self._torch.float64 and 'mps' in str(data.device))
+                )
+                
+                if needs_cpu_detour:
+                    # MPS doesn't support float64, detour through CPU
+                    data = data.cpu().to(dtype=target_dtype).to(device=self._device)
+                else:
+                    # Normal conversion
+                    data = data.to(device=self._device, dtype=target_dtype)
+                return data
             elif isinstance(data, np.ndarray):
                 return self._torch.from_numpy(data).to(
-                    device=self._device, dtype=self._torch_dtype
+                    device=self._device, dtype=target_dtype
                 )
             else:
                 return self._torch.tensor(
-                    data, device=self._device, dtype=self._torch_dtype
+                    data, device=self._device, dtype=target_dtype
                 )
     
     def array(self, data, dtype=None):

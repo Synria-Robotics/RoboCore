@@ -192,12 +192,12 @@ def matrix_to_axis_angle(R):
     
     # Normalize axis
     axis_norm = xp.linalg.norm(axis, axis=-1, keepdims=True)
-    axis = axis / xp.maximum(axis_norm, 1e-10)
+    eps = bm.ensure_array(1e-10) if bm.is_torch else 1e-10
+    axis = axis / xp.maximum(axis_norm, eps)
     
     if not batch:
         return axis[0], angle[0]
     return axis, angle
-
 
 def matrix_to_euler(R, seq='xyz'):
     """
