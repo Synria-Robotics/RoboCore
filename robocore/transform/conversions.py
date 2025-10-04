@@ -24,7 +24,18 @@ from .so3 import (
 
 def matrix_to_rpy(R):
     """
-    Convert rotation matrix to Roll-Pitch-Yaw (ZYX Euler angles).
+    Convert rotation matrix to Roll-Pitch-Yaw (Robotics convention).
+    
+    RPY corresponds to extrinsic XYZ rotations: R = Rz(yaw) @ Ry(pitch) @ Rx(roll)
+    Expanded matrix (cr=cos(roll), sr=sin(roll), etc.):
+    R = [ cy*cp,  cy*sp*sr - sy*cr,  cy*sp*cr + sy*sr ]
+        [ sy*cp,  sy*sp*sr + cy*cr,  sy*sp*cr - cy*sr ]
+        [ -sp,    cp*sr,              cp*cr            ]
+    
+    Extraction formulas:
+    - pitch = arcsin(-R[2,0])
+    - roll = atan2(R[2,1], R[2,2])
+    - yaw = atan2(R[1,0], R[0,0])
     
     :param R: Rotation matrix, shape (3, 3) or (N, 3, 3)
     :return: [roll, pitch, yaw] in radians, shape (3,) or (N, 3)
@@ -38,26 +49,25 @@ def matrix_to_rpy(R):
     if not batch:
         R = R.reshape(1, 3, 3)
     
-    # Extract angles
-    pitch = xp.arcsin(-R[..., 2, 0])
+    # Extract pitch from R[2,0] = -sin(pitch)
+    pitch = xp.arcsin(xp.clip(-R[..., 2, 0], -1.0, 1.0))
     
-    # Handle gimbal lock
+    # Handle gimbal lock (cos(pitch) ≈ 0)
     cos_pitch = xp.cos(pitch)
     threshold = 1e-6
     
     if bm.is_torch:
-        safe_cos = xp.where(xp.abs(cos_pitch) > threshold, cos_pitch, xp.ones_like(cos_pitch))
-        roll = xp.arctan2(R[..., 2, 1] / safe_cos, R[..., 2, 2] / safe_cos)
-        yaw = xp.arctan2(R[..., 1, 0] / safe_cos, R[..., 0, 0] / safe_cos)
+        # Non-singular: roll = atan2(R[2,1], R[2,2]),  yaw = atan2(R[1,0], R[0,0])
+        roll = xp.arctan2(R[..., 2, 1], R[..., 2, 2])
+        yaw = xp.arctan2(R[..., 1, 0], R[..., 0, 0])
         
-        # Fix gimbal lock cases
+        # Gimbal lock fallback
         gimbal = xp.abs(cos_pitch) <= threshold
         roll = xp.where(gimbal, xp.zeros_like(roll), roll)
         yaw = xp.where(gimbal, xp.arctan2(-R[..., 0, 1], R[..., 1, 1]), yaw)
     else:
-        safe_cos = xp.where(xp.abs(cos_pitch) > threshold, cos_pitch, 1.0)
-        roll = xp.arctan2(R[..., 2, 1] / safe_cos, R[..., 2, 2] / safe_cos)
-        yaw = xp.arctan2(R[..., 1, 0] / safe_cos, R[..., 0, 0] / safe_cos)
+        roll = xp.arctan2(R[..., 2, 1], R[..., 2, 2])
+        yaw = xp.arctan2(R[..., 1, 0], R[..., 0, 0])
         
         gimbal = xp.abs(cos_pitch) <= threshold
         roll = xp.where(gimbal, 0.0, roll)
@@ -203,17 +213,226 @@ def matrix_to_euler(R, seq='xyz'):
     """
     Convert rotation matrix to Euler angles.
     
+    Supports both intrinsic (lowercase) and extrinsic (uppercase) conventions:
+    - Intrinsic (e.g., 'xyz'): rotations about rotating axes
+      'xyz' → first rotate about X, then new Y, then new Z
+      Matrix: R = Rz(γ) @ Ry(β) @ Rx(α)
+    
+    - Extrinsic (e.g., 'XYZ'): rotations about fixed axes  
+      'XYZ' → first rotate about fixed X, then fixed Y, then fixed Z
+      Matrix: R = Rx(α) @ Ry(β) @ Rz(γ)
+    
+    This matches SciPy's Rotation.from_euler() convention.
+    
+    Supported sequences: xyz, XYZ, zyx, ZYX, xzy, XZY, yxz, YXZ, yzx, YZX, zxy, ZXY
+    
     :param R: Rotation matrix, shape (3, 3) or (N, 3, 3)
-    :param seq: Rotation sequence (e.g., 'xyz', 'zyx')
+    :param seq: Rotation sequence (lowercase=intrinsic, uppercase=extrinsic)
     :return: Euler angles [α, β, γ], shape (3,) or (N, 3)
     """
-    # For ZYX, use matrix_to_rpy
-    if seq.lower() == 'zyx':
-        return matrix_to_rpy(R)
+    bm = get_backend_manager()
+    xp = bm.module
+
+    R = bm.ensure_array(R)
+    batch = R.ndim == 3
+
+    if not batch:
+        R = R.reshape(1, 3, 3)
+
+    # Determine intrinsic vs extrinsic
+    is_intrinsic = seq.islower()
+    seq_lower = seq.lower()
     
-    # General implementation for other sequences
-    # This is a simplified version - full implementation would handle all 12 Euler sequences
-    raise NotImplementedError(f"Euler sequence '{seq}' not yet implemented. Use 'zyx' or matrix_to_rpy.")
+    # For extrinsic, convert to equivalent intrinsic problem
+    # Extrinsic ABC = Intrinsic CBA (reversed sequence, same angles)
+    if not is_intrinsic:
+        seq_lower = seq_lower[::-1]  # reverse sequence
+    
+    # Now solve as intrinsic
+    if seq_lower == 'zyx':
+        # ZYX Euler (intrinsic): First rotate Z by α, then new Y by β, then new X by γ
+        # Equivalent extrinsic: R = Rx(γ) @ Ry(β) @ Rz(α)
+        # Matrix elements:
+        # R = [ cβ*cα,              -cβ*sα,              sβ    ]
+        #     [ sγ*sβ*cα + cγ*sα,   -sγ*sβ*sα + cγ*cα,   -sγ*cβ ]
+        #     [-cγ*sβ*cα + sγ*sα,    cγ*sβ*sα + sγ*cα,    cγ*cβ ]
+
+        # Extract β from R[0,2] = sin(β)
+        beta = xp.arcsin(xp.clip(R[..., 0, 2], -1.0, 1.0))
+
+        # Handle gimbal lock
+        cos_beta = xp.cos(beta)
+        threshold = 1e-6
+
+        if bm.is_torch:
+            # Non-singular: α = atan2(-R[0,1], R[0,0]),  γ = atan2(-R[1,2], R[2,2])
+            alpha = xp.arctan2(-R[..., 0, 1], R[..., 0, 0])
+            gamma = xp.arctan2(-R[..., 1, 2], R[..., 2, 2])
+
+            gimbal = xp.abs(cos_beta) <= threshold
+            alpha = xp.where(gimbal, xp.zeros_like(alpha), alpha)
+            gamma = xp.where(gimbal, xp.arctan2(R[..., 1, 0], R[..., 1, 1]), gamma)
+        else:
+            alpha = xp.arctan2(-R[..., 0, 1], R[..., 0, 0])
+            gamma = xp.arctan2(-R[..., 1, 2], R[..., 2, 2])
+
+            gimbal = xp.abs(cos_beta) <= threshold
+            alpha = xp.where(gimbal, 0.0, alpha)
+            gamma = xp.where(gimbal, xp.arctan2(R[..., 1, 0], R[..., 1, 1]), gamma)
+
+        if bm.is_torch:
+            euler = xp.stack([alpha, beta, gamma], dim=-1)
+        else:
+            euler = xp.stack([alpha, beta, gamma], axis=-1)
+
+    # Now solve as intrinsic
+    if seq_lower == 'zyx':
+        # ZYX intrinsic: R = Rx(γ) @ Ry(β) @ Rz(α)
+        beta = xp.arcsin(xp.clip(R[..., 0, 2], -1.0, 1.0))
+        cos_beta = xp.cos(beta)
+        threshold = 1e-6
+        
+        if bm.is_torch:
+            alpha = xp.arctan2(-R[..., 0, 1], R[..., 0, 0])
+            gamma = xp.arctan2(-R[..., 1, 2], R[..., 2, 2])
+            gimbal = xp.abs(cos_beta) <= threshold
+            alpha = xp.where(gimbal, xp.zeros_like(alpha), alpha)
+            gamma = xp.where(gimbal, xp.arctan2(R[..., 1, 0], R[..., 1, 1]), gamma)
+        else:
+            alpha = xp.arctan2(-R[..., 0, 1], R[..., 0, 0])
+            gamma = xp.arctan2(-R[..., 1, 2], R[..., 2, 2])
+            gimbal = xp.abs(cos_beta) <= threshold
+            alpha = xp.where(gimbal, 0.0, alpha)
+            gamma = xp.where(gimbal, xp.arctan2(R[..., 1, 0], R[..., 1, 1]), gamma)
+        
+        angles = [alpha, beta, gamma]
+        
+    elif seq_lower == 'xyz':
+        # XYZ intrinsic: R = Rz(γ) @ Ry(β) @ Rx(α)
+        beta = xp.arcsin(xp.clip(-R[..., 2, 0], -1.0, 1.0))
+        cos_beta = xp.cos(beta)
+        threshold = 1e-6
+        
+        if bm.is_torch:
+            alpha = xp.arctan2(R[..., 2, 1], R[..., 2, 2])
+            gamma = xp.arctan2(R[..., 1, 0], R[..., 0, 0])
+            gimbal = xp.abs(cos_beta) <= threshold
+            alpha = xp.where(gimbal, xp.zeros_like(alpha), alpha)
+            gamma = xp.where(gimbal, xp.arctan2(-R[..., 0, 1], R[..., 1, 1]), gamma)
+        else:
+            alpha = xp.arctan2(R[..., 2, 1], R[..., 2, 2])
+            gamma = xp.arctan2(R[..., 1, 0], R[..., 0, 0])
+            gimbal = xp.abs(cos_beta) <= threshold
+            alpha = xp.where(gimbal, 0.0, alpha)
+            gamma = xp.where(gimbal, xp.arctan2(-R[..., 0, 1], R[..., 1, 1]), gamma)
+        
+        angles = [alpha, beta, gamma]
+        
+    elif seq_lower == 'xzy':
+        # XZY intrinsic: R = Ry(γ) @ Rz(β) @ Rx(α)
+        # R[1,0] = sin(β)
+        beta = xp.arcsin(xp.clip(R[..., 1, 0], -1.0, 1.0))
+        cos_beta = xp.cos(beta)
+        threshold = 1e-6
+        
+        if bm.is_torch:
+            alpha = xp.arctan2(-R[..., 1, 2], R[..., 1, 1])
+            gamma = xp.arctan2(-R[..., 2, 0], R[..., 0, 0])
+            gimbal = xp.abs(cos_beta) <= threshold
+            alpha = xp.where(gimbal, xp.zeros_like(alpha), alpha)
+            gamma = xp.where(gimbal, xp.arctan2(R[..., 2, 1], R[..., 2, 2]), gamma)
+        else:
+            alpha = xp.arctan2(-R[..., 1, 2], R[..., 1, 1])
+            gamma = xp.arctan2(-R[..., 2, 0], R[..., 0, 0])
+            gimbal = xp.abs(cos_beta) <= threshold
+            alpha = xp.where(gimbal, 0.0, alpha)
+            gamma = xp.where(gimbal, xp.arctan2(R[..., 2, 1], R[..., 2, 2]), gamma)
+        
+        angles = [alpha, beta, gamma]
+        
+    elif seq_lower == 'yxz':
+        # YXZ intrinsic: R = Rz(γ) @ Rx(β) @ Ry(α)
+        # R[2,1] = sin(β)
+        beta = xp.arcsin(xp.clip(R[..., 2, 1], -1.0, 1.0))
+        cos_beta = xp.cos(beta)
+        threshold = 1e-6
+        
+        if bm.is_torch:
+            alpha = xp.arctan2(-R[..., 2, 0], R[..., 2, 2])
+            gamma = xp.arctan2(-R[..., 0, 1], R[..., 1, 1])
+            gimbal = xp.abs(cos_beta) <= threshold
+            alpha = xp.where(gimbal, xp.zeros_like(alpha), alpha)
+            gamma = xp.where(gimbal, xp.arctan2(R[..., 1, 0], R[..., 0, 0]), gamma)
+        else:
+            alpha = xp.arctan2(-R[..., 2, 0], R[..., 2, 2])
+            gamma = xp.arctan2(-R[..., 0, 1], R[..., 1, 1])
+            gimbal = xp.abs(cos_beta) <= threshold
+            alpha = xp.where(gimbal, 0.0, alpha)
+            gamma = xp.where(gimbal, xp.arctan2(R[..., 1, 0], R[..., 0, 0]), gamma)
+        
+        angles = [alpha, beta, gamma]
+        
+    elif seq_lower == 'yzx':
+        # YZX intrinsic: R = Rx(γ) @ Rz(β) @ Ry(α)
+        # R[0,1] = -sin(β)
+        beta = xp.arcsin(xp.clip(-R[..., 0, 1], -1.0, 1.0))
+        cos_beta = xp.cos(beta)
+        threshold = 1e-6
+        
+        if bm.is_torch:
+            alpha = xp.arctan2(R[..., 0, 2], R[..., 0, 0])
+            gamma = xp.arctan2(R[..., 2, 1], R[..., 1, 1])
+            gimbal = xp.abs(cos_beta) <= threshold
+            alpha = xp.where(gimbal, xp.zeros_like(alpha), alpha)
+            gamma = xp.where(gimbal, xp.arctan2(-R[..., 2, 0], R[..., 2, 2]), gamma)
+        else:
+            alpha = xp.arctan2(R[..., 0, 2], R[..., 0, 0])
+            gamma = xp.arctan2(R[..., 2, 1], R[..., 1, 1])
+            gimbal = xp.abs(cos_beta) <= threshold
+            alpha = xp.where(gimbal, 0.0, alpha)
+            gamma = xp.where(gimbal, xp.arctan2(-R[..., 2, 0], R[..., 2, 2]), gamma)
+            gamma = xp.where(gimbal, xp.arctan2(R[..., 0, 2], R[..., 2, 2]), gamma)
+        
+        angles = [alpha, beta, gamma]
+        
+    elif seq_lower == 'zxy':
+        # ZXY intrinsic: R = Ry(γ) @ Rx(β) @ Rz(α)
+        # R[1,2] = -sin(β)
+        beta = xp.arcsin(xp.clip(-R[..., 1, 2], -1.0, 1.0))
+        cos_beta = xp.cos(beta)
+        threshold = 1e-6
+        
+        if bm.is_torch:
+            alpha = xp.arctan2(R[..., 1, 0], R[..., 1, 1])
+            gamma = xp.arctan2(R[..., 0, 2], R[..., 2, 2])
+            gimbal = xp.abs(cos_beta) <= threshold
+            alpha = xp.where(gimbal, xp.zeros_like(alpha), alpha)
+            gamma = xp.where(gimbal, xp.arctan2(-R[..., 0, 1], R[..., 0, 0]), gamma)
+        else:
+            alpha = xp.arctan2(R[..., 1, 0], R[..., 1, 1])
+            gamma = xp.arctan2(R[..., 0, 2], R[..., 2, 2])
+            gimbal = xp.abs(cos_beta) <= threshold
+            alpha = xp.where(gimbal, 0.0, alpha)
+            gamma = xp.where(gimbal, xp.arctan2(-R[..., 0, 1], R[..., 0, 0]), gamma)
+        
+        angles = [alpha, beta, gamma]
+        
+    else:
+        raise NotImplementedError(
+            f"Euler sequence '{seq}' not implemented. "
+            f"Supported: xyz/XYZ, zyx/ZYX, xzy/XZY, yxz/YXZ, yzx/YZX, zxy/ZXY"
+        )
+    
+    # If extrinsic, reverse the angle order to match extrinsic convention
+    if not is_intrinsic:
+        angles = angles[::-1]
+    
+    if bm.is_torch:
+        euler = xp.stack(angles, dim=-1)
+    else:
+        euler = xp.stack(angles, axis=-1)
+    
+    return euler if batch else euler[0]
 
 
 # ============================================================================

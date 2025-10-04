@@ -257,22 +257,46 @@ def euler_to_matrix(alpha, beta, gamma, seq='xyz'):
     """
     Convert Euler angles to rotation matrix.
     
+    Supports both intrinsic (lowercase) and extrinsic (uppercase) conventions:
+    
+    **Intrinsic rotations** (lowercase, e.g., 'xyz'):
+    - Rotations about rotating/body-fixed axes
+    - 'xyz' intrinsic = rotate first around X, then new Y, then new Z
+    - Matrix: R = Rz(γ) @ Ry(β) @ Rx(α)  [right-to-left application]
+    
+    **Extrinsic rotations** (uppercase, e.g., 'XYZ'):
+    - Rotations about fixed/space axes
+    - 'XYZ' extrinsic = rotate about fixed X, then fixed Y, then fixed Z
+    - Matrix: R = Rx(α) @ Ry(β) @ Rz(γ)  [left-to-right application]
+    
+    This matches SciPy's Rotation.from_euler() convention.
+    
+    Supported: xyz/XYZ, zyx/ZYX, xzy/XZY, yxz/YXZ, yzx/YZX, zxy/ZXY
+    
     :param alpha: First rotation angle in radians, shape () or (N,)
     :param beta: Second rotation angle in radians, shape () or (N,)
     :param gamma: Third rotation angle in radians, shape () or (N,)
-    :param seq: Rotation sequence (e.g., 'xyz', 'zyx', 'zyz')
+    :param seq: Rotation sequence (lowercase=intrinsic, uppercase=extrinsic)
     :return: Rotation matrix, shape (3, 3) or (N, 3, 3)
     """
-    seq = seq.lower()
+    is_intrinsic = seq.islower()
+    seq_lower = seq.lower()
     
     # Get rotation functions
     rot_map = {'x': rotation_x, 'y': rotation_y, 'z': rotation_z}
-    R1 = rot_map[seq[0]](alpha)
-    R2 = rot_map[seq[1]](beta)
-    R3 = rot_map[seq[2]](gamma)
     
-    # Multiply rotations
-    return rotation_multiply(rotation_multiply(R1, R2), R3)
+    if is_intrinsic:
+        # Intrinsic: R = R3(gamma) @ R2(beta) @ R1(alpha)
+        R1 = rot_map[seq_lower[0]](alpha)
+        R2 = rot_map[seq_lower[1]](beta)
+        R3 = rot_map[seq_lower[2]](gamma)
+        return rotation_multiply(R3, rotation_multiply(R2, R1))
+    else:
+        # Extrinsic: R = R1(alpha) @ R2(beta) @ R3(gamma)
+        R1 = rot_map[seq_lower[0]](alpha)
+        R2 = rot_map[seq_lower[1]](beta)
+        R3 = rot_map[seq_lower[2]](gamma)
+        return rotation_multiply(R1, rotation_multiply(R2, R3))
 
 
 def rotation_multiply(R1, R2):

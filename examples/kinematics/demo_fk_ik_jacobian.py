@@ -60,13 +60,9 @@ from robocore.kinematics.fk import forward_kinematics
 from robocore.kinematics.ik import inverse_kinematics
 from robocore.kinematics.jacobian import jacobian
 
-try:
-    from robocore.configs import ConfigManager, get_default_config
-    from omegaconf import OmegaConf
-    CONFIG_AVAILABLE = True
-except ImportError:
-    CONFIG_AVAILABLE = False
-from robocore.utils.beauty_logger import beauty_print
+from robocore.configs import ConfigManager, get_default_config
+from omegaconf import OmegaConf
+from robocore.utils.beauty_logger import beauty_print_array
 
 
 def print_separator(title: str = "", width: int = 80):
@@ -77,23 +73,6 @@ def print_separator(title: str = "", width: int = 80):
         print(f"{'=' * width}")
     else:
         print(f"{'=' * width}")
-
-
-def format_array(arr: np.ndarray, precision: int = 5) -> str:
-    """Format numpy array for pretty printing."""
-    arr = np.asarray(arr)  # Convert to numpy array if needed
-    if arr.ndim == 1:
-        values = ', '.join([f"{x:+.{precision}f}" for x in arr])
-        return f"[{values}]"
-    elif arr.ndim == 2:
-        lines = []
-        for row in arr:
-            values = '  '.join([f"{x:+.{precision}f}" for x in row])
-            lines.append(f"  [{values}]")
-        return "[\n" + "\n".join(lines) + "\n]"
-    else:
-        return str(arr)
-
 
 def random_q(model, rng, scale=0.5):
     """Generate random joint configuration within limits."""
@@ -150,9 +129,9 @@ def compute_fk_ik_jacobian(
     if verbose:
         print_separator("Step 1: Forward Kinematics (FK)")
         print(f"\nInput Joint Angles (radians):")
-        print(f"  q = {format_array(joint_angles)}")
+        print(f"  q = {beauty_print_array(joint_angles)}")
         print(f"\nInput Joint Angles (degrees):")
-        print(f"  q = {format_array(np.rad2deg(joint_angles))}")
+        print(f"  q = {beauty_print_array(np.rad2deg(joint_angles))}")
     
     T_fk = forward_kinematics(robot_model, joint_angles, backend='numpy', return_end=True)
     
@@ -176,21 +155,21 @@ def compute_fk_ik_jacobian(
     
     if verbose:
         print(f"\nEnd-Effector Position (m):")
-        print(f"  p = {format_array(position_fk)}")
+        print(f"  p = {beauty_print_array(position_fk)}")
         print(f"\nEnd-Effector Orientation (Euler XYZ, radians):")
-        print(f"  rpy = {format_array(euler_fk)}")
+        print(f"  rpy = {beauty_print_array(euler_fk)}")
         print(f"\nEnd-Effector Orientation (Euler XYZ, degrees):")
-        print(f"  rpy = {format_array(np.rad2deg(euler_fk))}")
+        print(f"  rpy = {beauty_print_array(np.rad2deg(euler_fk))}")
         print(f"\nEnd-Effector Orientation (Quaternion xyzw):")
-        print(f"  quat = {format_array(quat_fk, precision=6)}")
+        print(f"  quat = {beauty_print_array(quat_fk, precision=6)}")
         # Add note about quaternion sign ambiguity
         quat_neg = -quat_fk
         print(f"  Note: q and -q represent the same rotation")
-        print(f"  -quat = {format_array(quat_neg, precision=6)} (equivalent)")
+        print(f"  -quat = {beauty_print_array(quat_neg, precision=6)} (equivalent)")
         print(f"\nRotation Matrix:")
-        print(format_array(rotation_fk, precision=6))
+        print(beauty_print_array(rotation_fk, precision=6))
         print(f"\nHomogeneous Transformation Matrix:")
-        print(format_array(T_fk, precision=6))
+        print(beauty_print_array(T_fk, precision=6))
     
     # ========================================
     # 2. Inverse Kinematics (DLS)
@@ -198,9 +177,9 @@ def compute_fk_ik_jacobian(
     if verbose:
         print_separator("Step 2: Inverse Kinematics (IK) - DLS Solver")
         print(f"\nTarget Pose (from FK):")
-        print(f"  Position: {format_array(position_fk)}")
-        print(f"  Euler XYZ: {format_array(euler_fk)} rad")
-        print(f"  Quaternion xyzw: {format_array(quat_fk, precision=6)}")
+        print(f"  Position: {beauty_print_array(position_fk)}")
+        print(f"  Euler XYZ: {beauty_print_array(euler_fk)} rad")
+        print(f"  Quaternion xyzw: {beauty_print_array(quat_fk, precision=6)}")
     
     # Use a random initial guess
     rng = np.random.default_rng(42)
@@ -208,7 +187,7 @@ def compute_fk_ik_jacobian(
     
     if verbose:
         print(f"\nInitial Guess (radians):")
-        print(f"  q_init = {format_array(q_init)}")
+        print(f"  q_init = {beauty_print_array(q_init)}")
     
     # Solve IK using DLS method
     ik_result = inverse_kinematics(
@@ -231,14 +210,14 @@ def compute_fk_ik_jacobian(
         print(f"  Position Error: {ik_result['pos_err']:.6e} m")
         print(f"  Orientation Error: {ik_result['ori_err']:.6e} rad")
         print(f"\nSolved Joint Angles (radians):")
-        print(f"  q_ik = {format_array(ik_result['q'])}")
+        print(f"  q_ik = {beauty_print_array(ik_result['q'])}")
         print(f"\nSolved Joint Angles (degrees):")
-        print(f"  q_ik = {format_array(np.rad2deg(ik_result['q']))}")
+        print(f"  q_ik = {beauty_print_array(np.rad2deg(ik_result['q']))}")
         
         # Compare with original joint angles
         q_diff = joint_angles - ik_result['q']
         print(f"\nJoint Angle Difference (original - solved, radians):")
-        print(f"  Δq = {format_array(q_diff)}")
+        print(f"  Δq = {beauty_print_array(q_diff)}")
         print(f"  ||Δq|| = {np.linalg.norm(q_diff):.6e} rad")
     
     # Verify IK solution with FK
@@ -273,7 +252,7 @@ def compute_fk_ik_jacobian(
     if verbose:
         print_separator("Step 3: Jacobian Matrix (Analytical, NumPy)")
         print(f"\nComputing Jacobian at joint angles:")
-        print(f"  q = {format_array(joint_angles)}")
+        print(f"  q = {beauty_print_array(joint_angles)}")
     
     J = jacobian(robot_model, joint_angles, backend='numpy', method='analytic')
     
@@ -286,7 +265,7 @@ def compute_fk_ik_jacobian(
     
     if verbose:
         print(f"\nJacobian Matrix (6 × {robot_model.dof()}):")
-        print(format_array(J, precision=6))
+        print(beauty_print_array(J, precision=6))
         print(f"\nJacobian Properties:")
         print(f"  Shape: {J.shape}")
         print(f"  Rank: {results['jacobian']['rank']}")
@@ -295,7 +274,7 @@ def compute_fk_ik_jacobian(
         # Compute singular values
         U, s, Vt = np.linalg.svd(J)
         print(f"\nSingular Values:")
-        print(f"  σ = {format_array(s)}")
+        print(f"  σ = {beauty_print_array(s)}")
         print(f"  σ_min / σ_max = {s[-1] / s[0]:.6e}")
         
         # Check manipulability
@@ -309,7 +288,7 @@ def compute_fk_ik_jacobian(
     if ik_result['success'] and verbose:
         print_separator("Step 4: Jacobian at IK Solution")
         print(f"\nComputing Jacobian at IK solved joints:")
-        print(f"  q_ik = {format_array(ik_result['q'])}")
+        print(f"  q_ik = {beauty_print_array(ik_result['q'])}")
         
         J_ik = jacobian(robot_model, ik_result['q'], backend='numpy', method='analytic')
         
@@ -320,7 +299,7 @@ def compute_fk_ik_jacobian(
         }
         
         print(f"\nJacobian Matrix at IK Solution:")
-        print(format_array(J_ik, precision=6))
+        print(beauty_print_array(J_ik, precision=6))
         print(f"\nJacobian Properties:")
         print(f"  Rank: {results['jacobian_ik']['rank']}")
         print(f"  Condition Number: {results['jacobian_ik']['condition_number']:.6e}")
@@ -385,9 +364,9 @@ def main(args):
     if not args.quiet:
         print_separator("Summary")
         print(f"\n✓ Forward Kinematics computed successfully")
-        print(f"  Position: {format_array(results['fk']['position'], 3)} m")
-        print(f"  Orientation: {format_array(np.rad2deg(results['fk']['euler_xyz']), 3)} deg")
-        print(f"  Quaternion (xyzw): {format_array(results['fk']['quaternion_xyzw'], 6)}")
+        print(f"  Position: {beauty_print_array(results['fk']['position'], 3)} m")
+        print(f"  Orientation: {beauty_print_array(np.rad2deg(results['fk']['euler_xyz']), 3)} deg")
+        print(f"  Quaternion (xyzw): {beauty_print_array(results['fk']['quaternion_xyzw'], 6)}")
         
         print(f"\n✓ Inverse Kinematics (DLS) {'succeeded' if results['ik']['success'] else 'failed'}")
         if results['ik']['success']:
@@ -432,15 +411,15 @@ if __name__ == '__main__':
     robot_group.add_argument(
         '--urdf',
         type=str,
-        # default='robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf',
-        default='robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf',
+        default='robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf',
+        # default='robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf',
         help='Path to URDF file'
     )
     robot_group.add_argument(
         '--end-link',
         type=str,
-        # default='tool0',
-        default="left_arm_gripper_left_finger",
+        default='tool0',
+        # default="left_arm_gripper_left_finger",
         help='End-effector link name (default: tool0)'
     )
     
@@ -504,7 +483,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     # Handle configuration if specified
-    if args.config and CONFIG_AVAILABLE:
+    if args.config:
         print(f"✓ Loading configuration from: {args.config}")
         config_manager = ConfigManager(args.config)
         
@@ -531,7 +510,7 @@ if __name__ == '__main__':
             args.seed = config_manager.cfg.seed
         
         print()
-    elif args.config and not CONFIG_AVAILABLE:
+    elif args.config:
         print("⚠️  OmegaConf not available. Install with: pip install omegaconf")
         print("    Falling back to command-line arguments.\n")
 

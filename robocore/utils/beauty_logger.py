@@ -197,4 +197,65 @@ def beauty_print_matrix(name: str, data: Any, precision: int = 4, max_batch_item
         print(pad + f"{name} shape={getattr(arr, 'shape', '?')}")
 
 
-__all__ = ["BeautyLogger", "beauty_print", "beauty_print_matrix"]
+def beauty_print_array(arr: Any, precision: int = 5, sign: bool = True) -> str:
+    """Return a formatted string for 1D / 2D numeric arrays (numpy / torch / list).
+
+    Behavior:
+    - Scalars -> formatted with specified precision
+    - 1D -> [ +0.12345, -0.12345, ... ]
+    - 2D -> multi-line matrix style
+    - Other shapes -> falls back to str(arr)
+
+    :param arr: input data
+    :param precision: decimal places
+    :param sign: whether to always show sign
+    :return: string
+    """
+    try:
+        import numpy as _np  # type: ignore
+    except Exception:  # pragma: no cover
+        _np = None  # type: ignore
+    try:
+        import torch as _torch  # type: ignore
+    except Exception:  # pragma: no cover
+        _torch = None  # type: ignore
+
+    # Normalize to numpy array when possible
+    if _torch is not None and isinstance(arr, _torch.Tensor):
+        arr = arr.detach().cpu().numpy()
+    elif _np is not None:
+        if not isinstance(arr, (int, float)) and not isinstance(arr, str):
+            if not isinstance(arr, _np.ndarray):
+                try:
+                    arr = _np.array(arr)
+                except Exception:
+                    pass
+
+    # Scalars
+    if isinstance(arr, (int, float)):
+        fmt = f"%{'+' if sign else ''}.{precision}f"
+        return fmt % float(arr)
+
+    if _np is None or not hasattr(arr, 'ndim'):
+        return str(arr)
+
+    if arr.ndim == 0:
+        fmt = f"%{'+' if sign else ''}.{precision}f"
+        return fmt % float(arr)
+
+    number_fmt = f"{{:{'+' if sign else ''}.{precision}f}}"
+
+    if arr.ndim == 1:
+        values = ', '.join(number_fmt.format(float(x)) for x in arr)
+        return f"[{values}]"
+    elif arr.ndim == 2:
+        lines = []
+        for row in arr:
+            row_str = '  '.join(number_fmt.format(float(x)) for x in row)
+            lines.append(f"  [{row_str}]")
+        return "[\n" + "\n".join(lines) + "\n]"
+    else:
+        return str(arr)
+
+
+__all__ = ["BeautyLogger", "beauty_print", "beauty_print_matrix", "beauty_print_array"]
