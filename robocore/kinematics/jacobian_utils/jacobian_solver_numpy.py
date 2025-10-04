@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 import math
 from robocore.transform import rotation_error
+from robocore.utils.backend import set_backend, get_backend
 
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
@@ -49,12 +50,19 @@ class JacobianSolverNumPy:
         :param use_central_diff: use central difference if True (numeric only).
         :return: 6×n Jacobian matrix (top 3 rows: linear, bottom 3 rows: angular).
         """
-        if method == "analytic":
-            return self._solve_analytic(q)
-        elif method == "numeric":
-            return self._solve_numeric(q, epsilon, use_central_diff)
-        else:
-            raise ValueError(f"Unknown method '{method}', expected 'analytic' or 'numeric'")
+        # Ensure NumPy backend
+        prev_backend = get_backend()
+        set_backend('numpy')
+
+        try:
+            if method == "analytic":
+                return self._solve_analytic(q)
+            elif method == "numeric":
+                return self._solve_numeric(q, epsilon, use_central_diff)
+            else:
+                raise ValueError(f"Unknown method '{method}', expected 'analytic' or 'numeric'")
+        finally:
+            set_backend(prev_backend)
     
     def _solve_analytic(self, q: np.ndarray) -> np.ndarray:
         """Compute analytic (geometric) Jacobian.

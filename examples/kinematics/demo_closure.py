@@ -56,7 +56,7 @@ def pose_to_str(T):
 def main():
     random.seed(42)
     base = Path(__file__).resolve().parents[1]
-    urdf = os.path.join(base, "robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
+    urdf = os.path.join(base, "../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
     model = RobotModel(str(urdf), end_link="tool0")
 
     # 目标姿态

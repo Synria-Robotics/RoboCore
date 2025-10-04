@@ -27,6 +27,7 @@ Usage:
     python demo_mujoco_trajectory.py --robot bessica --arm left --export video.mp4
 """
 
+import os
 import numpy as np
 import argparse
 from pathlib import Path
@@ -253,11 +254,10 @@ def main():
     # Load robot model
     print(f"\nLoading robot model...")
     if args.robot == 'alicia':
-        urdf_path = Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot' / 'urdf' / 'Alicia-D_v5_4' / 'alicia_duo_with_gripper.urdf'
+        urdf_path = os.path.join(Path(__file__).parent.parent, '../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
         dof = 6
-    else:
-        urdf_path = Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot' / \
-            'urdf' / 'Bessica-D_v1_0' / 'Bessica-D_Covered.urdf'
+    else:  # bessica
+        urdf_path = os.path.join(Path(__file__).parent.parent, '../robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
         dof = 7
     
     model = RobotModel(str(urdf_path))
@@ -281,7 +281,7 @@ def main():
         # Try to use URDF directly
         mjcf_path = urdf_path
     
-    print(f"✓ Using model file: {mjcf_path.name}")
+    print(f"✓ Using model file: {mjcf_path}")
     
     # Step 1: Analyze workspace
     workspace_data = analyze_workspace_quick(model, num_samples=args.samples)

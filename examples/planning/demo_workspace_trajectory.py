@@ -14,6 +14,7 @@ Usage:
     python demo_workspace_trajectory.py --robot bessica --arm left --samples 10000 --visualize
 """
 
+import os
 import numpy as np
 import argparse
 from pathlib import Path
@@ -485,13 +486,14 @@ def main():
     print("="*70)
     
     # 加载机器人
-    print(f"\n加载机器人模型...")
+    print("Loading robot model...")
     if args.robot == 'alicia':
-        urdf_path = Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot' / 'urdf' / 'Alicia-D_v5_4' / 'alicia_duo_with_gripper.urdf'
+        urdf_path = os.path.join(Path(__file__).parent.parent,
+                                 '../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
         dof = 6
-    else:
-        urdf_path = Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot' / \
-            'urdf' / 'Bessica-D_v1_0' / 'Bessica-D_Covered.urdf'
+    else:  # bessica
+        urdf_path = os.path.join(Path(__file__).parent.parent,
+                                 '../robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
         dof = 7
     
     model = RobotModel(str(urdf_path))

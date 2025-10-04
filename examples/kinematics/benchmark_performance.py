@@ -25,7 +25,7 @@ def benchmark_fk(model, q, backend, n_runs=1000, device=None):
 
 def main(args):
     base = Path(__file__).resolve().parents[1]
-    urdf = os.path.join(base, "robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
+    urdf = os.path.join(base, "../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
     model = RobotModel(str(urdf), end_link="tool0")
     q = [0.1, 0.2, -0.3, 0.0, 0.5, -0.2, 0.0][:model.dof()]
     

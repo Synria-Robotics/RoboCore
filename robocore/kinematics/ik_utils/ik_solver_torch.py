@@ -32,8 +32,9 @@ except Exception:  # pragma: no cover
 
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
-
-Tensor = torch.Tensor
+    from torch import Tensor
+else:
+    Tensor = torch.Tensor
 
 
 class IKSolverTorch:
@@ -525,15 +526,19 @@ class IKSolverTorch:
         success = torch.zeros(B, dtype=torch.bool, device=self.device)
         iters = torch.zeros(B, dtype=torch.int32, device=self.device)
         active = torch.ones(B, dtype=torch.bool, device=self.device)
+        # Plateau & error tracking
+        prev_err_norm = torch.full((B,), float('inf'), dtype=self.dtype, device=self.device)
+        plateau_counter = torch.zeros(B, dtype=torch.int32, device=self.device)
 
         # Targets
         p_target = target_poses_batch[:, :3, 3]
         R_target = target_poses_batch[:, :3, :3]
 
-        # Damping selection
+        # Base damping (will be adapted per-sample)
         if damping is None:
-            damping = math.sqrt(self.min_damping * self.max_damping)
-        lam = float(damping)
+            base_lam = math.sqrt(self.min_damping * self.max_damping)
+        else:
+            base_lam = float(damping)
 
         eye6 = torch.eye(6, device=self.device, dtype=self.dtype).unsqueeze(0)  # [1,6,6]
 
@@ -548,71 +553,158 @@ class IKSolverTorch:
             # FK cache (vectorized)
             p_end, R_end, p_joint, z_axis = self._batch_fk_cache(q_act)
 
-            # Errors
+            # Errors (position in world frame, orientation axis-angle in end-effector frame)
             p_err = p_target[act_idx] - p_end  # [Ba,3]
-            R_err_vec = self._batch_rotation_error(R_target[act_idx], R_end)  # [Ba,3]
+            # match single-mode: rotation_error(R_cur, R_target)
+            R_err_vec = self._batch_rotation_error(R_end, R_target[act_idx])  # [Ba,3]  (cur, target)
 
             # Weighted error vector e: [Ba,6]
-            e = torch.cat([pos_weight * p_err, ori_weight * R_err_vec], dim=1)
+            # Dynamic orientation weight scaling per sample (replicate single-mode heuristic)
+            ori_norms = torch.linalg.norm(R_err_vec, dim=1)
+            # thresholds: >1.0 ->0.3, >0.7->0.5, >0.4->0.8 else 1.0
+            ori_scale = torch.ones_like(ori_norms)
+            ori_scale = torch.where(ori_norms > 1.0, torch.full_like(ori_scale, 0.3), ori_scale)
+            ori_scale = torch.where((ori_norms <= 1.0) & (ori_norms > 0.7), torch.full_like(ori_scale, 0.5), ori_scale)
+            ori_scale = torch.where((ori_norms <= 0.7) & (ori_norms > 0.4), torch.full_like(ori_scale, 0.8), ori_scale)
+            ori_weight_dyn = ori_weight * ori_scale  # per-sample
+            e = torch.cat([pos_weight * p_err, (ori_weight_dyn.unsqueeze(1) * R_err_vec)], dim=1)
 
-            # Jacobian build (analytic, vectorized)
+            # Jacobian build (analytic, vectorized) - 构建世界坐标系 Jacobian
             # J_lin[:,j] = z_j x (p_end - p_j); J_ang[:,j] = z_j (revolute)
             Ba = q_act.shape[0]
-            J = torch.zeros(Ba, 6, n, device=self.device, dtype=self.dtype)
+            J_geo = torch.zeros(Ba, 6, n, device=self.device, dtype=self.dtype)
             p_end_exp = p_end.unsqueeze(1)  # [Ba,1,3]
             for js in self.model._actuated:  # type: ignore[attr-defined]
                 j = js.index
                 z = z_axis[:, j, :]  # [Ba,3]
                 p_j = p_joint[:, j, :]  # [Ba,3]
                 if js.joint_type == 'revolute':
-                    J[:, 0:3, j] = torch.cross(z, (p_end_exp[:, 0, :] - p_j), dim=1)
-                    J[:, 3:6, j] = z
+                    J_geo[:, 0:3, j] = torch.cross(z, (p_end_exp[:, 0, :] - p_j), dim=1)
+                    J_geo[:, 3:6, j] = z  # world frame angular
                 elif js.joint_type == 'prismatic':
-                    J[:, 0:3, j] = z
+                    J_geo[:, 0:3, j] = z
                     # angular part zero
                 else:  # fixed
                     pass
+
+            # Transform angular rows into end-effector frame (match single-mode Jacobian convention)
+            # J_ang_body = R_end^T * J_ang_world
+            R_end_T = R_end.transpose(1, 2)  # [Ba,3,3]
+            J = J_geo.clone()
+            J[:, 3:6, :] = torch.bmm(R_end_T, J_geo[:, 3:6, :])  # [Ba,3,n]
+
+            # Apply position & dynamic orientation weights to Jacobian rows
+            if pos_weight != 1.0:
+                J[:, 0:3, :] *= pos_weight
+            # Broadcast ori_weight_dyn per sample
+            J[:, 3:6, :] *= ori_weight_dyn.view(Ba, 1, 1)
 
             # Norms & convergence (pre-update)
             pos_norm = torch.linalg.norm(p_err, dim=1)
             ori_norm = torch.linalg.norm(R_err_vec, dim=1)
             conv_mask = (pos_norm < self.pos_tol) & (ori_norm < self.ori_tol)
+
+            # Error norm for plateau detection (use weighted error vector)
+            err_norm_act = torch.linalg.norm(e.view(e.shape[0], -1), dim=1)
+            act_idx_full = act_idx  # preserve current mapping
+            # Update plateau counters for all active samples BEFORE removing converged ones
+            delta = prev_err_norm[act_idx_full] - err_norm_act
+            plateau_inc = delta < 1e-8
+            # Reset where improvement
+            plateau_counter[act_idx_full] = torch.where(
+                plateau_inc,
+                plateau_counter[act_idx_full] + 1,
+                torch.zeros_like(plateau_counter[act_idx_full])
+            )
+            prev_err_norm[act_idx_full] = err_norm_act
             if conv_mask.any():
                 g_idx = act_idx[conv_mask]
                 success[g_idx] = True
                 iters[g_idx] = it
                 active[g_idx] = False
 
-            # Remove converged from further computation
+            # Remove converged from further computation (filter current active subset)
             if (~active).all():
                 break
-            # Update set after marking
-            act_idx = torch.where(active)[0]
+            mask_keep = ~conv_mask  # among current active set (before filtering)
+            # Filter tensors to active subset (those not converged in this iteration)
+            J = J[mask_keep]
+            e = e[mask_keep]
+            # Slice auxiliary tensors accordingly
+            p_err_active = p_err[mask_keep]
+            ori_norms_active = ori_norms[mask_keep]
+            ori_weight_dyn_active = ori_weight_dyn[mask_keep]
+            plateau_sub = plateau_counter[act_idx_full[mask_keep]]
+
+            # IMPORTANT: q_sub should be taken BEFORE updating act_idx!
+            q_sub = q[act_idx_full[mask_keep]]
+
+            # Now update act_idx to point to still-active samples globally
+            act_idx = act_idx_full[mask_keep]
             if act_idx.numel() == 0:
                 break
 
-            # Filter tensors to active subset again (avoid updating converged rows)
-            mask_keep = ~conv_mask
-            J = J[mask_keep]
-            e = e[mask_keep]
-            q_sub = q[act_idx]
+            # Adaptive damping per-sample using batch SVD (much faster on GPU)
+            try:
+                # torch.linalg.svd on [Ba,6,n] -> U:[Ba,6,6], S:[Ba,6], Vh:[Ba,n,n] (full=False) when n>=6
+                # If n < 6, shape adjusts; we only need singular values.
+                S_all = torch.linalg.svdvals(J)  # [Ba', min(6,n)]
+                s_max = S_all[:, 0]
+                s_min = S_all[:, -1].clamp(min=1e-12)
+                conds = s_max / s_min
+            except RuntimeError:
+                # Fallback: approximate using Fro norm ratio (cheap)
+                # cond ≈ ||J||_F * ||pseudo-inverse||_F (approx). Here we simplify to scale by row norms.
+                fro = torch.linalg.norm(J, dim=(1, 2))
+                # Use min singular proxy ≈ fro / (sqrt(6)*max_col_norm) -> coarse
+                col_norms = torch.linalg.norm(J, dim=1)  # [Ba', n]
+                max_col = col_norms.max(dim=1).values.clamp(min=1e-6)
+                approx_s_min = fro / (math.sqrt(6.0)*max_col)
+                conds = fro / approx_s_min.clamp(min=1e-12)
+            pos_norm_sub = torch.linalg.norm(p_err_active, dim=1)
+            ori_norm_sub = ori_norms_active
+            err_combo = pos_norm_sub + 0.5 * ori_norm_sub
+            lam_vec = torch.full_like(conds, base_lam)
+            high_mask = (conds > 200) | (err_combo > 5e-2)
+            low_mask = (conds < 30) & (err_combo < 1e-2)
+            lam_vec[high_mask] = self.max_damping
+            lam_vec[low_mask] = self.min_damping
 
-            # DLS solve: dq = J^T (J J^T + lam^2 I)^-1 e
+            # Plateau-based damping escalation
+            lam_vec = torch.where(plateau_sub >= 4, torch.clamp(lam_vec * 2.0, max=self.max_damping*2), lam_vec)
+            lam_vec = torch.where(plateau_sub >= 8, torch.clamp(lam_vec * 1.5, max=self.max_damping*4), lam_vec)
+
+            # DLS solve: per-sample damping
             JJt = torch.bmm(J, J.transpose(1, 2))  # [Ba',6,6]
-            JJt_damped = JJt + (lam ** 2) * eye6
+            lam_sq = (lam_vec ** 2).view(-1, 1, 1)
+            JJt_damped = JJt + lam_sq * eye6
             try:
                 y = torch.linalg.solve(JJt_damped, e.unsqueeze(2)).squeeze(2)  # [Ba',6]
             except RuntimeError:
-                # fallback per-sample pinv
+                # fallback per-sample solve
                 y = torch.zeros_like(e)
                 for k in range(J.shape[0]):
                     try:
                         y[k] = torch.linalg.solve(JJt_damped[k], e[k])
                     except RuntimeError:
-                        # pinv fallback
                         Jk = J[k]
-                        y[k] = (Jk @ Jk.transpose(0,1) + (lam**2)*torch.eye(6,device=self.device,dtype=self.dtype)).pinverse() @ e[k]
+                        alt = (Jk @ Jk.transpose(0, 1) + (lam_vec[k]**2)*torch.eye(6,
+                               device=self.device, dtype=self.dtype)).pinverse() @ e[k]
+                        y[k] = alt
             dq = torch.bmm(J.transpose(1, 2), y.unsqueeze(2)).squeeze(2)  # [Ba',n]
+
+            # Adaptive step (vectorized similar to single-mode)
+            norm_pos = pos_norm_sub / 0.01
+            norm_ori = ori_norm_sub / 0.087
+            m = torch.maximum(norm_pos, norm_ori)
+            step = torch.full_like(m, self.base_step)
+            step = torch.where(m > 2.0, self.base_step * 0.6, step)
+            step = torch.where((m <= 2.0) & (m > 1.0), self.base_step * 1.0, step)
+            step = torch.where((m <= 1.0) & (m > 0.5), self.base_step * 1.2, step)
+            step = torch.where(m <= 0.5, self.base_step * 0.6, step)
+            # Plateau slowdown
+            step = torch.where(plateau_sub >= 8, step * 0.5, step)
+            dq = dq * step.unsqueeze(1)
 
             # Step norm clipping
             dq_norm = torch.linalg.norm(dq, dim=1, keepdim=True)
@@ -640,7 +732,7 @@ class IKSolverTorch:
         # Final errors (for reporting)
         p_end_all, R_end_all, _, _ = self._batch_fk_cache(q)
         p_err_final = torch.linalg.norm(p_target - p_end_all, dim=1)
-        ori_err_final = torch.linalg.norm(self._batch_rotation_error(R_target, R_end_all), dim=1)
+        ori_err_final = torch.linalg.norm(self._batch_rotation_error(R_end_all, R_target), dim=1)
 
         if verbose:
             sr = success.float().mean().item() * 100.0
@@ -671,85 +763,118 @@ class IKSolverTorch:
         p_joint = torch.zeros(B, self.n, 3, device=device, dtype=dtype)
         z_axis = torch.zeros(B, self.n, 3, device=device, dtype=dtype)
 
-        # Running transform (R, t) per sample
-        R_batch = torch.eye(3, device=device, dtype=dtype).unsqueeze(0).repeat(B,1,1)  # [B,3,3]
-        t_batch = torch.zeros(B,3, device=device, dtype=dtype)  # [B,3]
+        # Running transform T_parent = [R|t; 0|1] per sample (track as R, t separately)
+        R_parent = torch.eye(3, device=device, dtype=dtype).unsqueeze(0).repeat(B, 1, 1)  # [B,3,3]
+        t_parent = torch.zeros(B, 3, device=device, dtype=dtype)  # [B,3]
 
-        for js in self.model._actuated:  # type: ignore[attr-defined]
-            j = js.index
-            # Origin rotation & translation
-            # Joint origin fixed RPY -> construct pure torch batch rotation (avoid backend numpy)
-            rpy_vals = js.origin_rpy  # (roll, pitch, yaw) ZYX convention in codebase
+        # Build q_map for joint values (map joint name -> [B] tensor of values)
+        q_map = {js.name: q_batch[:, js.index] for js in self.model._actuated}  # type: ignore[attr-defined]
+
+        # CRITICAL: iterate over full chain (including fixed joints) like single-mode does
+        for urdf_joint in self.model._chain_joints:  # type: ignore[attr-defined]
+            # Origin rotation & translation (fixed per joint, broadcast to batch)
+            rpy_vals = urdf_joint.origin_rpy  # (roll, pitch, yaw)
             r = torch.full((B,), float(rpy_vals[0]), device=device, dtype=dtype)
             p = torch.full((B,), float(rpy_vals[1]), device=device, dtype=dtype)
             y = torch.full((B,), float(rpy_vals[2]), device=device, dtype=dtype)
             cr, sr = torch.cos(r), torch.sin(r)
             cp, sp = torch.cos(p), torch.sin(p)
             cy, sy = torch.cos(y), torch.sin(y)
-            # R = Rz(yaw) @ Ry(pitch) @ Rx(roll)
-            R_o = torch.zeros(B,3,3, device=device, dtype=dtype)
-            R_o[:,0,0] = cy*cp
-            R_o[:,0,1] = cy*sp*sr - sy*cr
-            R_o[:,0,2] = cy*sp*cr + sy*sr
-            R_o[:,1,0] = sy*cp
-            R_o[:,1,1] = sy*sp*sr + cy*cr
-            R_o[:,1,2] = sy*sp*cr - cy*sr
-            R_o[:,2,0] = -sp
-            R_o[:,2,1] = cp*sr
-            R_o[:,2,2] = cp*cr
-            t_o = torch.tensor(js.origin_xyz, device=device, dtype=dtype).unsqueeze(0).expand(B,3)  # [B,3]
+            # R = Rz(yaw) @ Ry(pitch) @ Rx(roll) (ZYX Euler)
+            R_origin = torch.zeros(B, 3, 3, device=device, dtype=dtype)
+            R_origin[:, 0, 0] = cy*cp
+            R_origin[:, 0, 1] = cy*sp*sr - sy*cr
+            R_origin[:, 0, 2] = cy*sp*cr + sy*sr
+            R_origin[:, 1, 0] = sy*cp
+            R_origin[:, 1, 1] = sy*sp*sr + cy*cr
+            R_origin[:, 1, 2] = sy*sp*cr - cy*sr
+            R_origin[:, 2, 0] = -sp
+            R_origin[:, 2, 1] = cp*sr
+            R_origin[:, 2, 2] = cp*cr
+            t_origin = torch.tensor(urdf_joint.origin_xyz, device=device,
+                                    dtype=dtype).unsqueeze(0).expand(B, 3)  # [B,3]
 
-            # World pose of joint origin
-            R_pre = torch.bmm(R_batch, R_o)            # [B,3,3]
-            p_origin = t_batch + torch.bmm(R_batch, t_o.unsqueeze(2)).squeeze(2)  # [B,3]
+            # T_joint_origin = T_parent @ T_origin
+            R_joint_origin = torch.bmm(R_parent, R_origin)  # [B,3,3]
+            t_joint_origin = t_parent + torch.bmm(R_parent, t_origin.unsqueeze(2)).squeeze(2)  # [B,3]
 
-            # Joint axis (local after origin) expressed in world
-            axis_local = torch.tensor(js.axis, device=device, dtype=dtype).unsqueeze(0).repeat(B,1)  # [B,3]
-            z_world = torch.bmm(R_pre, axis_local.unsqueeze(2)).squeeze(2)  # [B,3]
+            # For actuated joints: cache axis and origin position
+            if urdf_joint.joint_type in ("revolute", "prismatic"):
+                # Find corresponding JointSpec to get index
+                js = next((j for j in self.model._actuated if j.name ==
+                          urdf_joint.name), None)  # type: ignore[attr-defined]
+                if js is not None:
+                    j = js.index
+                    # Axis in world frame
+                    axis_local = torch.tensor(urdf_joint.axis, device=device,
+                                              dtype=dtype).unsqueeze(0).repeat(B, 1)  # [B,3]
+                    # Normalize axis
+                    axis_norm = torch.linalg.norm(axis_local, dim=1, keepdim=True).clamp(min=1e-10)
+                    axis_local = axis_local / axis_norm
+                    z_world = torch.bmm(R_joint_origin, axis_local.unsqueeze(2)).squeeze(2)  # [B,3]
 
-            # Cache before motion
-            p_joint[:, j, :] = p_origin
-            z_axis[:, j, :] = z_world
+                    # Cache position and axis
+                    p_joint[:, j, :] = t_joint_origin
+                    z_axis[:, j, :] = z_world
 
-            # Motion transform
-            if js.joint_type == 'revolute':
-                theta = q_batch[:, j]
-                # Rodrigues around axis_local in local frame then map: R_total = R_pre * R_motion_local? Actually R_pre already includes origin rotation, so:
-                # Build local rotation then world: R_batch = R_pre @ R_motion_local
-                k = axis_local / (axis_local.norm(dim=1, keepdim=True) + 1e-12)
+            # Motion transform (depends on joint type and value)
+            R_motion = torch.eye(3, device=device, dtype=dtype).unsqueeze(0).repeat(B, 1, 1)  # [B,3,3]
+            t_motion = torch.zeros(B, 3, device=device, dtype=dtype)  # [B,3]
+
+            if urdf_joint.joint_type == "revolute":
+                # Get joint value (theta) from q_map
+                theta = q_map.get(urdf_joint.name, torch.zeros(B, device=device, dtype=dtype))
+                # Rodrigues rotation around axis
+                axis_local = torch.tensor(urdf_joint.axis, device=device, dtype=dtype).unsqueeze(0).repeat(B, 1)
+                axis_norm = torch.linalg.norm(axis_local, dim=1, keepdim=True).clamp(min=1e-10)
+                k = axis_local / axis_norm
+                # Skew-symmetric matrix K
                 K = torch.zeros(B,3,3, device=device, dtype=dtype)
-                K[:,0,1] = -k[:,2]; K[:,0,2] = k[:,1]; K[:,1,0] = k[:,2]; K[:,1,2] = -k[:,0]; K[:,2,0] = -k[:,1]; K[:,2,1] = k[:,0]
+                K[:, 0, 1] = -k[:, 2]
+                K[:, 0, 2] = k[:, 1]
+                K[:, 1, 0] = k[:, 2]
+                K[:, 1, 2] = -k[:, 0]
+                K[:, 2, 0] = -k[:, 1]
+                K[:, 2, 1] = k[:, 0]
                 K2 = torch.bmm(K, K)
                 sin_t = torch.sin(theta).view(B,1,1)
                 cos_t = torch.cos(theta).view(B,1,1)
                 I = torch.eye(3, device=device, dtype=dtype).unsqueeze(0)
-                R_m = I + sin_t * K + (1 - cos_t) * K2  # [B,3,3]
-                R_batch = torch.bmm(R_pre, R_m)
-                t_batch = p_origin
-            elif js.joint_type == 'prismatic':
-                dval = q_batch[:, j].unsqueeze(1)  # [B,1]
-                t_batch = p_origin + z_world * dval  # move along axis
-                R_batch = R_pre
-            else:  # fixed
-                R_batch = R_pre
-                t_batch = p_origin
+                R_motion = I + sin_t * K + (1 - cos_t) * K2  # [B,3,3]
+            elif urdf_joint.joint_type == "prismatic":
+                # Get joint value (d) from q_map
+                d = q_map.get(urdf_joint.name, torch.zeros(B, device=device, dtype=dtype))
+                # Translation along axis
+                axis_local = torch.tensor(urdf_joint.axis, device=device, dtype=dtype).unsqueeze(0).repeat(B, 1)
+                axis_norm = torch.linalg.norm(axis_local, dim=1, keepdim=True).clamp(min=1e-10)
+                axis_local = axis_local / axis_norm
+                t_motion = axis_local * d.unsqueeze(1)  # [B,3]
+            # else: fixed joint, motion is identity
 
-        p_end = t_batch
-        R_end = R_batch
+            # T_child = T_joint_origin @ T_motion
+            R_child = torch.bmm(R_joint_origin, R_motion)  # [B,3,3]
+            t_child = t_joint_origin + torch.bmm(R_joint_origin, t_motion.unsqueeze(2)).squeeze(2)  # [B,3]
+
+            # Update parent for next iteration
+            R_parent = R_child
+            t_parent = t_child
+
+        p_end = t_parent
+        R_end = R_parent
         return p_end, R_end, p_joint, z_axis
     
     @staticmethod
-    def _batch_rotation_error(R_target: Tensor, R_current: Tensor) -> Tensor:
+    def _batch_rotation_error(R_current: Tensor, R_target: Tensor) -> Tensor:
         """Compute rotation error in angle-axis representation for batch.
         
-        Error = log(R_target @ R_current^T) converted to angle-axis
+        Error = log(R_current^T @ R_target) converted to axis-angle (match single-sample rotation_error)
         
-        :param R_target: [B, 3, 3] target rotation matrices
         :param R_current: [B, 3, 3] current rotation matrices
+        :param R_target: [B, 3, 3] target rotation matrices
         :return: [B, 3] rotation error vectors
         """
-        # R_error = R_target @ R_current^T
-        R_error = torch.bmm(R_target, R_current.transpose(1, 2))
+        # R_error = R_current^T @ R_target
+        R_error = torch.bmm(R_current.transpose(1, 2), R_target)
         
         # Convert to angle-axis
         return IKSolverTorch._batch_rotation_matrix_to_axis_angle(R_error)

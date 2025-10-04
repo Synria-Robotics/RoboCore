@@ -61,7 +61,7 @@ def main(args):
     
     # Load model
     base = Path(__file__).resolve().parents[1]
-    urdf = os.path.join(base, "robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
+    urdf = os.path.join(base, "../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
     model = RobotModel(str(urdf), end_link='tool0')
     
     beauty_print(f"IK Comparison: {model.name} ({model.dof()} DOF)", type="module")
@@ -141,7 +141,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="IK methods comparison")
-    parser.add_argument('--samples', type=int, default=10, help='Number of test samples')
+    parser.add_argument('--samples', type=int, default=100, help='Number of test samples')
     parser.add_argument('--seed', type=int, default=77, help='Random seed')
     parser.add_argument('--methods', nargs='+', default=['pinv', 'dls'],
                         help='IK methods to test (pinv, dls, transpose). Note: transpose is slow')

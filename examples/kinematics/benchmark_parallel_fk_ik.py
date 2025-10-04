@@ -1,318 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Parallel FK / IK Benchmark (NumPy vs PyTorch, TRUE BATCH FK)
-==========================================================
-
-本脚本用于评估：
-1. 前向运动学 (FK) 单次/批量性能：NumPy(循环) vs PyTorch(向量化)
-2. 逆运动学 (IK) 性能：当前 Torch 版本仍使用逐样本循环（TODO: 向量化批 IK）
-
-特性：
-- 真实批量 FK：PyTorch 一次处理全部样本 (B, n)
-- NumPy 基准：逐样本循环（作为 baseline）
-- 可选只跑 FK 或只跑 IK
-- 统计平均耗时 / 吞吐率 和 IK 成功率
-
-已移除：Apple MPS (Metal) 支持，仅保留 cpu / cuda。
-"""
-
-from __future__ import annotations
-
-import argparse
-import time
-from pathlib import Path
-from typing import Dict, List, Any
-import numpy as np
-
-from robocore.modeling.robot_model import RobotModel
-from robocore.kinematics.fk import forward_kinematics
-from robocore.kinematics.ik import inverse_kinematics
-
-_HAS_TORCH = False
-try:  # pragma: no cover
-    import torch
-    from robocore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
-    from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
-    from robocore.transform import matrix_to_quaternion
-    _HAS_TORCH = True
-except Exception:  # noqa: E722
-    torch = None  # type: ignore
-
-
-# ---------------------------- Utility Printing ----------------------------- #
-def print_header(title: str):
-    print("\n" + "=" * 80)
-    print(title.center(80))
-    print("=" * 80)
-
-
-def print_section(title: str):
-    print("\n" + "-" * 80)
-    print(title)
-    print("-" * 80)
-
-
-# ---------------------------- Data Generation ------------------------------ #
-def random_q_batch(model: RobotModel, batch_size: int, seed: int = 42, span_scale: float = 0.5) -> np.ndarray:
-    """生成批量随机关节配置（在各关节限制中间附近采样）。"""
-    rng = np.random.default_rng(seed)
-    n = model.dof()
-    q_batch = np.zeros((batch_size, n), dtype=float)
-    for i in range(batch_size):
-        for js in model._actuated:  # type: ignore[attr-defined]
-            lo, hi = -1.0, 1.0
-            if js.limit:
-                if js.limit[0] is not None:
-                    lo = js.limit[0]
-                if js.limit[1] is not None:
-                    hi = js.limit[1]
-            mid = 0.5 * (lo + hi)
-            span = 0.5 * (hi - lo) * span_scale
-            q_batch[i, js.index] = rng.uniform(mid - span, mid + span)
-    return q_batch
-
-
-# ---------------------------- FK Benchmarks -------------------------------- #
-def benchmark_fk_numpy(model: RobotModel, q_batch: np.ndarray, warmup: int = 5) -> Dict[str, Any]:
-    batch = q_batch.shape[0]
-    # Warmup
-    for i in range(min(warmup, batch)):
-        _ = forward_kinematics(model, q_batch[i], backend='numpy', return_end=True)
-    t0 = time.perf_counter()
-    results = []
-    for i in range(batch):
-        T = forward_kinematics(model, q_batch[i], backend='numpy', return_end=True)
-        results.append(T)
-    dt = time.perf_counter() - t0
-    return {
-        'backend': 'numpy',
-        'batch_size': batch,
-        'total_time': dt,
-        'avg_time': dt / batch,
-        'throughput': batch / dt,
-        'results': results,
-    }
-
-
-def benchmark_fk_torch(model: RobotModel, q_batch: np.ndarray, device: str, warmup: int = 5, dtype='float32') -> Dict[str, Any] | None:
-    if not _HAS_TORCH:
-        return None
-    fk_solver = FKSolverTorch(model)
-    torch_dtype = torch.float32 if dtype == 'float32' else torch.float64
-    q_t = torch.from_numpy(q_batch).to(dtype=torch_dtype)
-    # Warmup (small subset)
-    warm = q_t[:min(warmup, q_t.shape[0])]
-    _ = fk_solver.solve(warm, device=device, dtype=torch_dtype)
-    if device != 'cpu' and device.startswith('cuda'):
-        torch.cuda.synchronize()
-    t0 = time.perf_counter()
-    T_batch = fk_solver.solve(q_t, device=device, dtype=torch_dtype)  # [B,4,4]
-    if device != 'cpu' and device.startswith('cuda'):
-        torch.cuda.synchronize()
-    dt = time.perf_counter() - t0
-    results = [T_batch[i].detach().cpu().numpy() for i in range(T_batch.shape[0])]
-    return {
-        'backend': f'torch_{device}',
-        'batch_size': q_t.shape[0],
-        'total_time': dt,
-        'avg_time': dt / q_t.shape[0],
-        'throughput': q_t.shape[0] / dt,
-        'results': results,
-    }
-
-
-# ---------------------------- IK Benchmarks -------------------------------- #
-def benchmark_ik_numpy(model: RobotModel, poses: List[np.ndarray], q_init_batch: np.ndarray, max_iters: int, warmup: int = 3) -> Dict[str, Any]:
-    B = len(poses)
-    for i in range(min(warmup, B)):
-        _ = inverse_kinematics(model, poses[i], q_init_batch[i], backend='numpy', method='dls', max_iters=max_iters)
-    t0 = time.perf_counter()
-    succ = 0
-    results = []
-    for i in range(B):
-        r = inverse_kinematics(model, poses[i], q_init_batch[i], backend='numpy', method='dls', max_iters=max_iters)
-        results.append(r)
-        succ += 1 if r.get('success') else 0
-    dt = time.perf_counter() - t0
-    return {
-        'backend': 'numpy',
-        'batch_size': B,
-        'total_time': dt,
-        'avg_time': dt / B,
-        'throughput': B / dt,
-        'success_rate': succ / B,
-        'results': results,
-    }
-
-
-def benchmark_ik_torch(model: RobotModel, poses: List[np.ndarray], q_init_batch: np.ndarray, device: str, max_iters: int, warmup: int = 3, dtype='float32') -> Dict[str, Any] | None:
-    if not _HAS_TORCH:
-        return None
-    torch_dtype = torch.float32 if dtype == 'float32' else torch.float64
-    solver = IKSolverTorch(model, max_iters=max_iters, pos_tol=1e-4, ori_tol=1e-4, device=device, dtype=torch_dtype)
-    B = len(poses)
-    # Warmup
-    for i in range(min(warmup, B)):
-        _ = solver.solve(poses[i], q_init_batch[i], method='dls')
-    if device != 'cpu' and device.startswith('cuda'):
-        torch.cuda.synchronize()
-    t0 = time.perf_counter()
-    succ = 0
-    results = []
-    for i in range(B):
-        r = solver.solve(poses[i], q_init_batch[i], method='dls')
-        results.append(r)
-        succ += 1 if r.get('success') else 0
-    if device != 'cpu' and device.startswith('cuda'):
-        torch.cuda.synchronize()
-    dt = time.perf_counter() - t0
-    return {
-        'backend': f'torch_{device}',
-        'batch_size': B,
-        'total_time': dt,
-        'avg_time': dt / B,
-        'throughput': B / dt,
-        'success_rate': succ / B,
-        'results': results,
-    }
-
-
-# ---------------------------- Result Formatting ---------------------------- #
-def print_fk_table(results: Dict[str, Dict[str, Any]]):
-    print_section("Forward Kinematics Performance")
-    print(f"\n{'Backend':<18}{'Batch':>8}{'Total(s)':>12}{'Avg(ms)':>12}{'Throughput':>14}")
-    print('-' * 64)
-    for k, v in results.items():
-        if v is None:
-            continue
-        print(f"{k:<18}{v['batch_size']:>8}{v['total_time']:>12.4f}{v['avg_time']*1e3:>12.3f}{v['throughput']:>14.1f}")
-    if 'numpy' in results and results['numpy']:
-        base = results['numpy']['avg_time']
-        print("\nSpeedup vs NumPy:")
-        for k, v in results.items():
-            if v and k != 'numpy':
-                print(f"  {k:<18}: {base / v['avg_time']:.2f}x")
-
-
-def print_ik_table(results: Dict[str, Dict[str, Any]]):
-    print_section("Inverse Kinematics Performance")
-    print(f"\n{'Backend':<18}{'Batch':>8}{'Total(s)':>12}{'Avg(ms)':>12}{'Throughput':>14}{'Succ(%)':>10}")
-    print('-' * 78)
-    for k, v in results.items():
-        if v is None:
-            continue
-        succ_percent = 100.0 * v.get('success_rate', 0.0)
-        print(f"{k:<18}{v['batch_size']:>8}{v['total_time']:>12.4f}{v['avg_time']*1e3:>12.3f}{v['throughput']:>14.1f}{succ_percent:>10.1f}")
-    if 'numpy' in results and results['numpy']:
-        base = results['numpy']['avg_time']
-        print("\nSpeedup vs NumPy:")
-        for k, v in results.items():
-            if v and k != 'numpy':
-                print(f"  {k:<18}: {base / v['avg_time']:.2f}x")
-
-
-# ---------------------------- Main Flow ------------------------------------ #
-def main(args):
-    # Normalize device
-    if args.device.startswith('cuda') and _HAS_TORCH:
-        if not torch.cuda.is_available():
-            print("⚠️  CUDA 不可用，回退到 CPU")
-            args.device = 'cpu'
-        else:
-            # Expand plain 'cuda' -> 'cuda:0'
-            if args.device == 'cuda':
-                args.device = 'cuda:0'
-    elif args.device != 'cpu':
-        if args.device.startswith('cuda') and not _HAS_TORCH:
-            print("⚠️  未安装 PyTorch，无法使用 CUDA，回退 cpu")
-        args.device = 'cpu'
-
-    print_header("Parallel FK / IK Benchmark")
-    print(f"URDF        : {args.urdf}")
-    print(f"End Link    : {args.end_link}")
-    print(f"Batch Size  : {args.batch_size}")
-    print(f"Warmup      : {args.warmup}")
-    print(f"Max IK Iters: {args.ik_iters}")
-    print(f"Torch Device: {args.device if _HAS_TORCH else 'N/A (torch not installed)'}")
-
-    urdf_path = Path(args.urdf)
-    if not urdf_path.exists():
-        print(f"\n❌ URDF 不存在: {urdf_path}")
-        return
-    model = RobotModel(str(urdf_path), end_link=args.end_link)
-    print(f"\n✓ 模型加载完成: DOF={model.dof()} end_link={model.end_link}")
-
-    # Generate joint samples
-    print("\n🎲 生成随机关节配置...")
-    q_batch = random_q_batch(model, args.batch_size, seed=args.seed)
-    print("✓ 完成")
-
-    fk_results: Dict[str, Dict[str, Any] | None] = {}
-    ik_results: Dict[str, Dict[str, Any] | None] = {}
-
-    # ---------------- FK ----------------
-    if not args.ik_only:
-        print_section("Benchmark FK")
-        print("NumPy FK...")
-        fk_results['numpy'] = benchmark_fk_numpy(model, q_batch, warmup=args.warmup)
-        print(f"  平均 {fk_results['numpy']['avg_time']*1e3:.3f} ms/样本")
-        if not args.numpy_only and _HAS_TORCH:
-            print(f"PyTorch FK ({args.device}) true batch ...")
-            fk_results[f'torch_{args.device}'] = benchmark_fk_torch(model, q_batch, device=args.device, warmup=args.warmup, dtype=args.torch_dtype)
-            if fk_results[f'torch_{args.device}']:
-                print(f"  平均 {fk_results[f'torch_{args.device}']['avg_time']*1e3:.3f} ms/样本")
-        print_fk_table(fk_results)
-
-    # Prepare poses for IK (reuse FK NumPy results for determinism)
-    if not args.fk_only:
-        print_section("Prepare IK Targets")
-        if 'numpy' in fk_results and fk_results['numpy']:
-            poses = fk_results['numpy']['results']
-        else:
-            poses = [forward_kinematics(model, q_batch[i], backend='numpy', return_end=True) for i in range(q_batch.shape[0])]
-        q_init_batch = random_q_batch(model, args.batch_size, seed=args.seed+1)
-        print("✓ 目标与初始解已生成")
-
-        print_section("Benchmark IK")
-        print("NumPy IK (dls)...")
-        ik_results['numpy'] = benchmark_ik_numpy(model, poses, q_init_batch, max_iters=args.ik_iters, warmup=args.warmup)
-        print(f"  平均 {ik_results['numpy']['avg_time']*1e3:.3f} ms/样本, 成功率 {ik_results['numpy']['success_rate']*100:.1f}%")
-        if not args.numpy_only and _HAS_TORCH:
-            print(f"PyTorch IK ({args.device}) dls (逐样本循环, TODO: 向量化)...")
-            ik_results[f'torch_{args.device}'] = benchmark_ik_torch(model, poses, q_init_batch, device=args.device, max_iters=args.ik_iters, warmup=args.warmup, dtype=args.torch_dtype)
-            if ik_results[f'torch_{args.device}']:
-                print(f"  平均 {ik_results[f'torch_{args.device}']['avg_time']*1e3:.3f} ms/样本, 成功率 {ik_results[f'torch_{args.device}']['success_rate']*100:.1f}%")
-        print_ik_table(ik_results)
-
-    print("\n" + "="*80)
-    print("Benchmark 完成")
-    print("="*80 + "\n")
-
-
-def build_arg_parser():
-    p = argparse.ArgumentParser(description='Parallel FK/IK benchmark (NumPy vs PyTorch)')
-    p.add_argument('--urdf', type=str, default='robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf', help='URDF 路径')
-    p.add_argument('--end-link', type=str, default='tool0', help='末端执行器 link 名称')
-    p.add_argument('--batch-size', type=int, default=1000, help='批大小')
-    p.add_argument('--warmup', type=int, default=5, help='预热样本数')
-    p.add_argument('--ik-iters', type=int, default=100, help='IK 最大迭代')
-    p.add_argument('--device', type=str, default='cpu', help='PyTorch 设备 (cpu / cuda / cuda:0 / cuda:1)')
-    p.add_argument('--torch-dtype', type=str, default='float32', choices=['float32', 'float64'], help='Torch dtype')
-    p.add_argument('--seed', type=int, default=42, help='随机种子')
-    p.add_argument('--fk-only', action='store_true', help='仅跑 FK')
-    p.add_argument('--ik-only', action='store_true', help='仅跑 IK')
-    p.add_argument('--numpy-only', action='store_true', help='只跑 NumPy (跳过 Torch)')
-    return p
-
-
-if __name__ == '__main__':
-    args = build_arg_parser().parse_args()
-    main(args)
-
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
 Parallel FK/IK Performance Benchmark: NumPy vs PyTorch (TRUE BATCH)
 ==================================================================
 
@@ -519,65 +207,65 @@ def benchmark_ik_torch(model, poses: List, q_init_batch: np.ndarray,
         return None
     
     batch_size = len(poses)
-    
-    # Convert poses to torch tensor [B, 4, 4]
-    poses_np = [p.cpu().numpy() if isinstance(p, torch.Tensor) else p for p in poses]
-    poses_tensor = torch.stack([torch.from_numpy(p).float() for p in poses_np])
-    
-    # Convert initial guesses to torch
-    q_init_torch = torch.from_numpy(q_init_batch).float()
-    
-    # TODO: Implement batch IK support in IKSolverTorch
-    # For now, use loop (not true batch processing)
-    print(f"  Note: Batch IK not yet implemented in unified solver, using sequential processing...")
-    
-    ik_solver = IKSolverTorch(model, max_iters=max_iters, pos_tol=1e-4, ori_tol=1e-4)
-    
+
+    # Stack poses (list of np.ndarray or Tensor) -> Tensor [B,4,4]
+    poses_tensor = torch.stack([
+        p if isinstance(p, torch.Tensor) else torch.from_numpy(p) for p in poses
+    ])
+    poses_tensor = poses_tensor.to(dtype=torch.float32, device=device)
+
+    q_init_t = torch.from_numpy(q_init_batch).to(dtype=torch.float32, device=device)
+
+    ik_solver = IKSolverTorch(
+        model,
+        max_iters=max_iters,
+        pos_tol=1e-4,
+        ori_tol=1e-4,
+        device=torch.device(device),
+        dtype=torch.float32,
+    )
+
+    # Warmup (subset)
+    warm_B = min(warmup, batch_size)
+    if warm_B > 0:
+        _ = ik_solver.solve(poses_tensor[:warm_B], q_init_t[:warm_B], method='dls')
+        if device != 'cpu' and device.startswith('cuda'):
+            torch.cuda.synchronize()
+
     start_time = time.perf_counter()
-    
-    q_sol_list = []
-    success_list = []
-    iters_list = []
-    
-    for i in range(batch_size):
-        pose = poses_tensor[i].cpu().numpy().tolist()
-        q_init = q_init_torch[i].cpu().numpy().tolist()
-        result = ik_solver.solve(pose, q_init, method='dls')
-        q_sol_list.append(result['q'])
-        success_list.append(result.get('success', False))
-        iters_list.append(result.get('iters', 0))
-    
-    q_sol_batch = torch.tensor(q_sol_list, device=device)
-    success_batch = torch.tensor(success_list, device=device)
-    iters_batch = torch.tensor(iters_list, device=device)
-    
+    batch_res = ik_solver.solve(poses_tensor, q_init_t, method='dls')
     if device != 'cpu' and device.startswith('cuda'):
         torch.cuda.synchronize()
-    
     end_time = time.perf_counter()
-    
+
     total_time = end_time - start_time
     avg_time = total_time / batch_size
-    
-    # Convert results
-    success_count = success_batch.sum().item()
-    results = [
-        {
-            'q': q_sol_batch[i].cpu().numpy(),
-            'success': success_batch[i].item(),
-            'iterations': iters_batch[i].item()
-        }
-        for i in range(batch_size)
-    ]
-    
+
+    q_sol = batch_res['q']  # [B,n]
+    success = batch_res['success']  # [B]
+    iters = batch_res['iterations']  # [B]
+    pos_err = batch_res['pos_err']
+    ori_err = batch_res['ori_err']
+
+    results = []
+    for i in range(batch_size):
+        results.append({
+            'q': q_sol[i].detach().cpu().numpy(),
+            'success': bool(success[i].item()),
+            'iterations': int(iters[i].item()),
+            'pos_err': float(pos_err[i].item()),
+            'ori_err': float(ori_err[i].item()),
+        })
+
+    success_rate = success.float().mean().item()
     return {
         'backend': f'torch_{device}',
         'batch_size': batch_size,
         'total_time': total_time,
         'avg_time': avg_time,
         'throughput': batch_size / total_time,
-        'success_rate': success_count / batch_size,
-        'results': results
+        'success_rate': success_rate,
+        'results': results,
     }
 
 
@@ -806,7 +494,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--device',
         type=str,
-        default='cpu',
+        default='cuda:1',
     help='PyTorch device (cpu/cuda/cuda:0/cuda:1)'
     )
     parser.add_argument(
