@@ -9,6 +9,7 @@ Showcases:
 3. Visualize kinematic tree structure with model.print_tree().
 4. Generate a random joint configuration via unified API.
 5. Compute and compare FK end-effector poses (expected to be close).
+6. Validate that RobotModel.fk/ik/jacobian methods match standalone functions.
 
 Notes:
 - MJCF parser is a minimal subset (single longest serial chain, first hinge/slide joint per body).
@@ -31,11 +32,14 @@ Example::
     # Random configuration comparison
     python examples/modeling/demo_robot_model.py --random --seed 123
 
+    # Validate kinematics methods
+    python examples/modeling/demo_robot_model.py --validate
+
     # Full example
     python examples/modeling/demo_robot_model.py \\
         --urdf robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf \\
         --mjcf robocore/assets/robot/mjcf/Alicia-D_v5_4/alicia_duo_with_gripper.xml \\
-        --show-tree --show-fixed --random --seed 123
+        --show-tree --show-fixed --random --seed 123 --validate
 """
 
 from __future__ import annotations
@@ -46,6 +50,8 @@ from pathlib import Path
 
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.fk import forward_kinematics
+from robocore.kinematics.ik import inverse_kinematics
+from robocore.kinematics.jacobian import jacobian
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 from robocore.utils.path import get_robocore_path
 
@@ -74,6 +80,128 @@ def compare_fk(model_a: RobotModel, model_b: RobotModel, q):
 	print(f"  {pos_err:.6e} m")
 	beauty_print("Orientation difference angle:")
 	print(f"  {angle_err:.6e} rad  ({np.rad2deg(angle_err):.6e} deg)")
+
+
+def validate_kinematics_methods(model: RobotModel, q: np.ndarray):
+	"""Validate that RobotModel methods match standalone kinematics functions.
+
+	:param model: RobotModel instance
+	:param q: Joint configuration to test
+	"""
+	beauty_print("Kinematics Methods Validation", type="module", centered=True)
+	
+	# ===== FK Validation =====
+	beauty_print("1️⃣  Forward Kinematics (FK) Validation", type="info")
+	
+	# Call via RobotModel.fk()
+	fk_model_full = model.fk(q, backend='numpy', return_end=False)
+	fk_model_end = model.fk(q, backend='numpy', return_end=True)
+	
+	# Call via standalone function
+	fk_standalone_full = forward_kinematics(model, q, backend='numpy', return_end=False)
+	fk_standalone_end = forward_kinematics(model, q, backend='numpy', return_end=True)
+	
+	# Compare results
+	fk_full_match = np.allclose(fk_model_full['end'], fk_standalone_full['end'], atol=1e-10)
+	fk_end_match = np.allclose(fk_model_end, fk_standalone_end, atol=1e-10)
+	
+	if fk_full_match and fk_end_match:
+		beauty_print("   ✓ FK: model.fk() == forward_kinematics()", type="success")
+		print(f"     Max diff (full): {np.max(np.abs(fk_model_full['end'] - fk_standalone_full['end'])):.2e}")
+		print(f"     Max diff (end):  {np.max(np.abs(fk_model_end - fk_standalone_end)):.2e}")
+	else:
+		beauty_print("   ✗ FK: Mismatch detected!", type="error")
+		print(f"     Full match: {fk_full_match}, End match: {fk_end_match}")
+	
+	# ===== Jacobian Validation =====
+	beauty_print("2️⃣  Jacobian Validation", type="info")
+	
+	# Call via RobotModel.jacobian()
+	J_model = model.jacobian(q, backend='numpy', method='analytic')
+	
+	# Call via standalone function
+	J_standalone = jacobian(model, q, backend='numpy', method='analytic')
+	
+	# Compare results
+	J_match = np.allclose(J_model, J_standalone, atol=1e-10)
+	
+	if J_match:
+		beauty_print("   ✓ Jacobian: model.jacobian() == jacobian()", type="success")
+		print(f"     Shape: {J_model.shape}, Max diff: {np.max(np.abs(J_model - J_standalone)):.2e}")
+	else:
+		beauty_print("   ✗ Jacobian: Mismatch detected!", type="error")
+		print(f"     Model shape: {J_model.shape}, Standalone shape: {J_standalone.shape}")
+		print(f"     Max diff: {np.max(np.abs(J_model - J_standalone)):.2e}")
+	
+	# ===== IK Validation =====
+	beauty_print("3️⃣  Inverse Kinematics (IK) Validation", type="info")
+	
+	# Get target pose from FK
+	target_pose = fk_model_end
+	q_initial = np.zeros(model.num_dof())
+	
+	# Call via RobotModel.ik()
+	ik_result_model = model.ik(
+		target_pose.tolist(),
+		q_initial=q_initial,
+		backend='numpy',
+		method='pinv',
+		max_iters=100,
+		pos_tol=1e-4,
+		ori_tol=1e-4
+	)
+	
+	# Call via standalone function
+	ik_result_standalone = inverse_kinematics(
+		model,
+		target_pose.tolist(),
+		q_initial,  # q0 is a positional argument
+		backend='numpy',
+		method='pinv',
+		max_iters=100,
+		pos_tol=1e-4,
+		ori_tol=1e-4
+	)
+	
+	# Compare results
+	q_model = np.array(ik_result_model['q'])
+	q_standalone = np.array(ik_result_standalone['q'])
+	
+	# IK may converge to slightly different solutions, so check if both are valid
+	model_valid = ik_result_model['success']
+	standalone_valid = ik_result_standalone['success']
+	q_diff = np.max(np.abs(q_model - q_standalone))
+	
+	if model_valid and standalone_valid:
+		beauty_print("   ✓ IK: Both methods converged successfully", type="success")
+		print(f"     Model:      success={model_valid}, pos_err={ik_result_model['pos_err']:.2e}, ori_err={ik_result_model['ori_err']:.2e}")
+		print(f"     Standalone: success={standalone_valid}, pos_err={ik_result_standalone['pos_err']:.2e}, ori_err={ik_result_standalone['ori_err']:.2e}")
+		print(f"     Solution diff: {q_diff:.2e} rad")
+		
+		# Verify both solutions reach the target
+		fk_check_model = model.fk(q_model, backend='numpy', return_end=True)
+		fk_check_standalone = forward_kinematics(model, q_standalone, backend='numpy', return_end=True)
+		pose_err_model = np.linalg.norm(fk_check_model[:3, 3] - target_pose[:3, 3])
+		pose_err_standalone = np.linalg.norm(fk_check_standalone[:3, 3] - target_pose[:3, 3])
+		
+		if pose_err_model < 1e-3 and pose_err_standalone < 1e-3:
+			beauty_print("   ✓ IK: Both solutions reach target pose", type="success")
+			print(f"     Model pose error:      {pose_err_model:.2e} m")
+			print(f"     Standalone pose error: {pose_err_standalone:.2e} m")
+		else:
+			beauty_print("   ⚠ IK: Solutions may not reach target accurately", type="warning")
+	elif model_valid or standalone_valid:
+		beauty_print("   ⚠ IK: One method converged, the other didn't (may be difficult target)", type="warning")
+		print(f"     Model success: {model_valid}, Standalone success: {standalone_valid}")
+		if model_valid:
+			print(f"     Model: pos_err={ik_result_model['pos_err']:.2e}, ori_err={ik_result_model['ori_err']:.2e}")
+		if standalone_valid:
+			print(f"     Standalone: pos_err={ik_result_standalone['pos_err']:.2e}, ori_err={ik_result_standalone['ori_err']:.2e}")
+	else:
+		beauty_print("   ⚠ IK: Both methods failed to converge (challenging target from zero config)", type="warning")
+		print(f"     Model: pos_err={ik_result_model['pos_err']:.2e}, ori_err={ik_result_model['ori_err']:.2e}")
+		print(f"     Standalone: pos_err={ik_result_standalone['pos_err']:.2e}, ori_err={ik_result_standalone['ori_err']:.2e}")
+		print(f"     This is expected when target is far from initial guess")
 
 
 def main(args):
@@ -125,6 +253,10 @@ def main(args):
 
     beauty_print("Joint angles (rad):")
     print(f"  q = {beauty_print_array(q)}")
+
+    # Validate kinematics methods if requested
+    if args.validate:
+        validate_kinematics_methods(urdf_model, q)
 
     compare_fk(urdf_model, mjcf_model, q)
 
@@ -180,6 +312,11 @@ if __name__ == "__main__":
         '--show-fixed',
         action='store_true',
         help='Include fixed joints in tree (requires --show-tree)'
+    )
+    parser.add_argument(
+        '--validate',
+        action='store_true',
+        help='Validate that RobotModel.fk/ik/jacobian match standalone functions'
     )
     args = parser.parse_args()
     main(args)

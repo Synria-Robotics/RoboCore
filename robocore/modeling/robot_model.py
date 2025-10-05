@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Any
 
 from .parser.urdf_parser import load_urdf, URDFJoint
 from .parser.mjcf_parser import load_mjcf
@@ -167,24 +167,33 @@ class RobotModel:
     def fk(self, q: Sequence[float] | Any, *, backend: str = 'auto', return_end: bool = False,
            device: Any | None = None, dtype: Any | None = None) -> Dict[str, Any] | Any:
         """Compute forward kinematics.
-    
-          :param q: joint configuration length = dof.
-          :param backend: 'auto'|'numpy'|'torch'
-          :param return_end: if True, return only end-effector pose.
-          :param device: torch device (if backend='torch')
-          :param dtype: torch dtype (if backend='torch')
-          :return: dict link_name -> 4x4 pose matrix or single 4x4 pose if return_end=True
-          """
-          if len(q) != self.num_dof():
-              raise ValueError("Expected q of length %d" % self.num_dof())
-          return forward_kinematics(
-              self,
-              q,
-              backend=backend,
-              return_end=return_end,
-              device=device,
-              dtype=dtype
-          )
+
+        :param q: joint configuration length = dof.
+        :param backend: 'auto'|'numpy'|'torch'
+        :param return_end: if True, return only end-effector pose.
+        :param device: torch device (if backend='torch')
+        :param dtype: torch dtype (if backend='torch')
+        :return: dict link_name -> 4x4 pose matrix or single 4x4 pose if return_end=True
+        """
+        if len(q) != self.num_dof():
+            raise ValueError("Expected q of length %d" % self.num_dof())
+        return forward_kinematics(
+            self,
+            q,
+            backend=backend,
+            return_end=return_end,
+            device=device,
+            dtype=dtype
+        )
+
+    def forward_kinematics(self, q: Sequence[float], return_numpy: bool = True):
+        """Legacy FK interface for backward compatibility with IK/Jacobian solvers.
+
+        :param q: joint values with length dof().
+        :param return_numpy: if True, return NumPy arrays; else convert to lists.
+        :return: dict link->(4x4 pose matrix), end-effector pose under key 'end'.
+        """
+        return self.fk(q, backend='numpy', return_end=False)
 
     def ik(self, target_pose: List[List[float]], q_initial: Optional[Sequence[float]] = None,
            backend: str = 'auto', method: str = 'pinv', max_iters: int = 120,

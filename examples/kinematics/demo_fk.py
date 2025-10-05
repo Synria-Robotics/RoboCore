@@ -14,13 +14,14 @@ def main(args):
     joint_angles = args.joint_angles
 
     robot_model = RobotModel(str(urdf_path), end_link=end_link)
+    robot_model.summary(show_chain=True)
+    robot_model.print_tree(show_fixed=True)
+
     T_fk = forward_kinematics(robot_model, joint_angles, backend='numpy', return_end=True)
-    # Extract position and orientation
     position_fk = T_fk[:3, 3]
     rotation_fk = T_fk[:3, :3]
 
     results = {}
-    # Convert rotation matrix to Euler angles (XYZ) and Quaternion (xyzw)
     euler_fk = matrix_to_euler(rotation_fk, seq='xyz')
     quat_fk = matrix_to_quaternion(rotation_fk)
 

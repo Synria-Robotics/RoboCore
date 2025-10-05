@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Dict
 import numpy as np
 from ..jacobian_utils.jacobian_solver_numpy import JacobianSolverNumPy
 from robocore.transform import rotation_error
+from robocore.kinematics.fk import forward_kinematics
 
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
@@ -103,8 +104,8 @@ class IKSolverNumPy:
         jac_type = "analytic" if use_analytic_jacobian else ("numeric_central" if use_central_diff else "numeric_forward")
 
         for it in range(1, self.max_iters + 1):
-            # Compute current pose
-            fk = self.model.forward_kinematics(q.tolist())["end"]
+            # Compute current pose - use standalone FK to avoid circular dependency
+            fk = forward_kinematics(self.model, q.tolist(), backend='numpy', return_end=True)
             if isinstance(fk, np.ndarray):
                 R_current = fk[:3, :3]
                 p_current = fk[:3, 3]
@@ -138,7 +139,7 @@ class IKSolverNumPy:
                     r_ori_tol = refine_ori_tol or (self.ori_tol * 0.2)
                     q_ref = q.copy()
                     for _r in range(refine_iters):
-                        fk_r = self.model.forward_kinematics(q_ref.tolist())["end"]
+                        fk_r = forward_kinematics(self.model, q_ref.tolist(), backend='numpy', return_end=True)
                         if isinstance(fk_r, np.ndarray):
                             R_r = fk_r[:3, :3]; p_r = fk_r[:3, 3]
                         else:
@@ -248,7 +249,7 @@ class IKSolverNumPy:
         # Return best solution found
         # 失败：返回迭代中最优残差对应的 pos/ori 误差（若未更新保持最后一次计算）
         if not np.isfinite(best_pos_err) or not np.isfinite(best_ori_err):
-            fk_best = self.model.forward_kinematics(best_q.tolist())["end"]
+            fk_best = forward_kinematics(self.model, best_q.tolist(), backend='numpy', return_end=True)
             if isinstance(fk_best, np.ndarray):
                 R_best = fk_best[:3, :3]; p_best = fk_best[:3, 3]
             else:

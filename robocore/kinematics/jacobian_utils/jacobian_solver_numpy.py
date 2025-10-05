@@ -10,6 +10,7 @@ import numpy as np
 import math
 from robocore.transform import rotation_error
 from robocore.utils.backend import set_backend, get_backend
+from robocore.kinematics.fk import forward_kinematics
 
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
@@ -167,8 +168,8 @@ class JacobianSolverNumPy:
         J = np.zeros((6, self.n), dtype=np.float64)
         
         if use_central_diff:
-            # Central difference
-            fk_ref = self.model.forward_kinematics(q.tolist())["end"]
+            # Central difference - use standalone FK to avoid circular dependency
+            fk_ref = forward_kinematics(self.model, q.tolist(), backend='numpy', return_end=True)
             R_ref = np.array(
                 fk_ref[:3, :3] if isinstance(fk_ref, np.ndarray) 
                 else [row[:3] for row in fk_ref[:3]], 
@@ -179,7 +180,7 @@ class JacobianSolverNumPy:
                 # Positive perturbation
                 q_pos = q.copy()
                 q_pos[i] += epsilon
-                fk_pos = self.model.forward_kinematics(q_pos.tolist())["end"]
+                fk_pos = forward_kinematics(self.model, q_pos.tolist(), backend='numpy', return_end=True)
                 R_pos = np.array(
                     fk_pos[:3, :3] if isinstance(fk_pos, np.ndarray) 
                     else [row[:3] for row in fk_pos[:3]], 
@@ -194,7 +195,7 @@ class JacobianSolverNumPy:
                 # Negative perturbation
                 q_neg = q.copy()
                 q_neg[i] -= epsilon
-                fk_neg = self.model.forward_kinematics(q_neg.tolist())["end"]
+                fk_neg = forward_kinematics(self.model, q_neg.tolist(), backend='numpy', return_end=True)
                 R_neg = np.array(
                     fk_neg[:3, :3] if isinstance(fk_neg, np.ndarray) 
                     else [row[:3] for row in fk_neg[:3]], 
@@ -214,8 +215,8 @@ class JacobianSolverNumPy:
                 err_neg = rotation_error(R_ref, R_neg)
                 J[3:6, i] = (err_pos - err_neg) / (2 * epsilon)
         else:
-            # Forward difference
-            fk_ref = self.model.forward_kinematics(q.tolist())["end"]
+            # Forward difference - use standalone FK to avoid circular dependency
+            fk_ref = forward_kinematics(self.model, q.tolist(), backend='numpy', return_end=True)
             R_ref = np.array(
                 fk_ref[:3, :3] if isinstance(fk_ref, np.ndarray) 
                 else [row[:3] for row in fk_ref[:3]], 
@@ -230,7 +231,7 @@ class JacobianSolverNumPy:
             for i in range(self.n):
                 q_pert = q.copy()
                 q_pert[i] += epsilon
-                fk_pert = self.model.forward_kinematics(q_pert.tolist())["end"]
+                fk_pert = forward_kinematics(self.model, q_pert.tolist(), backend='numpy', return_end=True)
                 R_pert = np.array(
                     fk_pert[:3, :3] if isinstance(fk_pert, np.ndarray) 
                     else [row[:3] for row in fk_pert[:3]], 
