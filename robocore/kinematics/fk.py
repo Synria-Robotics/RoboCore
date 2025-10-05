@@ -1,13 +1,22 @@
-"""Unified forward kinematics public interface.
+"""Unified Forward Kinematics Interface
 
-Usage:
-    poses = forward_kinematics(model, q)                 # auto select backend
-    end_pose = forward_kinematics(model, q, return_end=True)
-    poses_t = forward_kinematics(model, q, backend='torch', device='cpu')
+Copyright (c) 2025 Synria Robotics Co., Ltd.
 
-Returns a dict mapping link_name -> 4x4 pose matrix (NumPy array or torch.Tensor)
-unless ``return_end=True`` in which case only the end-effector 4x4 pose is
-returned.
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+Author: Synria Robotics Team
+Website: https://synriarobotics.ai
 """
 
 from __future__ import annotations

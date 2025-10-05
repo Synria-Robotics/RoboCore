@@ -1,12 +1,22 @@
-"""
-Rotation representation conversions.
+"""Rotation representation conversions.
 
-Supports conversions between:
-- Rotation matrix (3x3)
-- Quaternion [x, y, z, w]
-- RPY (Roll-Pitch-Yaw / ZYX Euler)
-- Axis-angle
-- General Euler angles
+Copyright (c) 2025 Synria Robotics Co., Ltd.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+Author: Synria Robotics Team
+Website: https://synriarobotics.ai
 """
 
 from robocore.utils.backend import get_backend_manager

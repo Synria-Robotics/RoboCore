@@ -1,24 +1,22 @@
 """Minimal MJCF parser.
 
-This is intentionally a very small subset to extract a *serial chain* description
-compatible with the existing :func:`load_urdf` return structure so that
-``RobotModel`` can transparently load either URDF or MJCF.
+Copyright (c) 2025 Synria Robotics Co., Ltd.
 
-Assumptions / Simplifications:
---------------------------------
-1. We only support a single kinematic chain (no branching).  The chain is taken
-   as the deepest path discovered by DFS from the first body under ``<worldbody>``.
-2. Each body may contain zero or more ``<joint>`` tags. We currently only use the
-   first hinge/slide joint found per body in building the chain.
-3. Supported joint types: ``hinge`` (→ revolute), ``slide`` (→ prismatic).
-4. Axis: taken from joint ``axis="x y z"`` (default 0 0 1).
-5. Origin: body frame pose relative to its parent using ``pos="x y z"`` and
-   either ``euler="r p y"`` (radians) or ``quat="w x y z"`` (converted to RPY).
-6. Joint limits: from ``range="lo hi"`` (if present) for hinge/slide.
-7. Units: assumed SI, angles in radians (MuJoCo default when specifying numeric values).
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-This is enough for educational FK/IK workflows; for full MuJoCo fidelity one would
-need inertial parameters, multiple joints per body, joint damping, etc.
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+Author: Synria Robotics Team
+Website: https://synriarobotics.ai
 """
 
 from __future__ import annotations

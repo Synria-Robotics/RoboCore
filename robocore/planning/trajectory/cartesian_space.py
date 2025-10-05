@@ -1,16 +1,22 @@
-"""
-Cartesian Space Trajectory Planning
-====================================
+"""Cartesian Space Trajectory Planning
 
-This module provides trajectory planning in Cartesian (task) space:
-- Linear interpolation
-- Circular interpolation  
-- Spline interpolation
+Copyright (c) 2025 Synria Robotics Co., Ltd.
 
-Requires inverse kinematics to convert Cartesian waypoints to joint space.
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-Author: RoboCore Team
-Date: 2025-10-03
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+Author: Synria Robotics Team
+Website: https://synriarobotics.ai
 """
 
 import numpy as np

@@ -1,40 +1,34 @@
-"""RoboCore: Robot Kinematics and Control Library.
+"""High-Performance Robotics Kinematics Library
 
-A lightweight robotics library providing:
-- URDF/MJCF parsing
-- Forward/Inverse Kinematics
-- Singularity analysis
-- Real and simulated robot bridges
-- Pure Python and NumPy-accelerated implementations
+Copyright (c) 2025 Synria Robotics Co., Ltd.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+Author: Synria Robotics Team
+Website: https://synriarobotics.ai
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
+__author__ = "Synria Robotics Team"
+__copyright__ = "Copyright (c) 2025 Synria Robotics Co., Ltd."
+__license__ = "GPL-3.0"
 
-# Core modules
-from .utils import backend
 from . import modeling
 from . import kinematics
+from . import transform
+from . import planning
 from . import analysis
-
-# Main classes / unified APIs for convenience
-from .modeling.robot_model import RobotModel
-from .kinematics import (
-    forward_kinematics,
-    inverse_kinematics,
-    jacobian,
-    IKSolverNumPy as IKSolver,  # keep alias for backward style usage (numpy solver)
-)
-
-__all__ = [
-    "__version__",
-    "backend",
-    "modeling",
-    "kinematics",
-    "analysis",
-    "RobotModel",
-    "IKSolver",
-    "forward_kinematics",
-    "inverse_kinematics",
-    "jacobian",
-]
+from . import configs
+from . import utils
 

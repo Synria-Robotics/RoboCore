@@ -1,30 +1,23 @@
 #!/usr/bin/env python3
-"""
-MuJoCo Trajectory Visualization Demo
-=====================================
+"""RoboCore Module
 
-Demonstrates workspace-constrained trajectory planning with MuJoCo visualization.
+Copyright (c) 2025 Synria Robotics Co., Ltd.
 
-Workflow:
-1. Analyze workspace
-2. Plan trajectory withi    # Load robot model
-    print(f"\nLoading robot model...")
-    if args.robot == 'alicia':
-        urdf_path = Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot' / 'urdf' / 'Alicia-D_v5_4' / 'alicia_duo_with_gripper.urdf'
-    else:
-        urdf_path = Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot' / 'urdf' / 'Bessica-D_v1_0' / 'Bessica-D_Covered.urdf'
-    
-    model = RobotModel(str(urdf_path))
-    dof = model.num_dof()
-    print(f"✓ Loaded {args.robot} ({dof}-DOF)")
-    
-    # Find MJCF fileonstraints
-3. Visualize in MuJoCo simulator
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-Usage:
-    python demo_mujoco_trajectory.py --robot bessica --arm left
-    python demo_mujoco_trajectory.py --robot bessica --arm left --samples 5000 --waypoints 4
-    python demo_mujoco_trajectory.py --robot bessica --arm left --export video.mp4
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+Author: Synria Robotics Team
+Website: https://synriarobotics.ai
 """
 
 import os

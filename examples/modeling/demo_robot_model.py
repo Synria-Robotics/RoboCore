@@ -1,45 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RobotModel loading demo (URDF & MJCF)
-=======================================
+"""RoboCore Module
 
-Showcases:
-1. Load the same robot in URDF and MJCF formats.
-2. Print DOF, joint names, end link via model.summary().
-3. Visualize kinematic tree structure with model.print_tree().
-4. Generate a random joint configuration via unified API.
-5. Compute and compare FK end-effector poses (expected to be close).
-6. Validate that RobotModel.fk/ik/jacobian methods match standalone functions.
+Copyright (c) 2025 Synria Robotics Co., Ltd.
 
-Notes:
-- MJCF parser is a minimal subset (single longest serial chain, first hinge/slide joint per body).
-- Branches or multiple stacked joints per body are not fully represented.
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-Example::
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
 
-    # Basic usage
-    python examples/modeling/demo_robot_model.py
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-    # Show detailed chain info
-    python examples/modeling/demo_robot_model.py --show-chain
-
-    # Show kinematic tree structure
-    python examples/modeling/demo_robot_model.py --show-tree
-
-    # Show tree with fixed joints
-    python examples/modeling/demo_robot_model.py --show-tree --show-fixed
-
-    # Random configuration comparison
-    python examples/modeling/demo_robot_model.py --random --seed 123
-
-    # Validate kinematics methods
-    python examples/modeling/demo_robot_model.py --validate
-
-    # Full example
-    python examples/modeling/demo_robot_model.py \\
-        --urdf robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf \\
-        --mjcf robocore/assets/robot/mjcf/Alicia-D_v5_4/alicia_duo_with_gripper.xml \\
-        --show-tree --show-fixed --random --seed 123 --validate
+Author: Synria Robotics Team
+Website: https://synriarobotics.ai
 """
 
 from __future__ import annotations

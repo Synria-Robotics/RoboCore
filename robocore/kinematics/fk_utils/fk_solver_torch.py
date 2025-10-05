@@ -1,10 +1,24 @@
 """PyTorch forward kinematics solver.
 
-与 `FKSolverNumPy` 功能等价，但使用 torch.Tensor，方便后续在 GPU / 自动求导场景中复用。
+Copyright (c) 2025 Synria Robotics Co., Ltd.
 
-注意：当前实现不依赖 autograd，仅使用张量算子做矩阵乘法；若需要对末端姿态关于 q 自动求导，可在上层定义
-一个函数包装 `solver.solve(q)` 并调用 `torch.autograd.functional.jacobian`。
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+Author: Synria Robotics Team
+Website: https://synriarobotics.ai
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Dict, Sequence

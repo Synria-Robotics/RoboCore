@@ -1,11 +1,24 @@
 """诊断 NumPy 和 Torch IK 求解器之间的差异。
 
-分析可能的原因：
-1. 数值精度差异（float32 vs float64）
-2. Jacobian 计算差异
-3. 矩阵求逆/伪逆算法差异
-4. 初始化和默认参数差异
+Copyright (c) 2025 Synria Robotics Co., Ltd.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+Author: Synria Robotics Team
+Website: https://synriarobotics.ai
 """
+
 import numpy as np
 import torch
 import os

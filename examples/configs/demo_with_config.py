@@ -1,49 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-FK, IK, and Jacobian Demo with OmegaConf Configuration
-=======================================================
+"""RoboCore Module
 
-This script demonstrates RoboCore with clean configuration management using OmegaConf.
-All parameters are managed through YAML config files or command-line overrides.
+Copyright (c) 2025 Synria Robotics Co., Ltd.
 
-Features:
-- Clean configuration management with OmegaConf
-- Support for YAML config files
-- Command-line config overrides
-- Type-safe configuration with dataclasses
-- No impact on computation performance (config loaded once at startup)
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-Usage Examples:
---------------
-# 1. Use default configuration
-python demo_with_config.py
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
 
-# 2. Load configuration from YAML file
-python demo_with_config.py --config robocore/configs/default.yaml
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-# 3. Use Bessica robot configuration
-python demo_with_config.py --config robocore/configs/bessica_config.yaml
-
-# 4. Use GPU configuration
-python demo_with_config.py --config robocore/configs/gpu_config.yaml
-
-# 5. Override specific config values
-python demo_with_config.py --config robocore/configs/default.yaml \
-    robot.end_link=Link7 \
-    kinematics.ik.solver.max_iterations=200
-
-# 6. Specify joint angles
-python demo_with_config.py --joints 0.5 -0.3 1.2 0.8 -0.5 1.5
-
-# 7. Random configuration with custom seed
-python demo_with_config.py --random --seed 123
-
-# 8. Save your current configuration
-python demo_with_config.py --save-config my_config.yaml
-
-Author: RoboCore Team
-Date: 2025-10-03
+Author: Synria Robotics Team
+Website: https://synriarobotics.ai
 """
 
 import numpy as np

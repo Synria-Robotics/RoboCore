@@ -1,59 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Comprehensive FK, IK, and Jacobian Demo (with OmegaConf Support & Closure Validation)
-======================================================================================
+"""RoboCore Module
 
-This script demonstrates:
-1. Forward Kinematics (FK): Compute end-effector pose from joint angles
-2. Inverse Kinematics (IK): Solve joint angles from end-effector pose using DLS
-3. Jacobian: Compute analytical Jacobian matrix at the end-effector pose
-4. **NEW: FK/IK Closure Validation** - Tests all IK methods with analytic/numeric Jacobian
+Copyright (c) 2025 Synria Robotics Co., Ltd.
 
-Features:
-- **NEW: OmegaConf configuration support** (see demo_with_config.py for cleaner example)
-- **NEW: Comprehensive IK method comparison** (DLS, Pinv, Transpose)
-- **NEW: Analytic vs Numeric Jacobian validation**
-- Uses DLS (Damped Least Squares) IK solver
-- Uses analytical Jacobian computation (NumPy backend)
-- Displays detailed kinematics information
-- Verifies IK solution with FK
-- Computes manipulability and singularity metrics
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
 
-Usage Examples:
---------------
-# 1. Zero configuration (default)
-python demo_fk_ik_jacobian.py
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
 
-# 2. Specify joint angles in radians
-python demo_fk_ik_jacobian.py --joints 0.5 -0.3 1.2 0.8 -0.5 1.5 0.0
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-# 3. Specify joint angles in degrees
-python demo_fk_ik_jacobian.py --joints-deg 30 -15 60 45 -30 90 0
-
-# 4. Use random joint angles
-python demo_fk_ik_jacobian.py --random --seed 123
-
-# 5. Custom IK parameters
-python demo_fk_ik_jacobian.py --random --ik-iters 200 --ik-pos-tol 1e-5
-
-# 6. Quiet mode (minimal output)
-python demo_fk_ik_jacobian.py --quiet --random
-
-# 7. Load configuration from YAML file (NEW)
-python demo_fk_ik_jacobian.py --config robocore/configs/default.yaml
-
-# 8. Override specific config values (NEW)
-python demo_fk_ik_jacobian.py --config robocore/configs/default.yaml \
-    --override robot.end_link=Link7 kinematics.ik.solver.max_iterations=200
-
-# 9. Run closure validation (NEW)
-python demo_fk_ik_jacobian.py --closure
-
-NOTE: For a cleaner configuration-focused example, see demo_with_config.py
-
-Author: RoboCore Team
-Date: 2025-10-05
+Author: Synria Robotics Team
+Website: https://synriarobotics.ai
 """
 
 import numpy as np

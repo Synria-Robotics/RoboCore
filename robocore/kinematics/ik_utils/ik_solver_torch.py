@@ -1,13 +1,24 @@
 """PyTorch 版本逆运动学求解器 (IKSolverTorch)。
 
-特性：
-1. 支持三种方法：dls / pinv / transpose
-2. 自适应阻尼 + 自适应步长（与 NumPy 参考实现一致思想）
-3. Plateau 检测：若误差长时间不下降，放大阻尼避免震荡
-4. 动态姿态权重：角度误差 > 0.7rad 时暂时降低一半 (Ori weight * 0.5)
-5. 可选使用数值 Jacobian（中心或前向差分）验证解析正确性
-6. 精修阶段（refine）：在收敛阈值内继续用解析 Jacobian 做若干小步以压缩残差
+Copyright (c) 2025 Synria Robotics Co., Ltd.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+Author: Synria Robotics Team
+Website: https://synriarobotics.ai
 """
+
 from __future__ import annotations
 
 import math

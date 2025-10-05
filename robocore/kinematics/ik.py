@@ -1,14 +1,24 @@
 """Unified inverse kinematics high-level API.
 
-Goals of this refactor:
-1. Consistent naming across backends (numpy / torch)
-2. Single public entry: `inverse_kinematics(model, target_pose, q0, *, backend='auto', method='pinv', ...)`
-3. Optional multi-start + backend selection
-4. Hide legacy ad-hoc solver objects from user-facing surface
+Copyright (c) 2025 Synria Robotics Co., Ltd.
 
-Returned result dict normalized fields:
-  q, success, iters, err_norm, pos_err, ori_err, method, backend, jacobian
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+Author: Synria Robotics Team
+Website: https://synriarobotics.ai
 """
+
 from __future__ import annotations
 from typing import Sequence, Dict, Any, Optional, List
 import numpy as np
