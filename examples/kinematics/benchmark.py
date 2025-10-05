@@ -80,7 +80,6 @@ def cmd_performance(args, model):
     
     q = [0.1, 0.2, -0.3, 0.0, 0.5, -0.2, 0.0][:model.dof()]
     
-    beauty_print(f"Robot: {model.name} ({model.dof()} DOF)")
     beauty_print(f"FK runs: {args.fk_runs}", type="info")
     
     # FK benchmark
@@ -131,7 +130,6 @@ def cmd_ik_compare(args, model):
     
     rng = np.random.default_rng(args.seed)
     
-    beauty_print(f"Robot: {model.name} ({model.dof()} DOF)")
     beauty_print(f"Samples: {args.samples}, Methods: {args.methods}, Backends: {args.backends}", type="info")
     beauty_print(f"Tolerances: pos={args.pos_tol:.1e}, ori={args.ori_tol:.1e}", type="info")
     if args.multi_start > 0:
@@ -197,7 +195,7 @@ def cmd_ik_compare(args, model):
         results[name] = stats
     
     # Print results
-    beauty_print("Results", type="module")
+    beauty_print("Results")
     for name, _, _ in tests:
         if name in results:
             summarize(name, results[name])
@@ -286,8 +284,6 @@ def benchmark_fk_torch_batch(model, q_batch: np.ndarray, device: str = 'cpu', wa
 def cmd_parallel(args, model):
     """Run parallel/batch processing benchmark."""
     beauty_print("Parallel/Batch Processing Benchmark", type="module", centered=True)
-    
-    beauty_print(f"Robot: {model.name} ({model.dof()} DOF)")
     beauty_print(f"Batch size: {args.batch_size}", type="info")
     
     # Generate random batch

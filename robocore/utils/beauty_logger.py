@@ -109,9 +109,7 @@ def beauty_print(content, type: str = None, width: int = 80, centered: bool = Tr
             print("=" * width)
         else:
             # Original module format
-            print("\n" + "=" * width)
             print("\033[1;33m[RoboCore:MODULE] {}\033[0m".format(content))  # For a new module (light yellow)
-            print("=" * width + "\n")
     elif type == "info":
         print("\033[1;35m[RoboCore:INFO] {}\033[0m".format(content))  # For info (light purple)
     elif type == "error":
