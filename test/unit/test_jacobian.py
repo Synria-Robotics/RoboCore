@@ -20,7 +20,7 @@ from robocore.kinematics.jacobian_utils.jacobian_solver_numpy import JacobianSol
 def random_q_in_limits(model, seed=42):
     """Generate random joint configuration within joint limits."""
     rng = np.random.default_rng(seed)
-    n = model.dof()
+    n = model.num_dof()
     q = np.zeros(n)
     for js in model._actuated:
         lo, hi = -1.0, 1.0

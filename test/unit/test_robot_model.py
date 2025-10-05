@@ -34,7 +34,7 @@ class TestRobotModel:
     def test_dof(self, urdf_path):
         """Test DOF calculation."""
         model = RobotModel(urdf_path, end_link='tool0')
-        dof = model.dof()
+        dof = model.num_dof()
         
         # Alicia-D should have 6 DOF
         assert dof == 6
@@ -45,7 +45,7 @@ class TestRobotModel:
         model = RobotModel(urdf_path, end_link='tool0')
         
         actuated = model._actuated
-        assert len(actuated) == model.dof()
+        assert len(actuated) == model.num_dof()
         
         # Check joint properties
         for js in actuated:
@@ -58,7 +58,7 @@ class TestRobotModel:
         model = RobotModel(urdf_path, end_link='tool0')
         
         chain = model._chain_joints
-        assert len(chain) >= model.dof()  # May include fixed joints
+        assert len(chain) >= model.num_dof()  # May include fixed joints
         
         # Check chain continuity
         for joint in chain:
@@ -94,7 +94,7 @@ class TestRobotModel:
         model2 = RobotModel(urdf_path, end_link='tool0')
         
         # Should have same properties
-        assert model1.dof() == model2.dof()
+        assert model1.num_dof() == model2.num_dof()
         assert model1.base_link == model2.base_link
         assert model1.end_link == model2.end_link
 

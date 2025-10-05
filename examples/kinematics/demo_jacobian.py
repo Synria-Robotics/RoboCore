@@ -23,7 +23,7 @@ def main(args):
     urdf = args.urdf
     model = RobotModel(urdf, end_link='tool0')
     
-    beauty_print(f"Jacobian Validation: {model.name} ({model.dof()} DOF)", type="module")
+    beauty_print(f"Jacobian Validation: {model.name} ({model.num_dof()} DOF)", type="module")
     beauty_print(f"Backend: {args.backend}", type="info")
     
     rng = np.random.default_rng(args.seed)
@@ -32,7 +32,7 @@ def main(args):
         # NumPy backend comparison
         beauty_print("[1] Analytic vs Numeric Jacobian (NumPy)", type="module", centered=False)
         
-        q = np.zeros(model.dof())
+        q = np.zeros(model.num_dof())
         
         # Warmup
         jacobian(model, q, backend='numpy', method='analytic')
@@ -99,7 +99,7 @@ def main(args):
         beauty_print(f"PyTorch device: {device}", type="info")
         beauty_print("[1] Analytic vs Numeric vs Autograd Jacobian (PyTorch)", type="module")
         
-        q = torch.zeros(model.dof(), dtype=torch.float64, device=device)
+        q = torch.zeros(model.num_dof(), dtype=torch.float64, device=device)
         
         # Compute all three using unified interface
         Ja = jacobian(model, q, backend='torch', method='analytic', device=device)

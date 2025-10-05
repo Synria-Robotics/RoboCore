@@ -106,11 +106,11 @@ def linear_cartesian_trajectory(
     
     # Initialize arrays
     poses = np.zeros((num_points, 4, 4))
-    q = np.zeros((num_points, robot_model.dof()))
+    q = np.zeros((num_points, robot_model.num_dof()))
     
     # Initial guess for IK
     if q_init is None:
-        q_init = np.zeros(robot_model.dof())
+        q_init = np.zeros(robot_model.num_dof())
     
     q_current = q_init.copy()
     
@@ -252,10 +252,10 @@ def circular_cartesian_trajectory(
     
     # Initialize
     poses = np.zeros((num_points, 4, 4))
-    q = np.zeros((num_points, robot_model.dof()))
+    q = np.zeros((num_points, robot_model.num_dof()))
     
     if q_init is None:
-        q_init = np.zeros(robot_model.dof())
+        q_init = np.zeros(robot_model.num_dof())
     q_current = q_init.copy()
     
     # Determine orientation handling

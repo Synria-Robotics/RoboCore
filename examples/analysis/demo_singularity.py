@@ -21,7 +21,7 @@ def main():
 
     # Test specific configurations
     configs = {
-        "Zero pose": [0.0] * model.dof(),
+        "Zero pose": [0.0] * model.num_dof(),
         "Extended": [0.0, -1.57, 0.0, 0.0, 0.0, 0.0],
         "Folded": [0.0, 1.57, 0.0, 0.0, 0.0, 0.0],
     }

@@ -15,7 +15,7 @@ Workflow:
         urdf_path = Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot' / 'urdf' / 'Bessica-D_v1_0' / 'Bessica-D_Covered.urdf'
     
     model = RobotModel(str(urdf_path))
-    dof = model.dof()
+    dof = model.num_dof()
     print(f"✓ Loaded {args.robot} ({dof}-DOF)")
     
     # Find MJCF fileonstraints
@@ -138,7 +138,7 @@ def plan_trajectory_simple(model, workspace_data, num_waypoints=4):
         print("\nUsing reachable workspace region")
     
     # Start configuration
-    q_start = np.zeros(model.dof())
+    q_start = np.zeros(model.num_dof())
     
     # Generate target waypoints in workspace
     waypoints_cartesian = []

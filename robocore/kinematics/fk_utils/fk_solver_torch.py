@@ -51,7 +51,7 @@ class FKSolverTorch:
         :param model: robot model.
         """
         self.model = model
-        self.n = model.dof()
+        self.n = model.num_dof()
         self.joint_chain = model._chain_joints
         self.actuated_joints = model._actuated
         self.base_link = model.base_link

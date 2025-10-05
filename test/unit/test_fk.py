@@ -19,7 +19,7 @@ from robocore.kinematics.fk_utils.fk_solver_numpy import FKSolverNumPy
 def random_q_in_limits(model, seed=42):
     """Generate random joint configuration within joint limits."""
     rng = np.random.default_rng(seed)
-    n = model.dof()
+    n = model.num_dof()
     q = np.zeros(n)
     for js in model._actuated:
         lo, hi = -1.0, 1.0
@@ -91,7 +91,7 @@ class TestFKConsistency:
     
     def test_zero_configuration(self, robot_model):
         """Test FK at zero configuration."""
-        q_zero = np.zeros(robot_model.dof())
+        q_zero = np.zeros(robot_model.num_dof())
         
         T_np = forward_kinematics(robot_model, q_zero, backend='numpy', return_end=True)
         T_torch = forward_kinematics(robot_model, q_zero, backend='torch', return_end=True,

@@ -9,7 +9,7 @@
 | 模块 | 完整度 | 状态 |
 |------|--------|------|
 | 坐标变换 | 90% | ✅ 完整实现 (所有转换函数) |
-| 机器人建模 | 80% | ✅ 基本完善 |
+| 机器人建模 | 80% | ✅ 基本完善 (已新增 MJCF 解析基础版) |
 | 正运动学 | 95% | ✅ 完善 |
 | 雅可比矩阵 | 90% | ✅ 完善 |
 | 逆运动学 | 85% | ✅ 很强 |
@@ -26,71 +26,33 @@
 
 ## 🔴 阶段一：基础完整性（P0 - 必须补）
 
-### 1. 坐标变换与旋转表示 ✅ 基本完成 (90%)
+### 1. 坐标变换与旋转表示 ✅ (已完成 90%)
 
-**当前状态**: 所有核心功能已在 `robocore/transform/conversions.py` 中实**Status**: 
-- ✅ **核心运动学完成** (FK/IK/Jacobian 批量GPU加速)
-- ✅ **旋转表示转换完成** (100% - 所有转换函数+双后端)
-- ✅ **四元数支持完成** (95% - 所有核心操作+插值)
-- ✅ **测试基础设施完成** (10个测试文件, 65%覆盖)
-- ⚠️ **轨迹插值待补充** (重采样/平滑/缩放)
-- 🔴 **动力学与控制待开发** (Sprint 2目标)mPy/PyTorch双后端和批量处理。
+状态概述：
 
-#### 1.1 四元数支持 ✅ 完成 (95%)
-**文件**: `robocore/transform/conversions.py` (已实现)
+- ✅ 核心运动学完成 (FK/IK/Jacobian 批量 & GPU 加速支持结构已预留)
+- ✅ 旋转表示转换完成 (全部函数 + 双后端 + 批量)
+- ✅ 四元数支持 (核心操作 + SLERP)
+- ✅ 测试基础设施 (10 个测试文件, ~65% 覆盖率)
+- ⚠️ 轨迹插值相关仍待补充 (重采样 / 平滑 / 缩放)
+- 🔴 动力学与控制属于后续 Sprint 目标
 
-- [x] **四元数核心操作** ✅ (函数形式)
-  - [x] `quaternion_normalize(q)` - 归一化
-  - [x] `quaternion_conjugate(q)` - 共轭
-  - [x] `quaternion_inverse(q)` - 求逆
-  - [x] `quaternion_multiply(q1, q2)` - 四元数乘法 ✅
+#### 1.1 四元数支持 ✅ (95%)
 
-- [x] **四元数与旋转矩阵转换** ✅
-  - [x] `quaternion_to_matrix(q)` → R [3×3] (在 `so3.py`)
-  - [x] `matrix_to_quaternion(R)` → [x,y,z,w]
+文件: `robocore/transform/conversions.py`, `so3.py`
 
-- [x] **四元数与其他表示转换** ✅
-  - [x] `quaternion_to_rpy(q)` → (roll, pitch, yaw)
-  - [x] `quaternion_to_axis_angle(q)` → (axis, angle)
-  - [x] `rpy_to_quaternion(roll, pitch, yaw)` → Quaternion
-  - [x] `axis_angle_to_quaternion(axis, angle)` → Quaternion
+已实现：normalize / conjugate / inverse / multiply / 全部互转 / SLERP / 双后端 / 批处理
 
-- [x] **四元数插值** ✅
-  - [x] SLERP - 通过 `scipy.spatial.transform.Slerp` (在 `cartesian_space.py`)
-  - [ ] SQUAD - 球面样条插值 (可选)
+可选：SQUAD 插值
 
-- [x] **双后端批量支持** ✅
-  - [x] NumPy backend
-  - [x] PyTorch backend (CUDA支持)
-  - [x] 批量处理 (支持 shape (N, 4))
+#### 1.2 旋转矩阵转换 ✅ (100%)
 
-#### 1.2 旋转矩阵转换 ✅ 完成 (100%)
-**文件**: `robocore/transform/conversions.py` (已实现)
+全部互转 + 批量 + 双后端已实现。
 
-- [x] **旋转矩阵 → 所有表示** ✅
-  - [x] `matrix_to_rpy(R)` → (roll, pitch, yaw)
-  - [x] `matrix_to_quaternion(R)` → [x,y,z,w]
-  - [x] `matrix_to_axis_angle(R)` → (axis, angle)
-  - [x] `matrix_to_euler(R, seq)` → 通用欧拉角 (支持不同序列)
-
-- [x] **RPY/轴角/欧拉角 → 旋转矩阵** ✅
-  - [x] `rpy_to_matrix(roll, pitch, yaw)` (在 `so3.py`)
-  - [x] `axis_angle_to_matrix(axis, angle)` (在 `so3.py`)
-  - [x] `quaternion_to_matrix(q)` (在 `so3.py`)
-
-- [x] **交叉转换** ✅
-  - [x] `rpy_to_axis_angle(roll, pitch, yaw)`
-  - [x] `axis_angle_to_rpy(axis, angle)`
-  - [x] `axis_angle_to_compact(axis, angle)` - 紧凑表示 [rx, ry, rz]
-  - [x] `compact_to_axis_angle(compact)` - 解析紧凑表示
-
-**待扩展** (可选):
-- [ ] `rotation_distance(R1, R2)` - 旋转距离度量
-- [ ] `rotation_error(R_current, R_target, representation='axis_angle')` - 姿态误差
-- [ ] 12种欧拉角约定的便捷封装 (当前通过 `seq` 参数支持)
+可选：rotation_distance / rotation_error / 12序列便捷封装（函数已支持 seq）。
 
 #### 1.3 高级变换 ❌ 未实现 (可选 - P2优先级)
-**文件**: `robocore/transform/advanced.py` (待新建)
+文件: `robocore/transform/advanced.py` (待新建)
 
 - [ ] **对偶四元数 (Dual Quaternion)** - 同时表示旋转+平移
   - [ ] `DualQuaternion` 类
@@ -502,7 +464,7 @@
 
 ## 🎯 开发优先级建议
 
-### Sprint 1 (Week 1-2): 基础工具 ✅ 90% 完成
+### Sprint 1 (已完成 90%)
 1. ✅ **四元数支持** (95% - 所有核心函数已实现)
    - ✅ 所有转换函数 (quaternion ↔ matrix/rpy/axis-angle)
    - ✅ 基础操作 (normalize, conjugate, inverse, multiply)
@@ -573,10 +535,13 @@
 
 ---
 
-**Last Updated**: 2025-10-04  
+**Last Updated**: 2025-10-05  
 **Status**: 
-- ✅ 核心运动学完成 (FK/IK/Jacobian)
-- ✅ 旋转表示转换完成 (所有转换函数)
-- ✅ 测试基础设施完成 (10个测试文件)
-- ⚠️ 轨迹插值待补充 (重采样/平滑/缩放)
-- � 动力学与控制待开发
+**已完成模块概览**
+
+✅ 核心运动学 (FK/IK/Jacobian)  
+✅ 旋转表示转换 (所有转换函数)  
+✅ 测试基础设施 (10 个测试文件)  
+
+⚠️ 轨迹插值待补充 (重采样/平滑/缩放)  
+🔴 动力学与控制待开发  

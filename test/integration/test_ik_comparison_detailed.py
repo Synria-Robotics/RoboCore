@@ -18,7 +18,7 @@ from robocore.kinematics.fk import forward_kinematics
 def random_q_in_limits(model, seed=42):
     """生成一个在关节限制内的随机配置"""
     rng = np.random.default_rng(seed)
-    n = model.dof()
+    n = model.num_dof()
     q = np.zeros(n)
     for js in model._actuated:
         lo, hi = -1.0, 1.0
@@ -234,7 +234,7 @@ def main():
         return
     
     model = RobotModel(str(urdf_path), end_link=args.end_link)
-    print(f"✓ 模型加载: DOF={model.dof()}, end_link={model.end_link}")
+    print(f"✓ 模型加载: DOF={model.num_dof()}, end_link={model.end_link}")
     
     if args.single:
         # 单样本详细对比

@@ -10,11 +10,13 @@ from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 from .parser.urdf_parser import load_urdf, URDFJoint
-from robocore.utils import backend as B
-import math
+from .parser.mjcf_parser import load_mjcf
+from robocore.kinematics.fk import forward_kinematics
+from robocore.kinematics.ik import inverse_kinematics
+from robocore.kinematics.jacobian import jacobian
 import numpy as np
 
-from robocore.utils.beauty_logger import beauty_print
+from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 
 @dataclass
@@ -50,16 +52,23 @@ class RobotModel:
     :param end_link: override end-effector link name.
     """
 
-    def __init__(self, file_path: str | Path, end_link: Optional[str] = None, use_numpy: bool = True):
+    def __init__(self, file_path: str | Path, end_link: Optional[str] = None):
         """Initialize robot model.
 
-        :param file_path: path to URDF file.
+        :param file_path: path to URDF or MJCF file.
         :param end_link: end-effector link name (auto-detect if None).
-        :param use_numpy: if True, use NumPy-accelerated FK (50-100x faster).
         """
         self.file_path = str(file_path)
-        self.use_numpy = use_numpy
-        parsed = load_urdf(self.file_path)
+        # Auto-detect format by file extension (simple heuristic). If '.xml' we try MJCF first.
+        path_lower = str(self.file_path).lower()
+        parsed = None
+        if path_lower.endswith('.xml'):
+            try:
+                parsed = load_mjcf(self.file_path)
+            except Exception as e:
+                beauty_print(f"⚠️ MJCF parse failed ({e}); falling back to URDF parser", type="warning")
+        if parsed is None:
+            parsed = load_urdf(self.file_path)
         self.name = parsed.get("name", "")
         self._raw_joints = parsed["joints"]
         self.base_link = parsed["base_links"][0] if parsed["base_links"] else self._raw_joints[0].parent
@@ -85,14 +94,8 @@ class RobotModel:
                 idx += 1
         self.end_link = end_link or (self._chain_joints[-1].child if self._chain_joints else self.base_link)
 
-        # Initialize NumPy FK solver if enabled
-        self._fk_solver_numpy = None
-        if self.use_numpy:
-            from robocore.kinematics.fk_utils.fk_solver_numpy import FKSolverNumPy
-            self._fk_solver_numpy = FKSolverNumPy(self)
-            
         beauty_print(f"📦 Loading robot model from: {self.file_path}")
-        beauty_print(f"✓ Robot loaded: {self.dof()} DOF, end_link={self.end_link}", type="success")
+        beauty_print(f"✓ Robot loaded: {self.num_dof()} DOF, end_link={self.end_link}", type="success")
             
 
     @staticmethod
@@ -139,7 +142,7 @@ class RobotModel:
         return res
 
     # ---------------- Public API -----------------
-    def dof(self) -> int:
+    def num_dof(self) -> int:
         """Return number of actuated joints.
 
         :return: dof.
@@ -161,78 +164,98 @@ class RobotModel:
         return {j.name: j.index for j in self._actuated}
 
     # ------------- Kinematics ---------------------
-    @staticmethod
-    def _rpy_matrix(r, p, y):
-        sr, cr = math.sin(r), math.cos(r)
-        sp, cp = math.sin(p), math.cos(p)
-        sy, cy = math.sin(y), math.cos(y)
-        # R = Rz(y) * Ry(p) * Rx(r)
-        return [
-            [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
-            [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
-            [-sp, cp * sr, cp * cr],
-        ]
+    def fk(self, q: Sequence[float] | Any, *, backend: str = 'auto', return_end: bool = False,
+           device: Any | None = None, dtype: Any | None = None) -> Dict[str, Any] | Any:
+        """Compute forward kinematics.
+    
+          :param q: joint configuration length = dof.
+          :param backend: 'auto'|'numpy'|'torch'
+          :param return_end: if True, return only end-effector pose.
+          :param device: torch device (if backend='torch')
+          :param dtype: torch dtype (if backend='torch')
+          :return: dict link_name -> 4x4 pose matrix or single 4x4 pose if return_end=True
+          """
+          if len(q) != self.num_dof():
+              raise ValueError("Expected q of length %d" % self.num_dof())
+          return forward_kinematics(
+              self,
+              q,
+              backend=backend,
+              return_end=return_end,
+              device=device,
+              dtype=dtype
+          )
 
-    @staticmethod
-    def _axis_rotation(axis, theta):
-        ax, ay, az = axis
-        norm = math.sqrt(ax * ax + ay * ay + az * az) or 1.0
-        ax, ay, az = ax / norm, ay / norm, az / norm
-        ct = math.cos(theta)
-        st = math.sin(theta)
-        vt = 1 - ct
-        return [
-            [ct + ax * ax * vt, ax * ay * vt - az * st, ax * az * vt + ay * st],
-            [ay * ax * vt + az * st, ct + ay * ay * vt, ay * az * vt - ax * st],
-            [az * ax * vt - ay * st, az * ay * vt + ax * st, ct + az * az * vt],
-        ]
-
-    @staticmethod
-    def _axis_translation(axis, d):
-        ax, ay, az = axis
-        norm = math.sqrt(ax * ax + ay * ay + az * az) or 1.0
-        ax, ay, az = ax / norm, ay / norm, az / norm
-        return [ax * d, ay * d, az * d]
-
-    def forward_kinematics(self, q: Sequence[float], return_numpy: bool = False):
-        """Compute FK for chain.
-
-        :param q: joint values with length dof().
-        :param return_numpy: if True and NumPy is enabled, return NumPy arrays; else lists.
-        :return: dict link->(4x4 pose matrix), end-effector pose under key 'end'.
+    def ik(self, target_pose: List[List[float]], q_initial: Optional[Sequence[float]] = None,
+           backend: str = 'auto', method: str = 'pinv', max_iters: int = 120,
+           pos_tol: float = 1e-4, ori_tol: float = 1e-4, multi_start: int = 0,
+           multi_noise: float = 0.3, random_seed: Optional[int] = None,
+           torch_device: Optional[str] = None, torch_dtype: Optional[Any] = None,
+           **solver_kwargs) -> Dict[str, Any]:
+        """Compute IK for the robot model.
+        :param target_pose: 4x4 target pose as nested list.
+        :param q_initial: initial guess (if None, uses zero vector).
+        :param backend: 'auto'|'numpy'|'torch'
+        :param method: 'pinv'|'dls'|'transpose'
+        :param max_iters: maximum iterations.
+        :param pos_tol: position tolerance (meters).
+        :param ori_tol: orientation tolerance (radians).
+        :param multi_start: extra random restarts count (0 disable)
+        :param multi_noise: gaussian noise scale (radians) for restarts
+        :param random_seed: seed for reproducibility
+        :param torch_device: specify torch device when backend='torch' (e.g. 'cpu' or 'cuda')
+        :param torch_dtype: specify torch dtype (e.g. torch.float32) when backend='torch'
+        :param solver_kwargs: additional solver parameters.
+        :return: dict with keys 'q', 'success', 'pos_err', 'ori_err', 'iters'
         """
-        if len(q) != self.dof():
-            raise ValueError("Expected %d joint values" % self.dof())
-        
-        # Use NumPy-accelerated FK if enabled
-        if self.use_numpy and self._fk_solver_numpy is not None:
-            poses = self._fk_solver_numpy.solve(q)
-            if not return_numpy:
-                # Convert NumPy arrays to lists for compatibility
-                poses = {k: v.tolist() for k, v in poses.items()}
-            return poses
-        # Pure Python fallback
-        q_map = {j.name: q[j.index] for j in self._actuated}
-        # base pose
-        poses: Dict[str, List[List[float]]] = {self.base_link: self._make_transform([[1, 0, 0], [0, 1, 0], [0, 0, 1]], [0, 0, 0])}
-        # traverse chain joints
-        for j in self._chain_joints:
-            parent_pose = poses[j.parent]
-            R_origin = self._rpy_matrix(*j.origin_rpy)
-            t_origin = j.origin_xyz
-            R_joint = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
-            t_joint = [0, 0, 0]
-            if j.joint_type == "revolute":
-                R_joint = self._axis_rotation(j.axis, q_map.get(j.name, 0.0))
-            elif j.joint_type == "prismatic":
-                t_joint = self._axis_translation(j.axis, q_map.get(j.name, 0.0))
-            # compose parent -> joint origin
-            T_origin = self._make_transform(R_origin, t_origin)
-            T_motion = self._make_transform(R_joint, t_joint)
-            child_pose = self._matmul(parent_pose, self._matmul(T_origin, T_motion))
-            poses[j.child] = child_pose
-        poses["end"] = poses.get(self.end_link, list(poses.values())[-1])
-        return poses
+        if q_initial is None:
+            q_initial = [0.0] * self.num_dof()
+        if len(q_initial) != self.num_dof():
+            raise ValueError("Expected initial q of length %d" % self.num_dof())
+        return inverse_kinematics(
+            self,
+            target_pose,
+            q_initial,
+            backend=backend,
+            method=method,
+            max_iters=max_iters,
+            pos_tol=pos_tol,
+            ori_tol=ori_tol,
+            multi_start=multi_start,
+            multi_noise=multi_noise,
+            random_seed=random_seed,
+            torch_device=torch_device,
+            torch_dtype=torch_dtype,
+            **solver_kwargs
+        )
+
+    def jacobian(self, q: Sequence[float] | Any, *, backend: str = 'auto', method: str = 'analytic',
+                 epsilon: float = 5e-5, use_central_diff: bool = True,
+                 device: Any | None = None, dtype: Any | None = None) -> Any:
+        """Compute 6×n geometric Jacobian matrix.
+        The Jacobian relates joint velocities to end-effector spatial velocity
+        (linear + angular). Uses axis-angle representation for orientation.
+        :param q: joint configuration of length = dof.
+        :param backend: 'auto'|'numpy'|'torch'
+        :param method: 'analytic'|'numeric'|'autograd'
+        :param epsilon: finite-difference step size (numeric method only).
+        :param use_central_diff: use central differences for numeric method (more accurate than forward).
+        :param device: torch device for torch backend (e.g., 'cpu', 'cuda').
+        :param dtype: torch dtype for torch backend. Defaults to float64 if omitted.
+        :return: 6×n Jacobian matrix (numpy.ndarray or torch.Tensor).
+        """
+        if len(q) != self.num_dof():
+            raise ValueError("Expected q of length %d" % self.num_dof())
+        return jacobian(
+            self,
+            q,
+            backend=backend,
+            method=method,
+            epsilon=epsilon,
+            use_central_diff=use_central_diff,
+            device=device,
+            dtype=dtype
+        )
 
     def random_q(self, rng=None, scale: float = 0.5):
         """
@@ -253,7 +276,7 @@ class RobotModel:
         """
         if rng is None:
             rng = np.random.default_rng()
-        q = [0.0] * self.dof()
+        q = [0.0] * self.num_dof()
         for js in self._actuated:
             lo, hi = -1.0, 1.0
             if js.limit:
@@ -283,7 +306,7 @@ class RobotModel:
             >>> q_batch = model.random_q_batch(100, scale=0.8)  # Use 80% of range
         """
         rng = np.random.default_rng(seed)
-        n_joints = self.dof()
+        n_joints = self.num_dof()
         q_batch = np.zeros((batch_size, n_joints))
 
         for i in range(batch_size):
@@ -300,23 +323,88 @@ class RobotModel:
 
         return q_batch
 
-    # ------------- Small matrix helpers -------------
-    @staticmethod
-    def _make_transform(R, t):
-        return [
-            [R[0][0], R[0][1], R[0][2], t[0]],
-            [R[1][0], R[1][1], R[1][2], t[1]],
-            [R[2][0], R[2][1], R[2][2], t[2]],
-            [0, 0, 0, 1],
-        ]
+    def summary(self, show_chain: bool = False, title: str = "Robot Model Summary"):
+        """Print a concise summary of the robot model.
 
-    @staticmethod
-    def _matmul(A, B):
-        C = [[0.0] * 4 for _ in range(4)]
-        for i in range(4):
-            for j in range(4):
-                C[i][j] = sum(A[i][k] * B[k][j] for k in range(4))
-        return C
+        :param show_chain: Whether to print internal actuated chain details
+        :param title: Custom title for the summary
+        """
+        beauty_print(title, type="module", centered=True)
+        beauty_print(f"Name: {self.name}")
+        beauty_print(f"File: {self.file_path}")
+        beauty_print(f"DOF: {self.num_dof()}  |  End Link: {self.end_link}")
+        beauty_print(f"Base Link: {self.base_link}")
+        beauty_print(f"Actuated Joints: {self.joint_names()}")
+
+        if show_chain:
+            beauty_print("Actuated Chain Details:")
+            for j in self._actuated:
+                limit_str = f"[{j.limit[0]:.3f}, {j.limit[1]:.3f}]" if j.limit and j.limit[0] is not None else "unlimited"
+                beauty_print(
+                    f"  [{j.index}] {j.name} ({j.joint_type})\n"
+                    f"      parent: {j.parent} -> child: {j.child}\n"
+                    f"      axis: {beauty_print_array(j.axis)}  limits: {limit_str}"
+                )
+
+    def print_tree(self, show_fixed: bool = False):
+        """Print kinematic tree structure showing body/link connections.
+
+        :param show_fixed: Whether to include fixed joints in the tree
+        """
+        beauty_print("Kinematic Tree Structure", type="module", centered=True)
+
+        # Build a complete parent-child graph for tree visualization
+        visited = set()
+
+        def print_subtree(link: str, prefix: str = "", is_last: bool = True):
+            """Recursively print tree structure."""
+            if link in visited:
+                return
+            visited.add(link)
+
+            # Determine connector symbols
+            connector = "└── " if is_last else "├── "
+            extension = "    " if is_last else "│   "
+
+            # Print current link
+            if link == self.base_link:
+                beauty_print(f"{link} (base)")
+            else:
+                print(f"{prefix}{connector}{link}")
+
+            # Get children from graph
+            children_joints = self._graph.get(link, [])
+
+            # Filter based on show_fixed flag
+            if not show_fixed:
+                children_joints = [j for j in children_joints if j.joint_type in ("revolute", "prismatic")]
+
+            # Print children
+            for i, joint in enumerate(children_joints):
+                is_last_child = (i == len(children_joints) - 1)
+
+                # Print joint info
+                joint_symbol = "⚙" if joint.joint_type in ("revolute", "prismatic") else "⊗"
+                joint_prefix = prefix + extension
+                joint_connector = "└── " if is_last_child else "├── "
+
+                # Check if this joint is in the active chain
+                in_chain = any(j.name == joint.name for j in self._chain_joints)
+                chain_marker = " ★" if in_chain else ""
+
+                print(f"{joint_prefix}{joint_connector}{joint_symbol} {joint.name} ({joint.joint_type}){chain_marker}")
+
+                # Recursively print child link
+                child_prefix = prefix + extension + ("    " if is_last_child else "│   ")
+                print_subtree(joint.child, child_prefix, True)
+
+        print_subtree(self.base_link)
+
+        # Legend
+        beauty_print("\nLegend:")
+        print("  ⚙  = Actuated joint (revolute/prismatic)")
+        print("  ⊗  = Fixed joint")
+        print("  ★  = Part of active chain to end-effector")
 
 
 __all__ = ["RobotModel", "JointSpec"]

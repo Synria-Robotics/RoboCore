@@ -9,7 +9,7 @@ from robocore.transform.conversions import *
 
 def random_q(model, rng, scale=0.5):
     """Generate random joint configuration within limits."""
-    q = [0.0] * model.dof()
+    q = [0.0] * model.num_dof()
     for js in model._actuated:  # type: ignore[attr-defined]
         lo, hi = -1.0, 1.0
         if js.limit:

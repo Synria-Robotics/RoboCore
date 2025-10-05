@@ -198,7 +198,7 @@ def plan_trajectory_in_workspace(
     print("="*70)
     
     if q_start is None:
-        q_start = np.zeros(model.dof())
+        q_start = np.zeros(model.num_dof())
     
     # 选择目标区域
     if use_safe_region and workspace_data['safe_points'] is not None:

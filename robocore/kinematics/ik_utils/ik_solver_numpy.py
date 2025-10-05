@@ -53,7 +53,7 @@ class IKSolverNumPy:
         self.min_damping = min_damping
         self.max_damping = max_damping
         self.base_step = base_step
-        self.n = model.dof()
+        self.n = model.num_dof()
         # Initialize Jacobian solver
         self.jacobian_solver = JacobianSolverNumPy(model)
 

@@ -78,7 +78,7 @@ def cmd_performance(args, model):
     """Run performance benchmark."""
     beauty_print("Performance Benchmark: FK/IK/Jacobian", type="module", centered=True)
     
-    q = [0.1, 0.2, -0.3, 0.0, 0.5, -0.2, 0.0][:model.dof()]
+    q = [0.1, 0.2, -0.3, 0.0, 0.5, -0.2, 0.0][:model.num_dof()]
     
     beauty_print(f"FK runs: {args.fk_runs}", type="info")
     
@@ -151,7 +151,7 @@ def cmd_ik_compare(args, model):
         stats = {k: [] for k in ['iters', 'pos_err', 'ori_err', 'time', 'success']}
         
         for pose in poses:
-            q0 = np.zeros(model.dof())
+            q0 = np.zeros(model.num_dof())
             
             # Prepare torch-specific kwargs
             extra = {}

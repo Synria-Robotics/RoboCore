@@ -68,7 +68,7 @@ class WorkspaceAnalyzer:
         """
         self.model = model
         self.backend = backend
-        self.dof = model.dof()
+        self.num_dof = model.num_dof()
         
         # Cache for workspace data
         self._workspace_cache: Dict[str, Any] = {}
@@ -127,7 +127,7 @@ class WorkspaceAnalyzer:
         
         # Default joint limits
         if q_limits is None:
-            q_limits = np.tile([-np.pi, np.pi], (self.dof, 1))
+            q_limits = np.tile([-np.pi, np.pi], (self.num_dof, 1))
         
         # Generate samples
         if method == 'monte_carlo':
@@ -196,7 +196,7 @@ class WorkspaceAnalyzer:
         
         # Generate diverse samples
         if q_limits is None:
-            q_limits = np.tile([-np.pi, np.pi], (self.dof, 1))
+            q_limits = np.tile([-np.pi, np.pi], (self.num_dof, 1))
         
         q_samples = self._sample_monte_carlo(num_samples, q_limits)
         
@@ -451,7 +451,7 @@ class WorkspaceAnalyzer:
         from robocore.kinematics.jacobian import jacobian
         
         if q_limits is None:
-            q_limits = np.tile([-np.pi, np.pi], (self.dof, 1))
+            q_limits = np.tile([-np.pi, np.pi], (self.num_dof, 1))
         
         q_samples = self._sample_monte_carlo(num_samples, q_limits)
         
@@ -581,7 +581,7 @@ class WorkspaceAnalyzer:
         q_samples = np.random.uniform(
             q_limits[:, 0],
             q_limits[:, 1],
-            size=(num_samples, self.dof)
+            size=(num_samples, self.num_dof)
         )
         return q_samples
     
@@ -591,10 +591,10 @@ class WorkspaceAnalyzer:
         q_limits: np.ndarray
     ) -> np.ndarray:
         """Grid-based sampling in joint space."""
-        points_per_dim = int(np.ceil(num_samples ** (1.0 / self.dof)))
+        points_per_dim = int(np.ceil(num_samples ** (1.0 / self.num_dof)))
         
         grids = []
-        for i in range(self.dof):
+        for i in range(self.num_dof):
             grids.append(np.linspace(q_limits[i, 0], q_limits[i, 1], points_per_dim))
         
         mesh = np.meshgrid(*grids, indexing='ij')
@@ -615,7 +615,7 @@ class WorkspaceAnalyzer:
         """Sobol quasi-random sampling."""
         try:
             from scipy.stats import qmc
-            sampler = qmc.Sobol(d=self.dof, scramble=True)
+            sampler = qmc.Sobol(d=self.num_dof, scramble=True)
             q_unit = sampler.random(num_samples)
             
             # Scale to joint limits

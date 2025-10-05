@@ -51,7 +51,7 @@ class JacobianSolverTorch:
         :param model: robot model.
         """
         self.model = model
-        self.n = model.dof()
+        self.n = model.num_dof()
     
     def solve(
         self,

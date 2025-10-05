@@ -126,7 +126,7 @@ def batch_analysis(model, n_samples=20):
     # Generate test cases
     test_cases = []
     for _ in range(n_samples):
-        q_rand = np.zeros(model.dof())
+        q_rand = np.zeros(model.num_dof())
         for js in model._actuated:
             lo, hi = -1.0, 1.0
             if js.limit and js.limit[0] is not None and js.limit[1] is not None:
@@ -136,7 +136,7 @@ def batch_analysis(model, n_samples=20):
             q_rand[js.index] = float(rng.uniform(mid - span, mid + span))
         
         pose = model.forward_kinematics(q_rand.tolist())['end']
-        test_cases.append((pose, np.zeros(model.dof())))
+        test_cases.append((pose, np.zeros(model.num_dof())))
     
     # Test with both methods
     for method in ['pinv', 'dls']:
@@ -202,11 +202,11 @@ def main():
     urdf = os.path.join(base, "../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
     model = RobotModel(str(urdf), end_link='tool0')
     
-    beauty_print(f"IK Diagnostic Tool: {model.name} ({model.dof()} DOF)", type="module")
+    beauty_print(f"IK Diagnostic Tool: {model.name} ({model.num_dof()} DOF)", type="module")
     
     # Single case analysis
     rng = np.random.default_rng(42)
-    q_test = np.zeros(model.dof())
+    q_test = np.zeros(model.num_dof())
     for js in model._actuated:
         lo, hi = -1.0, 1.0
         if js.limit and js.limit[0] is not None and js.limit[1] is not None:
@@ -216,7 +216,7 @@ def main():
         q_test[js.index] = float(rng.uniform(mid - span, mid + span))
     
     pose_test = model.forward_kinematics(q_test.tolist())['end']
-    q0_test = np.zeros(model.dof())
+    q0_test = np.zeros(model.num_dof())
     
     # Compare both methods
     for method in ['pinv', 'dls']:
