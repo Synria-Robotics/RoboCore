@@ -44,8 +44,8 @@ class IKSolverTorch:
         max_iters: int = 100,
         pos_tol: float = 1e-4,
         ori_tol: float = 1e-3,
-        min_damping: float = 1e-6,
-        max_damping: float = 1e-2,
+        min_damping: float = 1e-4,  # 与 NumPy 一致
+        max_damping: float = 5e-2,  # 与 NumPy 一致
         base_step: float = 1.0,
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
@@ -85,7 +85,7 @@ class IKSolverTorch:
         adaptive_step: bool = True,
         use_numeric_jacobian: bool = False,
         use_central_diff: bool = True,
-        max_step_norm: float = 0.3,
+        max_step_norm: float = 0.5,  # 与 NumPy 一致（原来是 0.3）
         backtrack: bool = False,  # 默认关闭以加速
         refine: bool = False,  # 默认关闭以加速
         refine_iters: int = 5,  # 减少refine迭代次数
@@ -217,18 +217,8 @@ class IKSolverTorch:
                 pos_err_norm_t = torch.linalg.norm(pos_err_v)  # 保持为tensor
                 ori_err_norm_t = torch.linalg.norm(ori_err_v)  # 保持为tensor
 
-                # 分段动态姿态权重 - 延迟.item()调用
-                ori_err_norm_val = ori_err_norm_t.item()
-                if ori_err_norm_val > 1.0:
-                    ori_scale = 0.3
-                elif ori_err_norm_val > 0.7:
-                    ori_scale = 0.5
-                elif ori_err_norm_val > 0.4:
-                    ori_scale = 0.8
-                else:
-                    ori_scale = 1.0
-                ori_weight_dyn = ori_weight * ori_scale
-                err = torch.cat([pos_weight * pos_err_v, ori_weight_dyn * ori_err_v])
+                # 与 NumPy 一致：不使用动态姿态权重调整
+                err = torch.cat([pos_weight * pos_err_v, ori_weight * ori_err_v])
                 err_norm = torch.linalg.norm(err)
 
                 # 更新最优解 - 使用tensor比较
@@ -236,7 +226,7 @@ class IKSolverTorch:
                     best_err = err_norm
                     best_q = q.clone()
                     final_pos_err = pos_err_norm_t.item()
-                    final_ori_err = ori_err_norm_val
+                    final_ori_err = ori_err_norm_t.item()
 
                 if prev_err_norm - err_norm < 1e-8:
                     plateau_counter += 1
@@ -246,7 +236,7 @@ class IKSolverTorch:
 
                 # 收敛检查 - 只在这里调用.item()
                 pos_err_norm = pos_err_norm_t.item()
-                ori_err_norm = ori_err_norm_val
+                ori_err_norm = ori_err_norm_t.item()
 
                 if pos_err_norm < self.pos_tol and ori_err_norm < self.ori_tol:
                     if refine:
@@ -315,8 +305,8 @@ class IKSolverTorch:
                     jac_type_local = "analytic"
                 if pos_weight != 1.0:
                     J[:3, :] *= pos_weight
-                if ori_weight_dyn != 1.0:
-                    J[3:6, :] *= ori_weight_dyn
+                if ori_weight != 1.0:
+                    J[3:6, :] *= ori_weight
 
                 # 阻尼
                 if adaptive_damping:
@@ -495,7 +485,7 @@ class IKSolverTorch:
         method: str = "dls",
         pos_weight: float = 1.0,
         ori_weight: float = 1.0,
-        max_step_norm: float = 0.3,
+        max_step_norm: float = 0.5,  # 与 NumPy 一致
         verbose: bool = False,
         damping: float | None = None,
     ) -> Dict:

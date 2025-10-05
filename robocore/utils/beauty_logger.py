@@ -81,7 +81,7 @@ class BeautyLogger:
         self._write_log(content, type="info")
 
 
-def beauty_print(content, type: str = None):
+def beauty_print(content, type: str = None, width: int = 80, centered: bool = True):
     """
     Print the content with different colors.
 
@@ -89,9 +89,12 @@ def beauty_print(content, type: str = None):
 
         >>> import RoboCore as rc
         >>> rc.logger.beauty_print("This is a warning message.", type="warning")
+        >>> rc.logger.beauty_print("Section Title", type="module", centered=True)
 
     :param content: the content to be printed
-    :param type: support "warning", "module", "info", "error", "matrix"
+    :param type: support "warning", "module", "info", "error", "success", "separator"
+    :param width: width of the separator line (default: 80)
+    :param centered: for "module" type, whether to center the title in separator (default: False)
     :return:
     """
     if type is None:
@@ -99,9 +102,16 @@ def beauty_print(content, type: str = None):
     if type == "warning":
         print("\033[1;37m[RoboCore:WARNING] {}\033[0m".format(content))  # For warning (gray)
     elif type == "module":
-        print("\n" + "="*80)
-        print("\033[1;33m[RoboCore:MODULE] {}\033[0m".format(content))  # For a new module (light yellow)
-        print("="*80 + "\n")
+        if centered:
+            # Centered title with separator
+            print("\n" + "=" * width)
+            print("\033[1;33m{}\033[0m".format(content.center(width)))
+            print("=" * width)
+        else:
+            # Original module format
+            print("\n" + "=" * width)
+            print("\033[1;33m[RoboCore:MODULE] {}\033[0m".format(content))  # For a new module (light yellow)
+            print("=" * width + "\n")
     elif type == "info":
         print("\033[1;35m[RoboCore:INFO] {}\033[0m".format(content))  # For info (light purple)
     elif type == "error":

@@ -12,14 +12,9 @@ from typing import Dict, List, Optional, Sequence
 from .parser.urdf_parser import load_urdf, URDFJoint
 from robocore.utils import backend as B
 import math
+import numpy as np
 
-# Optional NumPy acceleration
-try:
-    import numpy as np
-    from robocore.kinematics.fk_utils.fk_solver_numpy import forward_kinematics_numpy
-    _HAS_NUMPY = True
-except ImportError:
-    _HAS_NUMPY = False
+from robocore.utils.beauty_logger import beauty_print
 
 
 @dataclass
@@ -60,10 +55,10 @@ class RobotModel:
 
         :param file_path: path to URDF file.
         :param end_link: end-effector link name (auto-detect if None).
-        :param use_numpy: if True and NumPy is available, use NumPy-accelerated FK (50-100x faster).
+        :param use_numpy: if True, use NumPy-accelerated FK (50-100x faster).
         """
         self.file_path = str(file_path)
-        self.use_numpy = use_numpy and _HAS_NUMPY
+        self.use_numpy = use_numpy
         parsed = load_urdf(self.file_path)
         self.name = parsed.get("name", "")
         self._raw_joints = parsed["joints"]
@@ -89,6 +84,16 @@ class RobotModel:
                 )
                 idx += 1
         self.end_link = end_link or (self._chain_joints[-1].child if self._chain_joints else self.base_link)
+
+        # Initialize NumPy FK solver if enabled
+        self._fk_solver_numpy = None
+        if self.use_numpy:
+            from robocore.kinematics.fk_utils.fk_solver_numpy import FKSolverNumPy
+            self._fk_solver_numpy = FKSolverNumPy(self)
+            
+        beauty_print(f"📦 Loading robot model from: {self.file_path}")
+        beauty_print(f"✓ Robot loaded: {self.dof()} DOF, end_link={self.end_link}", type="success")
+            
 
     @staticmethod
     def _build_graph(joints: List[URDFJoint]):
@@ -199,15 +204,9 @@ class RobotModel:
         if len(q) != self.dof():
             raise ValueError("Expected %d joint values" % self.dof())
         
-        # Use NumPy-accelerated FK if available and enabled
-        if self.use_numpy and _HAS_NUMPY:
-            poses = forward_kinematics_numpy(
-                self._chain_joints,
-                self._actuated,
-                self.base_link,
-                self.end_link,
-                q
-            )
+        # Use NumPy-accelerated FK if enabled
+        if self.use_numpy and self._fk_solver_numpy is not None:
+            poses = self._fk_solver_numpy.solve(q)
             if not return_numpy:
                 # Convert NumPy arrays to lists for compatibility
                 poses = {k: v.tolist() for k, v in poses.items()}
@@ -234,6 +233,72 @@ class RobotModel:
             poses[j.child] = child_pose
         poses["end"] = poses.get(self.end_link, list(poses.values())[-1])
         return poses
+
+    def random_q(self, rng=None, scale: float = 0.5):
+        """
+        Generate a random joint configuration within joint limits.
+        
+        :param rng: NumPy random generator (if None, creates a new one with random seed)
+        :param scale: scaling factor for the joint range (0.0 to 1.0, default: 0.5)
+                      0.5 means sample from middle 50% of each joint's range
+        :return: list of random joint values (length = dof())
+        
+        Example::
+        
+            >>> model = RobotModel("robot.urdf")
+            >>> q = model.random_q()  # Random configuration
+            >>> q = model.random_q(scale=0.8)  # Use 80% of joint range
+            >>> rng = np.random.default_rng(42)
+            >>> q = model.random_q(rng=rng)  # Reproducible random
+        """
+        if rng is None:
+            rng = np.random.default_rng()
+        q = [0.0] * self.dof()
+        for js in self._actuated:
+            lo, hi = -1.0, 1.0
+            if js.limit:
+                if js.limit[0] is not None:
+                    lo = js.limit[0]
+                if js.limit[1] is not None:
+                    hi = js.limit[1]
+            mid = 0.5 * (lo + hi)
+            span = 0.5 * (hi - lo) * scale
+            q[js.index] = float(rng.uniform(mid - span, mid + span))
+        return q
+
+    def random_q_batch(self, batch_size: int, seed: int = None, scale: float = 0.5):
+        """
+        Generate a batch of random joint configurations within joint limits.
+        
+        :param batch_size: number of configurations to generate
+        :param seed: random seed for reproducibility (if None, uses random seed)
+        :param scale: scaling factor for the joint range (0.0 to 1.0, default: 0.5)
+        :return: NumPy array of shape (batch_size, dof())
+        
+        Example::
+        
+            >>> model = RobotModel("robot.urdf")
+            >>> q_batch = model.random_q_batch(100)  # 100 random configs
+            >>> q_batch = model.random_q_batch(100, seed=42)  # Reproducible
+            >>> q_batch = model.random_q_batch(100, scale=0.8)  # Use 80% of range
+        """
+        rng = np.random.default_rng(seed)
+        n_joints = self.dof()
+        q_batch = np.zeros((batch_size, n_joints))
+
+        for i in range(batch_size):
+            for js in self._actuated:
+                lo, hi = -1.0, 1.0
+                if js.limit:
+                    if js.limit[0] is not None:
+                        lo = js.limit[0]
+                    if js.limit[1] is not None:
+                        hi = js.limit[1]
+                mid = 0.5 * (lo + hi)
+                span = 0.5 * (hi - lo) * scale
+                q_batch[i, js.index] = rng.uniform(mid - span, mid + span)
+
+        return q_batch
 
     # ------------- Small matrix helpers -------------
     @staticmethod
