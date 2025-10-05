@@ -1,8 +1,6 @@
 ![](./imgs/logo.jpeg)
 
-# RoboCore
-
-**Unified High-Throughput Robotics Core Library**
+# RoboCore: Unified High-Throughput Robotics Core Library
 
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
