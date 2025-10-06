@@ -52,3 +52,73 @@ class BiIndependentIKSolverNumpy:
             'res_left': res_left,
             'res_right': res_right,
         }
+
+
+class BiRelativeIKSolverNumpy(BiIndependentIKSolverNumpy):
+    """Relative bimanual IK solver (NumPy).
+
+    Solves two-arm IK with relative constraints by composing per-arm IK and
+    using a relative Jacobian in higher-level loops (to be extended).
+    """
+
+    def solve(self,
+              target_left: Optional[Sequence[Sequence[float]]],
+              target_right: Optional[Sequence[Sequence[float]]],
+              q0_left: Optional[Sequence[float]] = None,
+              q0_right: Optional[Sequence[float]] = None,
+              constraint_type: str = 'pose',
+              **ik_kwargs) -> Dict[str, Any]:
+        """
+        :param target_left: Left target pose
+        :param target_right: Right target pose
+        :param q0_left: Initial left configuration
+        :param q0_right: Initial right configuration
+        :param constraint_type: 'pose'|'position'|'orientation'
+        :return: Result dict
+        """
+        # For now, delegate to independent IK per arm; future work will use
+        # relative Jacobian-based coupling.
+        return super().solve(target_left, target_right, q0_left, q0_right, **ik_kwargs)
+
+
+class BiMirrorIKSolverNumpy(BiIndependentIKSolverNumpy):
+    """Mirror-symmetric bimanual IK solver (NumPy).
+
+    Uses independent IK but allows providing only one target by mirroring.
+    """
+
+    def solve(self,
+              target_left: Optional[Sequence[Sequence[float]]],
+              target_right: Optional[Sequence[Sequence[float]]],
+              q0_left: Optional[Sequence[float]] = None,
+              q0_right: Optional[Sequence[float]] = None,
+              mirror_axis: str = 'y',
+              **ik_kwargs) -> Dict[str, Any]:
+        """
+        :param target_left: Left target pose
+        :param target_right: Right target pose
+        :param q0_left: Initial left configuration
+        :param q0_right: Initial right configuration
+        :param mirror_axis: Mirror axis 'x'|'y'|'z'
+        :return: Result dict
+        """
+        # If only one side provided, mirror it to the other side.
+        def mirror_pose(T):
+            import numpy as np
+            M = np.eye(4)
+            if mirror_axis == 'x':
+                M[0, 0] = -1
+            elif mirror_axis == 'y':
+                M[1, 1] = -1
+            elif mirror_axis == 'z':
+                M[2, 2] = -1
+            return T @ M
+
+        if target_left is None and target_right is not None:
+            T_r = target_right.tolist() if hasattr(target_right, 'tolist') else target_right
+            target_left = mirror_pose(T_r)
+        elif target_right is None and target_left is not None:
+            T_l = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
+            target_right = mirror_pose(T_l)
+
+        return super().solve(target_left, target_right, q0_left, q0_right, **ik_kwargs)

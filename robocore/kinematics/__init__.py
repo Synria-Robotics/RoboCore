@@ -22,7 +22,7 @@ Website: https://synriarobotics.ai
 from .fk import forward_kinematics  # unified FK
 from .ik import inverse_kinematics  # unified IK
 from .jacobian import jacobian  # unified Jacobian
-from .bimanual import dual_fk, dual_block_jacobian, dual_ik
+from .bimanual import bimanual_forward_kinematics, bimanual_inverse_kinematics, bimanual_jacobian
 
 # Solver classes (not exported, for advanced usage)
 from .fk_utils.fk_solver_numpy import FKSolverNumPy
@@ -37,9 +37,9 @@ __all__ = [
     "forward_kinematics",
     "inverse_kinematics",
     "jacobian",
-    # dual-arm
-    "dual_fk",
-    "dual_block_jacobian",
-    "dual_ik",
+    # bimanual
+    "bimanual_forward_kinematics",
+    "bimanual_inverse_kinematics",
+    "bimanual_jacobian",
 ]
 

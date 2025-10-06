@@ -30,6 +30,7 @@ from .parser.mjcf_parser import load_mjcf
 from robocore.kinematics.fk import forward_kinematics
 from robocore.kinematics.ik import inverse_kinematics
 from robocore.kinematics.jacobian import jacobian
+from robocore.kinematics.utils import relative_pose_error, relative_jacobian
 import numpy as np
 
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
@@ -138,6 +139,9 @@ class RobotModel:
         self._workspace_points = None  # Cached reachable workspace points
         self._workspace_kdtree = None  # KDTree for fast reachability checks
         self._workspace_bounds = None  # Bounding box
+
+        # Multi-link groups (name -> RobotModel via spawn_chain)
+        self._groups: Dict[str, "RobotModel"] = {}
 
         # Only print load message if this is the first parse (heuristic: not from cache or explicit _parsed)
         if cache_key not in _PARSED_ROBOT_CACHE or _parsed is not None:
@@ -363,6 +367,222 @@ class RobotModel:
         children = set(j.child for j in self._raw_joints)
         # Leaf = appears as child but never as parent
         return sorted(list(children - parents))
+
+    # -------- Multi-link groups and whole-body kinematics ---------
+    def add_groups(self, groups: Dict[str, str]) -> Dict[str, "RobotModel"]:
+        """
+        :param groups: Mapping group_name -> end_link
+        :return: Mapping group_name -> spawned RobotModel
+        """
+        for name, end in groups.items():
+            self._groups[name] = self.spawn_chain(end)
+        return dict(self._groups)
+
+    def groups(self) -> Dict[str, "RobotModel"]:
+        """
+        :return: Current group mapping name -> RobotModel
+        """
+        return dict(self._groups)
+
+    def block_jacobian(self, q_by_group: Dict[str, Sequence[float]], *, backend: str = 'auto') -> np.ndarray:
+        """
+        :param q_by_group: Mapping name -> joint vector
+        :param backend: 'auto'|'numpy'|'torch'
+        :return: Block-diagonal Jacobian for all groups stacked as 6*k rows
+        """
+        if not self._groups:
+            raise ValueError("No groups defined. Call add_groups first.")
+        # Order by insertion
+        names = list(self._groups.keys())
+        J_blocks = []
+        cols_total = 0
+        for name in names:
+            model = self._groups[name]
+            q = q_by_group[name]
+            J = jacobian(model, q, backend=backend)
+            J = J.detach().cpu().numpy() if hasattr(J, 'detach') else np.array(J)
+            J_blocks.append(J)
+            cols_total += J.shape[1]
+        rows_total = 6 * len(J_blocks)
+        J_whole = np.zeros((rows_total, cols_total))
+        col_offset = 0
+        for i, J in enumerate(J_blocks):
+            r0 = 6 * i
+            r1 = r0 + 6
+            c1 = col_offset + J.shape[1]
+            J_whole[r0:r1, col_offset:c1] = J
+            col_offset = c1
+        return J_whole
+
+    def relative_jacobian_between(self, group_a: str, group_b: str,
+                                  q_a: Sequence[float], q_b: Sequence[float], *,
+                                  backend: str = 'auto') -> np.ndarray:
+        """
+        :param group_a: First group name
+        :param group_b: Second group name
+        :param q_a: Joint vector of group_a
+        :param q_b: Joint vector of group_b
+        :param backend: 'auto'|'numpy'|'torch'
+        :return: 6 x (n_a + n_b) relative Jacobian (pose)
+        """
+        if not self._groups:
+            raise ValueError("No groups defined. Call add_groups first.")
+        a = self._groups[group_a]
+        b = self._groups[group_b]
+        J_rel = relative_jacobian(a, b, q_a, q_b, backend=backend)
+        return J_rel.detach().cpu().numpy() if hasattr(J_rel, 'detach') else np.array(J_rel)
+
+    def multi_task_ik_weighted(self,
+                               tasks: List[Dict[str, Any]],
+                               q0_by_group: Dict[str, Sequence[float]],
+                               *,
+                               max_iters: int = 100,
+                               tol: float = 1e-3,
+                               damping: float = 1e-3,
+                               step_limit: float = 0.2,
+                               backend: str = 'numpy',
+                               verbose: bool = False) -> Dict[str, Any]:
+        """
+        :param tasks: List of task dicts. Absolute: {'type':'absolute','group':name,'target':T,'weight':w,'row_mask':[...]} Relative: {'type':'relative','group_a':A,'group_b':B,'target':T_rel,'weight':w,'row_mask':[...]}
+        :param q0_by_group: Mapping name -> initial q
+        :param max_iters: Max iterations
+        :param tol: Convergence tolerance
+        :param damping: DLS damping
+        :param step_limit: Joint step limit
+        :param backend: Backend for per-chain ops
+        :param verbose: Print iteration logs
+        :return: {'q_by_group', 'success', 'iters', 'residual'}
+        """
+        if not self._groups:
+            raise ValueError("No groups defined. Call add_groups first.")
+        names = list(self._groups.keys())
+        # Build concatenated q vector
+        q_by = {k: np.array(q0_by_group[k], dtype=float) for k in names}
+        n_by = {k: len(q_by[k]) for k in names}
+        idx_by = {}
+        offset = 0
+        for k in names:
+            idx_by[k] = (offset, offset + n_by[k])
+            offset += n_by[k]
+        n_total = offset
+        q = np.concatenate([q_by[k] for k in names])
+
+        def slice_group(vec, name):
+            i0, i1 = idx_by[name]
+            return vec[i0:i1]
+
+        def assign_group(vec, name, part):
+            i0, i1 = idx_by[name]
+            vec[i0:i1] = part
+
+        for it in range(max_iters):
+            errs = []
+            Jrows = []
+            for task in tasks:
+                if task.get('type') == 'absolute':
+                    g = task['group']
+                    model = self._groups[g]
+                    qg = slice_group(q, g)
+                    T_cur = model.fk(qg, backend=backend, return_end=True)
+                    T_cur = T_cur.detach().cpu().numpy() if hasattr(T_cur, 'detach') else np.array(T_cur)
+                    e = self._pose_error_np(T_cur, np.array(task['target']))
+                    Jg = jacobian(model, qg, backend=backend)
+                    Jg = Jg.detach().cpu().numpy() if hasattr(Jg, 'detach') else np.array(Jg)
+                    # pad into whole vector
+                    Jpad = np.zeros((6, n_total))
+                    i0, i1 = idx_by[g]
+                    Jpad[:, i0:i1] = Jg
+                    # row mask
+                    mask = task.get('row_mask')
+                    if mask is not None:
+                        m = np.array([bool(x) for x in mask])
+                        e = e[m]
+                        Jpad = Jpad[m, :]
+                    w = float(task.get('weight', 1.0)) ** 0.5
+                    errs.append(w * e)
+                    Jrows.append(w * Jpad)
+                elif task.get('type') == 'relative':
+                    ga = task['group_a']
+                    gb = task['group_b']
+                    ma = self._groups[ga]
+                    mb = self._groups[gb]
+                    qa = slice_group(q, ga)
+                    qb = slice_group(q, gb)
+                    Ta = ma.fk(qa, backend=backend, return_end=True)
+                    Tb = mb.fk(qb, backend=backend, return_end=True)
+                    if hasattr(Ta, 'detach'):
+                        Ta = Ta.detach().cpu().numpy()
+                        Tb = Tb.detach().cpu().numpy()
+                    Ta = np.array(Ta)
+                    Tb = np.array(Tb)
+                    e = relative_pose_error(Ta, Tb, np.array(task['target']))
+                    Jr = relative_jacobian(ma, mb, qa, qb, backend=backend)
+                    Jr = Jr.detach().cpu().numpy() if hasattr(Jr, 'detach') else np.array(Jr)
+                    # place Jr into columns of a+b
+                    Jpad = np.zeros((Jr.shape[0], n_total))
+                    i0a, i1a = idx_by[ga]
+                    i0b, i1b = idx_by[gb]
+                    Jpad[:, i0a:i1a] = Jr[:, :n_by[ga]]
+                    Jpad[:, i0b:i1b] = Jr[:, n_by[ga]:]
+                    mask = task.get('row_mask')
+                    if mask is not None:
+                        m = np.array([bool(x) for x in mask])
+                        e = e[m]
+                        Jpad = Jpad[m, :]
+                    w = float(task.get('weight', 1.0)) ** 0.5
+                    errs.append(w * e)
+                    Jrows.append(w * Jpad)
+                else:
+                    raise ValueError("Unknown task type")
+
+            e_total = np.concatenate(errs) if errs else np.zeros(0)
+            if e_total.size == 0:
+                break
+            J_total = np.vstack(Jrows)
+            JT = J_total.T
+            A = J_total @ JT + (damping ** 2) * np.eye(J_total.shape[0])
+            dq = JT @ np.linalg.solve(A, e_total)
+            dq = np.clip(dq, -step_limit, step_limit)
+            q += dq
+            if verbose:
+                print(f"Iter {it+1}: residual={np.linalg.norm(e_total):.6f}, |dq|={np.linalg.norm(dq):.6f}")
+            if np.linalg.norm(e_total) < tol:
+                break
+
+        # Split back
+        q_out = {}
+        for name in names:
+            q_out[name] = slice_group(q, name).tolist()
+        return {
+            'q_by_group': q_out,
+            'success': True,
+            'iters': it + 1,
+            'residual': float(np.linalg.norm(e_total)) if e_total.size else 0.0,
+        }
+
+    @staticmethod
+    def _pose_error_np(T_current: np.ndarray, T_target: np.ndarray) -> np.ndarray:
+        """
+        :param T_current: Current pose 4x4
+        :param T_target: Target pose 4x4
+        :return: 6D pose error
+        """
+        p_c = T_current[0:3, 3]
+        p_t = T_target[0:3, 3]
+        e_pos = p_t - p_c
+        R_c = T_current[0:3, 0:3]
+        R_t = T_target[0:3, 0:3]
+        R_err = R_t @ R_c.T
+        angle = np.arccos(max(-1.0, min(1.0, (np.trace(R_err) - 1.0) * 0.5)))
+        if angle < 1e-12:
+            e_ori = np.zeros(3)
+        else:
+            wx = R_err[2, 1] - R_err[1, 2]
+            wy = R_err[0, 2] - R_err[2, 0]
+            wz = R_err[1, 0] - R_err[0, 1]
+            axis = np.array([wx, wy, wz]) / (2.0 * np.sin(angle) + 1e-12)
+            e_ori = axis * angle
+        return np.concatenate([e_pos, e_ori])
 
     def random_q_batch(self, batch_size: int, seed: int = None, scale: float = 0.5):
         """

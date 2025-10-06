@@ -52,3 +52,67 @@ class BiIndependentIKSolverTorch:
             'res_left': res_left,
             'res_right': res_right,
         }
+
+
+class BiRelativeIKSolverTorch(BiIndependentIKSolverTorch):
+    """Relative bimanual IK solver (Torch-aware)."""
+
+    def solve(self,
+              target_left: Optional[Sequence[Sequence[float]]],
+              target_right: Optional[Sequence[Sequence[float]]],
+              q0_left: Optional[Sequence[float]] = None,
+              q0_right: Optional[Sequence[float]] = None,
+              constraint_type: str = 'pose',
+              backend: str = 'torch',
+              **ik_kwargs) -> Dict[str, Any]:
+        """
+        :param target_left: Left target pose
+        :param target_right: Right target pose
+        :param q0_left: Initial left configuration
+        :param q0_right: Initial right configuration
+        :param constraint_type: 'pose'|'position'|'orientation'
+        :param backend: Backend string
+        :return: Result dict
+        """
+        return super().solve(target_left, target_right, q0_left, q0_right, backend=backend, **ik_kwargs)
+
+
+class BiMirrorIKSolverTorch(BiIndependentIKSolverTorch):
+    """Mirror-symmetric bimanual IK solver (Torch-aware)."""
+
+    def solve(self,
+              target_left: Optional[Sequence[Sequence[float]]],
+              target_right: Optional[Sequence[Sequence[float]]],
+              q0_left: Optional[Sequence[float]] = None,
+              q0_right: Optional[Sequence[float]] = None,
+              mirror_axis: str = 'y',
+              backend: str = 'torch',
+              **ik_kwargs) -> Dict[str, Any]:
+        """
+        :param target_left: Left target pose
+        :param target_right: Right target pose
+        :param q0_left: Initial left configuration
+        :param q0_right: Initial right configuration
+        :param mirror_axis: Mirror axis 'x'|'y'|'z'
+        :param backend: Backend string
+        :return: Result dict
+        """
+        def mirror_pose(T):
+            import numpy as np
+            M = np.eye(4)
+            if mirror_axis == 'x':
+                M[0, 0] = -1
+            elif mirror_axis == 'y':
+                M[1, 1] = -1
+            elif mirror_axis == 'z':
+                M[2, 2] = -1
+            return T @ M
+
+        if target_left is None and target_right is not None:
+            T_r = target_right.tolist() if hasattr(target_right, 'tolist') else target_right
+            target_left = mirror_pose(T_r)
+        elif target_right is None and target_left is not None:
+            T_l = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
+            target_right = mirror_pose(T_l)
+
+        return super().solve(target_left, target_right, q0_left, q0_right, backend=backend, **ik_kwargs)

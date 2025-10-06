@@ -52,8 +52,8 @@ def forward_kinematics(
         return poses['end'] if return_end else poses
     elif b == 'torch':
         import torch
-
         from robocore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
+        
         solver = FKSolverTorch(model)
         if dtype is None:
             dtype = torch.float64
