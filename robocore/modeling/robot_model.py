@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Any, ClassVar, Tuple
+from typing import Dict, List, Optional, Sequence, Any, ClassVar, Tuple, Union
 
 from .parser.urdf_parser import load_urdf, URDFJoint
 from .parser.mjcf_parser import load_mjcf
@@ -31,6 +31,7 @@ from robocore.kinematics.fk import forward_kinematics
 from robocore.kinematics.ik import inverse_kinematics
 from robocore.kinematics.jacobian import jacobian
 from robocore.kinematics.utils import relative_pose_error, relative_jacobian
+from robocore.utils.backend import get_backend
 import numpy as np
 
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
@@ -378,6 +379,21 @@ class RobotModel:
             self._groups[name] = self.spawn_chain(end)
         return dict(self._groups)
 
+    def group(self, name: str) -> Dict[str, Any]:
+        """
+        :param name: Group name
+        :return: Group info {joint_indices, end_link, model}
+        """
+        if not self._groups or name not in self._groups:
+            raise ValueError(f"Group '{name}' not found. Available: {list(self._groups.keys())}")
+
+        group_model = self._groups[name]
+        return {
+            'joint_indices': list(range(len(group_model.joint_names()))),
+            'end_link': group_model.end_link,
+            'model': group_model
+        }
+
     def groups(self) -> Dict[str, "RobotModel"]:
         """
         :return: Current group mapping name -> RobotModel
@@ -430,6 +446,145 @@ class RobotModel:
             return solver.relative_jacobian_between(group_a, group_b, q_a, q_b, backend='torch')
         else:
             raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+
+    def ik_tasks(self, tasks: List[Union[Dict[str, Any], Any]], q0_by_group: Dict[str, Sequence[float]], *,
+                 mode: str = 'weighted', max_iters: int = 100, tol: float = 1e-3,
+                 damping: float = 1e-3, step_limit: float = 0.2, backend: str = 'auto',
+                 verbose: bool = False) -> Dict[str, Any]:
+        """
+        :param tasks: List of task dictionaries or Task objects
+        :param q0_by_group: Initial joint configurations by group
+        :param mode: 'weighted'|'hierarchical'
+        :param max_iters: Maximum iterations
+        :param tol: Convergence tolerance
+        :param damping: DLS damping factor
+        :param step_limit: Maximum step size
+        :param backend: Backend for computation
+        :param verbose: Print progress
+        :return: Solution results
+        """
+        if not self._groups:
+            raise ValueError("No groups defined. Call add_groups first.")
+
+        # Convert Task objects to dictionaries
+        task_dicts = []
+        for task in tasks:
+            if hasattr(task, 'type'):  # Task object
+                task_dict = {
+                    'type': task.type,
+                    'group': task.group,
+                    'group_a': task.group_a,
+                    'group_b': task.group_b,
+                    'target': task.target,
+                    'weight': task.weight,
+                    'priority': task.priority,
+                    'row_mask': task.row_mask,
+                    'joint_indices': task.joint_indices
+                }
+                task_dicts.append(task_dict)
+            else:  # Dictionary
+                task_dicts.append(task)
+
+        b = get_backend() if backend == 'auto' else backend
+        
+        # Use new multi-chain solver
+        from robocore.kinematics.solvers.multi_chain_solver import MultiChainIKSolver
+        from robocore.kinematics.task import Task
+        
+        # Convert dicts to Task objects
+        task_objs = []
+        for td in task_dicts:
+            task_objs.append(Task(
+                type=td.get('type'),
+                group=td.get('group'),
+                group_a=td.get('group_a'),
+                group_b=td.get('group_b'),
+                target=td.get('target'),
+                weight=td.get('weight', 1.0),
+                priority=td.get('priority', 0),
+                row_mask=td.get('row_mask'),
+                joint_indices=td.get('joint_indices')
+            ))
+        
+        solver = MultiChainIKSolver(self._groups)
+        
+        if mode == 'weighted':
+            return solver.solve_weighted(
+                task_objs, q0_by_group, max_iters=max_iters, tol=tol,
+                damping=damping, step_limit=step_limit, backend=b, verbose=verbose
+            )
+        elif mode == 'hierarchical':
+            # Organize by priority
+            from robocore.kinematics.task import organize_by_priority
+            task_groups = organize_by_priority(task_objs)
+            
+            return solver.solve_hierarchical(
+                task_groups, q0_by_group, max_iters=max_iters, tol=tol,
+                damping=damping, step_limit=step_limit, backend=b, verbose=verbose
+            )
+        else:
+            raise ValueError("Unknown mode, expected 'weighted'|'hierarchical'")
+
+    def ik_bimanual_absolute(self, target_left: np.ndarray, target_right: np.ndarray,
+                             q0_left: Sequence[float], q0_right: Sequence[float], *,
+                             weights: Optional[Dict[str, float]] = None, **kwargs) -> Dict[str, Any]:
+        """
+        :param target_left: Left arm target pose
+        :param target_right: Right arm target pose
+        :param q0_left: Left arm initial configuration
+        :param q0_right: Right arm initial configuration
+        :param weights: Task weights
+        :param kwargs: Additional arguments for ik_tasks
+        :return: Solution results
+        """
+        from robocore.kinematics.task import absolute_task
+
+        tasks = [
+            absolute_task('left_arm', target_left, weight=weights.get('left', 1.0) if weights else 1.0),
+            absolute_task('right_arm', target_right, weight=weights.get('right', 1.0) if weights else 1.0)
+        ]
+
+        return self.ik_tasks(tasks, {'left_arm': q0_left, 'right_arm': q0_right}, **kwargs)
+
+    def ik_bimanual_relative(self, target_rel: np.ndarray,
+                             q0_left: Sequence[float], q0_right: Sequence[float], *,
+                             weight: float = 1.0, **kwargs) -> Dict[str, Any]:
+        """
+        :param target_rel: Desired relative transformation
+        :param q0_left: Left arm initial configuration
+        :param q0_right: Right arm initial configuration
+        :param weight: Relative task weight
+        :param kwargs: Additional arguments for ik_tasks
+        :return: Solution results
+        """
+        from robocore.kinematics.task import relative_task
+
+        tasks = [relative_task('left_arm', 'right_arm', target_rel, weight=weight)]
+
+        return self.ik_tasks(tasks, {'left_arm': q0_left, 'right_arm': q0_right}, **kwargs)
+
+    def ik_bimanual_mixed(self, target_left: np.ndarray, target_right: np.ndarray, target_rel: np.ndarray,
+                          q0_left: Sequence[float], q0_right: Sequence[float], *,
+                          weights: Optional[Dict[str, float]] = None, **kwargs) -> Dict[str, Any]:
+        """
+        :param target_left: Left arm target pose
+        :param target_right: Right arm target pose
+        :param target_rel: Desired relative transformation
+        :param q0_left: Left arm initial configuration
+        :param q0_right: Right arm initial configuration
+        :param weights: Task weights {'left', 'right', 'relative'}
+        :param kwargs: Additional arguments for ik_tasks
+        :return: Solution results
+        """
+        from robocore.kinematics.task import absolute_task, relative_task
+
+        tasks = [
+            absolute_task('left_arm', target_left, weight=weights.get('left', 1.0) if weights else 1.0),
+            absolute_task('right_arm', target_right, weight=weights.get('right', 1.0) if weights else 1.0),
+            relative_task('left_arm', 'right_arm', target_rel, weight=weights.get('relative', 1.0) if weights else 1.0)
+        ]
+
+        return self.ik_tasks(tasks, {'left_arm': q0_left, 'right_arm': q0_right}, **kwargs)
 
     def multi_task_ik_weighted(self,
                                tasks: List[Dict[str, Any]],
