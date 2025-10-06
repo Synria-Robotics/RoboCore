@@ -18,3 +18,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
+
+from .robot_model import RobotModel
+
+__all__ = [
+    "RobotModel",
+]

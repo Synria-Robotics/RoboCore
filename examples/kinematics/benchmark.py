@@ -29,7 +29,7 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from robocore import RobotModel
+from robocore.modeling import RobotModel
 from robocore.kinematics import forward_kinematics, inverse_kinematics, jacobian
 from robocore.utils.beauty_logger import beauty_print
 from robocore.utils.path import get_robocore_path
@@ -125,7 +125,7 @@ def cmd_ik_compare(args, model):
     
     # Generate test cases
     qs = [model.random_q(rng) for _ in range(args.samples)]
-    poses = [model.forward_kinematics(q)['end'] for q in qs]
+    poses = [model.fk(q)['end'] for q in qs]
     
     # Build test matrix
     tests = []

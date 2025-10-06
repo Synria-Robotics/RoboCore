@@ -25,7 +25,9 @@ import argparse
 import time
 import numpy as np
 from pathlib import Path
-from robocore import RobotModel, jacobian
+
+from robocore.modeling import RobotModel
+from robocore.kinematics.jacobian import jacobian
 from robocore.utils.beauty_logger import beauty_print
 from robocore.utils.path import get_robocore_path
 
@@ -34,39 +36,39 @@ def main(args):
     # Load model
     urdf = args.urdf
     model = RobotModel(urdf, end_link='tool0')
-    
+
     beauty_print(f"Jacobian Validation: {model.name} ({model.num_dof()} DOF)", type="module")
     beauty_print(f"Backend: {args.backend}", type="info")
-    
+
     rng = np.random.default_rng(args.seed)
-    
+
     if args.backend == 'numpy':
         # NumPy backend comparison
         beauty_print("[1] Analytic vs Numeric Jacobian (NumPy)", type="module", centered=False)
-        
+
         q = np.zeros(model.num_dof())
-        
+
         # Warmup
         jacobian(model, q, backend='numpy', method='analytic')
         jacobian(model, q, backend='numpy', method='numeric')
-        
+
         # Timing
         n_runs = 100
         t0 = time.perf_counter()
         for _ in range(n_runs):
             Ja = jacobian(model, q, backend='numpy', method='analytic')
         time_analytic = (time.perf_counter() - t0) / n_runs * 1000
-        
+
         t0 = time.perf_counter()
         for _ in range(n_runs):
             Jn = jacobian(model, q, backend='numpy', method='numeric')
         time_numeric = (time.perf_counter() - t0) / n_runs * 1000
-        
+
         # Compare
         Ja = jacobian(model, q, backend='numpy', method='analytic')
         Jn = jacobian(model, q, backend='numpy', method='numeric')
         diff = Ja - Jn
-        
+
         beauty_print(f"Analytic time:  {time_analytic:.4f} ms")
         beauty_print(f"Numeric time:   {time_numeric:.4f} ms")
         beauty_print(f"Speedup:        {time_numeric/time_analytic:.2f}x", type="success")
@@ -75,89 +77,91 @@ def main(args):
         beauty_print(f"  Angular block max:     {np.max(np.abs(diff[3:6, :])):.3e}")
         beauty_print(f"  Overall max:           {np.max(np.abs(diff)):.3e}")
         beauty_print(f"  Frobenius norm:        {np.linalg.norm(diff, 'fro'):.3e}")
-        
+
         # Test multiple configurations
         beauty_print(f"[2] Accuracy across {args.samples} random configurations", type="module", centered=False)
-        
+
         max_diffs = []
         for i in range(args.samples):
             q_rand = []
             for js in model._actuated:  # type: ignore[attr-defined]
                 lo, hi = -1.0, 1.0
                 if js.limit:
-                    if js.limit[0] is not None: lo = js.limit[0]
-                    if js.limit[1] is not None: hi = js.limit[1]
+                    if js.limit[0] is not None:
+                        lo = js.limit[0]
+                    if js.limit[1] is not None:
+                        hi = js.limit[1]
                 q_rand.append(float(rng.uniform(lo * 0.7, hi * 0.7)))
-            
+
             Ja = jacobian(model, q_rand, backend='numpy', method='analytic')
             Jn = jacobian(model, q_rand, backend='numpy', method='numeric')
             max_diff = np.max(np.abs(Ja - Jn))
             max_diffs.append(max_diff)
-        
+
         beauty_print(f"Max difference statistics:")
         beauty_print(f"  Mean:   {np.mean(max_diffs):.3e}")
         beauty_print(f"  Median: {np.median(max_diffs):.3e}")
         beauty_print(f"  Max:    {np.max(max_diffs):.3e}")
         beauty_print(f"  Min:    {np.min(max_diffs):.3e}")
-        
+
     else:  # torch
         try:
             import torch
         except ImportError:
             beauty_print("PyTorch not available", type="error")
             return
-        
+
         device = torch.device(args.device)
         beauty_print(f"PyTorch device: {device}", type="info")
         beauty_print("[1] Analytic vs Numeric vs Autograd Jacobian (PyTorch)", type="module")
-        
+
         q = torch.zeros(model.num_dof(), dtype=torch.float64, device=device)
-        
+
         # Compute all three using unified interface
         Ja = jacobian(model, q, backend='torch', method='analytic', device=device)
         Jn = jacobian(model, q, backend='torch', method='numeric', device=device)
         Jg = jacobian(model, q, backend='torch', method='autograd', device=device)
-        
+
         # Compare
         diff_an = (Ja - Jn).cpu().numpy()
         diff_ag = (Ja - Jg).cpu().numpy()
         diff_ng = (Jn - Jg).cpu().numpy()
-        
+
         beauty_print("Analytic vs Numeric:")
         beauty_print(f"  Max difference:        {np.max(np.abs(diff_an)):.3e}")
         beauty_print(f"  Frobenius norm:        {np.linalg.norm(diff_an, 'fro'):.3e}")
-        
+
         beauty_print("Analytic vs Autograd:")
         beauty_print(f"  Max difference:        {np.max(np.abs(diff_ag)):.3e}")
         beauty_print(f"  Frobenius norm:        {np.linalg.norm(diff_ag, 'fro'):.3e}")
-        
+
         beauty_print("Numeric vs Autograd:")
         beauty_print(f"  Max difference:        {np.max(np.abs(diff_ng)):.3e}")
         beauty_print(f"  Frobenius norm:        {np.linalg.norm(diff_ng, 'fro'):.3e}")
-        
+
         # Timing
         beauty_print("[2] Performance comparison", type="module")
         n_runs = 50
-        
+
         t0 = time.perf_counter()
         for _ in range(n_runs):
             _ = jacobian(model, q, backend='torch', method='analytic', device=device)
         time_analytic = (time.perf_counter() - t0) / n_runs * 1000
-        
+
         t0 = time.perf_counter()
         for _ in range(n_runs):
             _ = jacobian(model, q, backend='torch', method='numeric', device=device)
         time_numeric = (time.perf_counter() - t0) / n_runs * 1000
-        
+
         t0 = time.perf_counter()
         for _ in range(n_runs):
             _ = jacobian(model, q, backend='torch', method='autograd', device=device)
         time_autograd = (time.perf_counter() - t0) / n_runs * 1000
-        
+
         beauty_print(f"Analytic:   {time_analytic:.4f} ms")
         beauty_print(f"Numeric:    {time_numeric:.4f} ms")
         beauty_print(f"Autograd:   {time_autograd:.4f} ms")
-    
+
     beauty_print("✓ Jacobian validation complete", type="success")
 
 

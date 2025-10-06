@@ -392,27 +392,18 @@ class RobotModel:
         """
         if not self._groups:
             raise ValueError("No groups defined. Call add_groups first.")
-        # Order by insertion
-        names = list(self._groups.keys())
-        J_blocks = []
-        cols_total = 0
-        for name in names:
-            model = self._groups[name]
-            q = q_by_group[name]
-            J = jacobian(model, q, backend=backend)
-            J = J.detach().cpu().numpy() if hasattr(J, 'detach') else np.array(J)
-            J_blocks.append(J)
-            cols_total += J.shape[1]
-        rows_total = 6 * len(J_blocks)
-        J_whole = np.zeros((rows_total, cols_total))
-        col_offset = 0
-        for i, J in enumerate(J_blocks):
-            r0 = 6 * i
-            r1 = r0 + 6
-            c1 = col_offset + J.shape[1]
-            J_whole[r0:r1, col_offset:c1] = J
-            col_offset = c1
-        return J_whole
+
+        b = get_backend() if backend == 'auto' else backend
+        if b == 'numpy':
+            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_numpy import BiMultiLinkJacobianSolverNumpy
+            solver = BiMultiLinkJacobianSolverNumpy(self._groups)
+            return solver.block_jacobian(q_by_group, backend='numpy')
+        elif b == 'torch':
+            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_torch import BiMultiLinkJacobianSolverTorch
+            solver = BiMultiLinkJacobianSolverTorch(self._groups)
+            return solver.block_jacobian(q_by_group, backend='torch')
+        else:
+            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
 
     def relative_jacobian_between(self, group_a: str, group_b: str,
                                   q_a: Sequence[float], q_b: Sequence[float], *,
@@ -427,10 +418,18 @@ class RobotModel:
         """
         if not self._groups:
             raise ValueError("No groups defined. Call add_groups first.")
-        a = self._groups[group_a]
-        b = self._groups[group_b]
-        J_rel = relative_jacobian(a, b, q_a, q_b, backend=backend)
-        return J_rel.detach().cpu().numpy() if hasattr(J_rel, 'detach') else np.array(J_rel)
+
+        b = get_backend() if backend == 'auto' else backend
+        if b == 'numpy':
+            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_numpy import BiMultiLinkJacobianSolverNumpy
+            solver = BiMultiLinkJacobianSolverNumpy(self._groups)
+            return solver.relative_jacobian_between(group_a, group_b, q_a, q_b, backend='numpy')
+        elif b == 'torch':
+            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_torch import BiMultiLinkJacobianSolverTorch
+            solver = BiMultiLinkJacobianSolverTorch(self._groups)
+            return solver.relative_jacobian_between(group_a, group_b, q_a, q_b, backend='torch')
+        else:
+            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
 
     def multi_task_ik_weighted(self,
                                tasks: List[Dict[str, Any]],

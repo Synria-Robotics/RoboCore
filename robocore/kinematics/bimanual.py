@@ -26,7 +26,6 @@ from typing import Dict, Any, Optional, Sequence, List
 from dataclasses import dataclass
 import numpy as np
 
-from robocore.modeling.robot_model import RobotModel
 from .jacobian import jacobian as single_jacobian
 from .fk import forward_kinematics as single_fk
 from .utils import relative_pose_error, relative_jacobian
@@ -168,8 +167,6 @@ def bimanual_jacobian(
             raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
     elif mode == 'mirror':
         raise NotImplementedError("Jacobian mode not implemented yet: mirror")
-    else:
-        raise ValueError("Unknown mode, expected 'indep'|'relative'|'mirror'")
 
 
 def bimanual_inverse_kinematics(
