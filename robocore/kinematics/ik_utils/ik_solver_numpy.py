@@ -21,7 +21,7 @@ Website: https://synriarobotics.ai
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING, Dict, Sequence
 import numpy as np
 from ..jacobian_utils.jacobian_solver_numpy import JacobianSolverNumPy
 from robocore.transform import rotation_error
@@ -90,6 +90,14 @@ class IKSolverNumPy:
         refine_iters: int = 10,
         refine_pos_tol: float | None = None,
         refine_ori_tol: float | None = None,
+        # Local task extension
+        target_link: str | None = None,
+        row_mask: Sequence[int | bool] | None = None,
+        # Redundancy control
+        nullspace_gain: float = 0.0,
+        joint_centering: bool = True,
+        joint_center_gain: float = 0.2,
+        joint_center_weights: Sequence[float] | None = None,
     ) -> Dict[str, object]:
         """Solve IK with selectable method.
 
@@ -118,9 +126,22 @@ class IKSolverNumPy:
         best_ori_err = np.inf
         jac_type = "analytic" if use_analytic_jacobian else ("numeric_central" if use_central_diff else "numeric_forward")
 
+        # Pre-compute row mask
+        if row_mask is not None:
+            mask_bool = [bool(m) for m in row_mask]
+            if len(mask_bool) != 6:
+                raise ValueError("row_mask must have length 6")
+        else:
+            mask_bool = None
+
         for it in range(1, self.max_iters + 1):
             # Compute current pose - use standalone FK to avoid circular dependency
-            fk = forward_kinematics(self.model, q.tolist(), backend='numpy', return_end=True)
+            if target_link is None:
+                fk = forward_kinematics(self.model, q.tolist(), backend='numpy', return_end=True)
+            else:
+                # Partial FK: reuse Jacobian solver's helper (or replicate minimal logic)
+                fk = self.jacobian_solver._fk_until(q, target_link) if hasattr(
+                    self.jacobian_solver, '_fk_until') else forward_kinematics(self.model, q.tolist(), backend='numpy', return_end=True)
             if isinstance(fk, np.ndarray):
                 R_current = fk[:3, :3]
                 p_current = fk[:3, 3]
@@ -136,7 +157,11 @@ class IKSolverNumPy:
             ori_err_norm = np.linalg.norm(ori_err)
 
             # Weighted error vector
-            err = np.concatenate([pos_weight * pos_err, ori_weight * ori_err])
+            full_err = np.concatenate([pos_weight * pos_err, ori_weight * ori_err])
+            if mask_bool is not None:
+                err = full_err[mask_bool]
+            else:
+                err = full_err
             err_norm = np.linalg.norm(err)
             
             # Track best solution
@@ -170,7 +195,7 @@ class IKSolverNumPy:
                             err_norm = np.linalg.norm(err)
                             break
                         # Always use analytic Jacobian for refinement & pseudoinverse
-                        J_ref = self.jacobian_solver.solve(q_ref, method="analytic")
+                        J_ref = self.jacobian_solver.solve(q_ref, method="analytic", target_link=target_link)
                         if pos_weight != 1.0:
                             J_ref[:3, :] *= pos_weight
                         if ori_weight != 1.0:
@@ -197,13 +222,14 @@ class IKSolverNumPy:
             
             # Compute Jacobian using solver
             if use_analytic_jacobian:
-                J = self.jacobian_solver.solve(q, method="analytic")
+                J = self.jacobian_solver.solve(q, method="analytic", target_link=target_link)
                 jac_type = "analytic"
             else:
                 J = self.jacobian_solver.solve(
                     q, 
                     method="numeric",
-                    use_central_diff=use_central_diff
+                    use_central_diff=use_central_diff,
+                    target_link=target_link,
                 )
                 jac_type = "numeric_central" if use_central_diff else "numeric_forward"
 
@@ -211,18 +237,22 @@ class IKSolverNumPy:
                 J[:3, :] *= pos_weight
             if ori_weight != 1.0:
                 J[3:6, :] *= ori_weight
+            if mask_bool is not None:
+                J_eff = J[mask_bool, :]
+            else:
+                J_eff = J
 
             # Damping (used by dls/pinv)
             if adaptive_damping:
-                damping = self._compute_adaptive_damping(J, pos_err_norm, ori_err_norm)
+                damping = self._compute_adaptive_damping(J_eff, pos_err_norm, ori_err_norm)
             else:
                 damping = (self.min_damping + self.max_damping) / 2
 
             # Solve per method
             if method == "dls":
-                dq = self._solve_dls(J, err, damping)
+                dq = self._solve_dls(J_eff, err, damping)
             elif method == "pinv":
-                dq = self._solve_pinv(J, err, damping)
+                dq = self._solve_pinv(J_eff, err, damping)
             else:  # transpose
                 # Jacobian Transpose 方法
                 # 使用自适应增益：alpha = ||err||² / ||J @ J.T @ err||²
@@ -241,7 +271,37 @@ class IKSolverNumPy:
                         alpha_raw = 0.01
                     # 限制 alpha 范围避免步长过大
                     alpha = np.clip(alpha_raw, 0.001, 0.5)
-                dq = alpha * (J.T @ err)
+                dq = alpha * (J_eff.T @ err)
+
+            # Nullspace redundancy handling (only if more joints than task rows and gain>0)
+            if nullspace_gain > 0 and self.n > J_eff.shape[0]:
+                # Compute pseudoinverse of effective task Jacobian
+                try:
+                    U_ns, S_ns, Vt_ns = np.linalg.svd(J_eff, full_matrices=False)
+                    S_inv_ns = np.array([1/s if s > 1e-9 else 0.0 for s in S_ns])
+                    J_pinv_eff = (Vt_ns.T * S_inv_ns) @ U_ns.T
+                    N = np.eye(self.n) - J_pinv_eff @ J_eff
+                    if joint_centering:
+                        centers = []
+                        for js in self.model._actuated:
+                            lo, hi = -1.0, 1.0
+                            if js.limit:
+                                if js.limit[0] is not None:
+                                    lo = js.limit[0]
+                                if js.limit[1] is not None:
+                                    hi = js.limit[1]
+                            centers.append(0.5 * (lo + hi))
+                        centers = np.asarray(centers)
+                        delta_center = centers - q
+                        if joint_center_weights is not None and len(joint_center_weights) == self.n:
+                            w = np.asarray(joint_center_weights)
+                            delta_center = delta_center * w
+                        dq_sec = joint_center_gain * delta_center
+                    else:
+                        dq_sec = np.zeros(self.n)
+                    dq += nullspace_gain * (N @ dq_sec)
+                except Exception:
+                    pass  # fallback ignore
 
             # Step scaling (transpose 方法的 alpha 已经是最优步长，不需要额外缩放)
             if method != "transpose" and adaptive_step:

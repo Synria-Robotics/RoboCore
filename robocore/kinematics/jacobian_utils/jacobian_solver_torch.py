@@ -77,6 +77,7 @@ class JacobianSolverTorch:
         use_central_diff: bool = True,
         device: Optional[torch.device] = None,
         dtype: Optional[torch.dtype] = None,
+        target_link: str | None = None,
     ) -> Tensor:
         """Compute Jacobian matrix (supports both single and batch modes).
         
@@ -108,13 +109,19 @@ class JacobianSolverTorch:
         if is_batch:
             # Batch mode: q is [B, n]
             if method == "analytic":
+                if target_link is not None:
+                    # For batch + partial target, fall back to per-sample analytic computation
+                    J_list = []
+                    for qb in q:
+                        J_list.append(self._solve_analytic(qb, device, dtype, target_link=target_link))
+                    return torch.stack(J_list, dim=0)
                 return self._solve_analytic_batch(q, device, dtype)
             else:
                 raise NotImplementedError(f"Batch mode only supports 'analytic' method, got '{method}'")
         else:
             # Single mode: q is (n,)
             if method == "analytic":
-                return self._solve_analytic(q, device, dtype)
+                return self._solve_analytic(q, device, dtype, target_link=target_link)
             elif method == "numeric":
                 return self._solve_numeric(q, epsilon, use_central_diff, device, dtype)
             elif method == "autograd":
@@ -122,8 +129,17 @@ class JacobianSolverTorch:
             else:
                 raise ValueError(f"Unknown method '{method}', expected 'analytic', 'numeric', or 'autograd'")
     
-    def _solve_analytic(self, q, device, dtype) -> Tensor:
-        """Compute analytic (geometric) Jacobian."""
+    def _solve_analytic(self, q, device, dtype, target_link: str | None = None) -> Tensor:
+        """Compute analytic (geometric) Jacobian.
+
+        If target_link is provided, the forward traversal is terminated early
+        once the joint whose child link equals target_link is reached. This
+        yields a local Jacobian for that intermediate link (with respect to the
+        world frame, angular rows expressed in the local link frame consistent
+        with the end-effector convention). J columns for joints appearing after
+        the truncated link in the kinematic chain (if any) will be zero because
+        they do not influence that link pose.
+        """
         if not torch.is_tensor(q):
             q = torch.tensor(q, dtype=dtype, device=device)
         else:
@@ -141,6 +157,7 @@ class JacobianSolverTorch:
         
         end_T = T_parent
         
+        reached_target = False
         for urdf_joint in self.model._chain_joints:
             R_origin = self._rpy_matrix_torch(
                 torch.tensor(urdf_joint.origin_rpy[0], dtype=dtype, device=device),
@@ -188,6 +205,9 @@ class JacobianSolverTorch:
             T_child = T_joint_origin @ T_motion
             T_parent = T_child
             end_T = T_child
+            if target_link is not None and urdf_joint.child == target_link:
+                reached_target = True
+                break
         
         p_end = end_T[:3, 3]
         
@@ -197,8 +217,11 @@ class JacobianSolverTorch:
             z_i = z_list[i]
             p_i = p_list[i]
             if z_i is None or p_i is None:
+                # If target_link caused early stop, remaining joints have no influence → leave zero column
+                if target_link is not None and reached_target:
+                    continue
                 raise RuntimeError("Internal error: missing joint axis or origin position")
-            
+
             js = self.model._actuated[i]
             if js.joint_type == "revolute":
                 J_geo[:3, i] = torch.linalg.cross(z_i, (p_end - p_i))

@@ -20,29 +20,11 @@ Website: https://synriarobotics.ai
 """
 
 from __future__ import annotations
-from typing import Any, Sequence, Union
+
+from typing import Any, Iterable, List, Optional, Sequence, Union
 
 from robocore.kinematics.jacobian_utils.jacobian_solver_numpy import JacobianSolverNumPy
-
-_HAS_TORCH = False
-try:  # pragma: no cover
-    from robocore.kinematics.jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
-    import torch  # type: ignore
-    _HAS_TORCH = True
-except Exception:  # noqa: E722
-    torch = None  # type: ignore
-    JacobianSolverTorch = None  # type: ignore
-
-
-def _select_backend(backend: str) -> str:
-    """Select backend automatically or validate user choice."""
-    if backend == 'auto':
-        return 'torch' if _HAS_TORCH else 'numpy'
-    if backend not in ('numpy', 'torch'):
-        raise ValueError(f"Unsupported backend '{backend}', expected 'auto'|'numpy'|'torch'")
-    if backend == 'torch' and not _HAS_TORCH:
-        raise RuntimeError("Torch backend requested but PyTorch is not available")
-    return backend
+from robocore.utils.backend import get_backend
 
 
 def jacobian(
@@ -51,6 +33,10 @@ def jacobian(
     *,
     backend: str = 'auto',
     method: str = 'analytic',
+    # Local / partial options
+    target_link: Optional[str] = None,
+    joint_indices: Optional[Sequence[int]] = None,
+    row_mask: Optional[Sequence[int | bool]] = None,
     # Numeric Jacobian options
     epsilon: float = 5e-5,
     use_central_diff: bool = True,
@@ -58,92 +44,80 @@ def jacobian(
     device: Any | None = None,
     dtype: Any | None = None,
 ) -> Union[Any, Any]:
-    """Compute 6×n geometric Jacobian matrix.
-
-    The Jacobian relates joint velocities to end-effector spatial velocity
-    (linear + angular). Uses axis-angle representation for orientation.
-
-    Parameters
-    ----------
-    model : RobotModel
-        Parsed robot model instance.
-    q : sequence | tensor
-        Joint configuration of length = dof.
-    backend : str, default 'auto'
-        Backend selection: 'auto' | 'numpy' | 'torch'.
-        'auto' prefers torch if available, else numpy.
-    method : str, default 'analytic'
-        Computation method:
-        - 'analytic': Closed-form geometric Jacobian (fastest, most accurate)
-        - 'numeric': Finite-difference approximation
-        - 'autograd': PyTorch automatic differentiation (torch backend only)
-    epsilon : float, default 5e-5
-        Finite-difference step size (numeric method only).
-    use_central_diff : bool, default True
-        Use central differences for numeric method (more accurate than forward).
-    device : torch device, optional
-        PyTorch device for torch backend (e.g., 'cpu', 'cuda').
-    dtype : torch dtype, optional
-        PyTorch dtype for torch backend. Defaults to float64 if omitted.
-
-    Returns
-    -------
-    ndarray | Tensor
-        6×n Jacobian matrix. Rows 0-2: linear velocity components (m/s per rad/s),
-        Rows 3-5: angular velocity components (rad/s per rad/s).
-        Type matches backend: numpy.ndarray or torch.Tensor.
-
-    Raises
-    ------
-    ValueError
-        If backend or method is invalid.
-    RuntimeError
-        If torch backend requested but unavailable.
-
-    Notes
-    -----
-    - Analytic method is recommended for production use (fast & accurate).
-    - Numeric method useful for validation but slower.
-    - Autograd method (torch only) validates against automatic differentiation.
-    - Orientation uses axis-angle error representation (not standard geometric).
-
-    Examples
-    --------
-    >>> J = jacobian(model, q)  # Auto backend, analytic
-    >>> J_num = jacobian(model, q, method='numeric')
-    >>> J_torch = jacobian(model, q, backend='torch', device='cpu')
     """
-    b = _select_backend(backend)
+    :param model: RobotModel instance
+    :param q: Joint configuration
+    :param backend: 'auto'|'numpy'|'torch'
+    :param method: 'analytic'|'numeric'|'autograd'
+    :param target_link: Target link name
+    :param joint_indices: Selected joint indices
+    :param row_mask: Row selection mask (len=6)
+    :param epsilon: Finite-difference step (numeric)
+    :param use_central_diff: Use central difference (numeric)
+    :param device: Torch device when using torch backend
+    :param dtype: Torch dtype when using torch backend
+    :return: 6xn Jacobian matrix
+    """
+    b = get_backend() if backend == 'auto' else backend
+
     method = method.lower()
 
     if b == 'numpy':
         # NumPy backend
         solver = JacobianSolverNumPy(model)
         if method in ('analytic', 'numeric'):
-            return solver.solve(q, method=method, epsilon=epsilon, use_central_diff=use_central_diff)
+            J = solver.solve(
+                q,
+                method=method,
+                epsilon=epsilon,
+                use_central_diff=use_central_diff,
+                target_link=target_link,
+            )
+            # Apply row mask (rows) if provided
+            if row_mask is not None:
+                mask_bool: List[bool] = [bool(m) for m in row_mask]
+                if len(mask_bool) != 6:
+                    raise ValueError("row_mask must have length 6 (for 6 twist components)")
+                J = J[mask_bool, :]
+            # Apply joint (column) selection if provided
+            if joint_indices is not None:
+                J = J[:, list(joint_indices)]
+            return J
         elif method == 'autograd':
             raise ValueError("Autograd method requires torch backend")
         else:
             raise ValueError(f"Unknown method '{method}' for numpy backend. Use 'analytic' or 'numeric'.")
+    elif b == 'torch':
+        import torch
+        from robocore.kinematics.jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
 
-    # Torch backend
-    solver_torch = JacobianSolverTorch(model)  # type: ignore[misc]
-    
-    # Decide dtype default
-    if dtype is None and _HAS_TORCH:  # pragma: no branch
-        dtype = torch.float64  # type: ignore[attr-defined]
-    
-    if method in ('analytic', 'numeric', 'autograd'):
-        return solver_torch.solve(
-            q,
-            method=method,
-            epsilon=epsilon,
-            use_central_diff=use_central_diff,
-            device=device,
-            dtype=dtype,
-        )
+        solver = JacobianSolverTorch(model)
+
+        if dtype is None:
+            dtype = torch.float64
+
+        if method in ('analytic', 'numeric', 'autograd'):
+            J = solver.solve(
+                q,
+                method=method,
+                epsilon=epsilon,
+                use_central_diff=use_central_diff,
+                device=device,
+                dtype=dtype,
+                target_link=target_link,
+            )
+            if row_mask is not None:
+                mask_bool: List[bool] = [bool(m) for m in row_mask]
+                if len(mask_bool) != 6:
+                    raise ValueError("row_mask must have length 6")
+                J = J[mask_bool, :]
+            if joint_indices is not None:
+                J = J[:, torch.tensor(list(joint_indices), dtype=torch.long)]
+            return J
+        else:
+            raise ValueError(f"Unknown method '{method}'. Use 'analytic', 'numeric', or 'autograd'.")
     else:
-        raise ValueError(f"Unknown method '{method}'. Use 'analytic', 'numeric', or 'autograd'.")
+        raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
 
 
 __all__ = ["jacobian"]

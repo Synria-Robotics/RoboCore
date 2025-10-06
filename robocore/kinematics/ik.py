@@ -20,27 +20,13 @@ Website: https://synriarobotics.ai
 """
 
 from __future__ import annotations
-from typing import Sequence, Dict, Any, Optional, List
+
+from typing import Any, Dict, List, Optional, Sequence
+
 import numpy as np
 
 from robocore.kinematics.ik_utils.ik_solver_numpy import IKSolverNumPy
-
-_HAS_TORCH = False
-try:  # pragma: no cover
-    from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
-    _HAS_TORCH = True
-except Exception:  # noqa: E722
-    pass
-
-
-def _select_backend(backend: str) -> str:
-    if backend == 'auto':
-        return 'torch' if _HAS_TORCH else 'numpy'
-    if backend not in ('numpy', 'torch'):
-        raise ValueError(f"Unknown backend '{backend}'")
-    if backend == 'torch' and not _HAS_TORCH:
-        raise RuntimeError('Torch backend requested but torch not available')
-    return backend
+from robocore.utils.backend import get_backend
 
 
 def inverse_kinematics(
@@ -49,52 +35,97 @@ def inverse_kinematics(
     q0: Sequence[float],
     *,
     backend: str = 'auto',
-    method: str = 'pinv',
+    method: str = 'dls',
     multi_start: int = 0,
     multi_noise: float = 0.3,
     random_seed: Optional[int] = None,
+    # Local / partial task options
+    target_link: Optional[str] = None,
+    row_mask: Optional[Sequence[int | bool]] = None,
+    # Redundancy / nullspace parameters
+    nullspace_gain: float = 0.0,
+    joint_centering: bool = True,
+    joint_center_gain: float = 0.2,
+    # Optional joint weights for centering (len = dof)
+    joint_center_weights: Optional[Sequence[float]] = None,
     # torch specific passthrough (ignored by numpy backend)
     torch_device: Any | None = None,
     torch_dtype: Any | None = None,
+    return_all: bool = False,
     **solver_kwargs,
 ) -> Dict[str, Any]:
-    """Unified IK entry.
-
-    :param model: RobotModel
-    :param target_pose: 4x4 pose (list or ndarray)
-    :param q0: initial configuration
+    """
+    :param model: RobotModel instance
+    :param target_pose: 4x4 pose
+    :param q0: Initial configuration
     :param backend: 'auto'|'numpy'|'torch'
     :param method: 'pinv'|'dls'|'transpose'
-    :param multi_start: extra random restarts count (0 disable)
-    :param multi_noise: gaussian noise scale (radians) for restarts
-    :param random_seed: seed for reproducibility
-    :param torch_device: specify torch device when backend='torch' (e.g. 'cpu' or 'cuda')
-    :param torch_dtype: specify torch dtype (e.g. torch.float32) when backend='torch'
-    :param solver_kwargs: forwarded to concrete solver (e.g. max_iters, pos_tol, ori_tol, ...)
+    :param multi_start: Restart trials
+    :param multi_noise: Gaussian noise scale (radians)
+    :param random_seed: Seed for reproducibility
+    :param torch_device: Torch device when using torch backend
+    :param torch_dtype: Torch dtype when using torch backend
+    :param return_all: Return all solutions
+    :param solver_kwargs: Extra kwargs passed to solver
+    :return: IK result dict
     """
-    b = _select_backend(backend)
+    b = get_backend() if backend == 'auto' else backend
+
     rng = np.random.default_rng(random_seed) if random_seed is not None else None
 
     def _run_once(q_init):
         if b == 'numpy':
-            solver = IKSolverNumPy(model, max_iters=solver_kwargs.pop('max_iters', 120), pos_tol=solver_kwargs.pop('pos_tol', 1e-4), ori_tol=solver_kwargs.pop('ori_tol', 1e-4))
-            res = solver.solve(np.asarray(target_pose), np.asarray(q_init), method=method, use_analytic_jacobian=solver_kwargs.pop('use_analytic_jacobian', True), **solver_kwargs)
+            solver = IKSolverNumPy(
+                model,
+                max_iters=solver_kwargs.pop('max_iters', 120),
+                pos_tol=solver_kwargs.pop('pos_tol', 1e-4),
+                ori_tol=solver_kwargs.pop('ori_tol', 1e-4),
+            )
+            res = solver.solve(
+                np.asarray(target_pose),
+                np.asarray(q_init),
+                method=method,
+                use_analytic_jacobian=solver_kwargs.pop('use_analytic_jacobian', True),
+                target_link=target_link,
+                row_mask=row_mask,
+                nullspace_gain=nullspace_gain,
+                joint_centering=joint_centering,
+                joint_center_gain=joint_center_gain,
+                joint_center_weights=joint_center_weights,
+                **solver_kwargs,
+            )
             res['backend'] = 'numpy'
             return res
-        # torch backend
-        # 默认强制使用 cpu 除非显式传入 cuda
-        dev = torch_device if torch_device is not None else 'cpu'
-        solver = IKSolverTorch(
-            model,
-            max_iters=solver_kwargs.pop('max_iters', 120),
-            pos_tol=solver_kwargs.pop('pos_tol', 1e-4),
-            ori_tol=solver_kwargs.pop('ori_tol', 1e-4),
-            device=dev,
-            dtype=torch_dtype,
-        )  # type: ignore
-        res = solver.solve(np.asarray(target_pose), q_init, method=method, **solver_kwargs)  # type: ignore[arg-type]
-        res['backend'] = 'torch'
-        return res
+        elif b == 'torch':
+            import torch
+
+            from robocore.kinematics.ik_utils.ik_solver_torch import \
+                IKSolverTorch
+            dev = torch_device if torch_device is not None else 'cpu'
+            solver = IKSolverTorch(
+                model,
+                max_iters=solver_kwargs.pop('max_iters', 120),
+                pos_tol=solver_kwargs.pop('pos_tol', 1e-4),
+                ori_tol=solver_kwargs.pop('ori_tol', 1e-4),
+                device=dev,
+                dtype=torch_dtype,
+            )
+            res = solver.solve(
+                np.asarray(target_pose),
+                q_init,
+                method=method,
+                target_link=target_link,
+                row_mask=row_mask,
+                nullspace_gain=nullspace_gain,
+                joint_centering=joint_centering,
+                joint_center_gain=joint_center_gain,
+                joint_center_weights=joint_center_weights,
+                **solver_kwargs,
+            )
+            res['backend'] = 'torch'
+            return res
+        else:
+            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
 
     base_res = _run_once(q0)
     if base_res.get('success') or multi_start <= 0:
@@ -111,4 +142,8 @@ def inverse_kinematics(
         successes.sort(key=lambda c: c['err_norm'])
         return successes[0]
     candidates.sort(key=lambda c: c['err_norm'])
-    return candidates[0]
+
+    if return_all:
+        return candidates
+    else:
+        return candidates[0]

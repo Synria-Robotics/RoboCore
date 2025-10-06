@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Any
+from typing import Dict, List, Optional, Sequence, Any, ClassVar, Tuple
 
 from .parser.urdf_parser import load_urdf, URDFJoint
 from .parser.mjcf_parser import load_mjcf
@@ -33,6 +33,12 @@ from robocore.kinematics.jacobian import jacobian
 import numpy as np
 
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+
+
+# Lazy import to avoid circular dependency
+def _get_workspace_analyzer():
+    from robocore.analysis.workspace_analyzer import WorkspaceAnalyzer
+    return WorkspaceAnalyzer
 
 
 @dataclass
@@ -61,6 +67,9 @@ class JointSpec:
     limit: Optional[Sequence[Optional[float]]]
 
 
+_PARSED_ROBOT_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
 class RobotModel:
     """Generic serial chain robot.
 
@@ -68,7 +77,7 @@ class RobotModel:
     :param end_link: override end-effector link name.
     """
 
-    def __init__(self, file_path: str | Path, end_link: Optional[str] = None):
+    def __init__(self, file_path: str | Path, end_link: Optional[str] = None, _parsed: Optional[Dict[str, Any]] = None):
         """Initialize robot model.
 
         :param file_path: path to URDF or MJCF file.
@@ -77,14 +86,28 @@ class RobotModel:
         self.file_path = str(file_path)
         # Auto-detect format by file extension (simple heuristic). If '.xml' we try MJCF first.
         path_lower = str(self.file_path).lower()
-        parsed = None
-        if path_lower.endswith('.xml'):
-            try:
-                parsed = load_mjcf(self.file_path)
-            except Exception as e:
-                beauty_print(f"⚠️ MJCF parse failed ({e}); falling back to URDF parser", type="warning")
+        parsed: Dict[str, Any] | None = _parsed
+        # Cache key (normalize path)
+        cache_key = str(Path(self.file_path).resolve())
         if parsed is None:
-            parsed = load_urdf(self.file_path)
+            # Try cache first
+            cached = _PARSED_ROBOT_CACHE.get(cache_key)
+            if cached is not None:
+                parsed = cached
+            else:
+                # Parse new
+                parsed = None
+                if path_lower.endswith('.xml'):
+                    try:
+                        parsed = load_mjcf(self.file_path)
+                    except Exception as e:
+                        beauty_print(f"⚠️ MJCF parse failed ({e}); falling back to URDF parser", type="warning")
+                if parsed is None:
+                    parsed = load_urdf(self.file_path)
+                # Store in cache (shallow dict copy to avoid accidental mutation)
+                _PARSED_ROBOT_CACHE[cache_key] = parsed
+        # Keep reference for spawn_chain
+        self._parsed_source = parsed
         self.name = parsed.get("name", "")
         self._raw_joints = parsed["joints"]
         self.base_link = parsed["base_links"][0] if parsed["base_links"] else self._raw_joints[0].parent
@@ -110,8 +133,19 @@ class RobotModel:
                 idx += 1
         self.end_link = end_link or (self._chain_joints[-1].child if self._chain_joints else self.base_link)
 
-        beauty_print(f"📦 Loading robot model from: {self.file_path}")
-        beauty_print(f"✓ Robot loaded: {self.num_dof()} DOF, end_link={self.end_link}", type="success")
+        # Workspace cache (lazy-loaded on first access)
+        self._workspace_analyzer = None
+        self._workspace_points = None  # Cached reachable workspace points
+        self._workspace_kdtree = None  # KDTree for fast reachability checks
+        self._workspace_bounds = None  # Bounding box
+
+        # Only print load message if this is the first parse (heuristic: not from cache or explicit _parsed)
+        if cache_key not in _PARSED_ROBOT_CACHE or _parsed is not None:
+            # already handled above; but avoid duplicate logs for spawn_chain
+            pass
+        else:
+            beauty_print(f"📦 Loading robot model from: {self.file_path}")
+            beauty_print(f"✓ Robot loaded: {self.num_dof()} DOF, end_link={self.end_link}", type="success")
             
 
     @staticmethod
@@ -202,15 +236,6 @@ class RobotModel:
             dtype=dtype
         )
 
-    def forward_kinematics(self, q: Sequence[float], return_numpy: bool = True):
-        """Legacy FK interface for backward compatibility with IK/Jacobian solvers.
-
-        :param q: joint values with length dof().
-        :param return_numpy: if True, return NumPy arrays; else convert to lists.
-        :return: dict link->(4x4 pose matrix), end-effector pose under key 'end'.
-        """
-        return self.fk(q, backend='numpy', return_end=False)
-
     def ik(self, target_pose: List[List[float]], q_initial: Optional[Sequence[float]] = None,
            backend: str = 'auto', method: str = 'pinv', max_iters: int = 120,
            pos_tol: float = 1e-4, ori_tol: float = 1e-4, multi_start: int = 0,
@@ -256,7 +281,10 @@ class RobotModel:
 
     def jacobian(self, q: Sequence[float] | Any, *, backend: str = 'auto', method: str = 'analytic',
                  epsilon: float = 5e-5, use_central_diff: bool = True,
-                 device: Any | None = None, dtype: Any | None = None) -> Any:
+                 device: Any | None = None, dtype: Any | None = None,
+                 target_link: str | None = None,
+                 joint_indices: Sequence[int] | None = None,
+                 row_mask: Sequence[int | bool] | None = None) -> Any:
         """Compute 6×n geometric Jacobian matrix.
         The Jacobian relates joint velocities to end-effector spatial velocity
         (linear + angular). Uses axis-angle representation for orientation.
@@ -279,7 +307,10 @@ class RobotModel:
             epsilon=epsilon,
             use_central_diff=use_central_diff,
             device=device,
-            dtype=dtype
+            dtype=dtype,
+            target_link=target_link,
+            joint_indices=joint_indices,
+            row_mask=row_mask,
         )
 
     def random_q(self, rng=None, scale: float = 0.5):
@@ -313,6 +344,25 @@ class RobotModel:
             span = 0.5 * (hi - lo) * scale
             q[js.index] = float(rng.uniform(mid - span, mid + span))
         return q
+
+    # -------- Multi-chain support / spawn ---------
+    def spawn_chain(self, end_link: str) -> "RobotModel":
+        """Create a lightweight chain-specific view sharing the same parsed URDF.
+
+        :param end_link: target end link in the original kinematic tree.
+        :return: new RobotModel instance whose DOF/order corresponds to the chain from base_link to end_link.
+        """
+        return RobotModel(self.file_path, end_link=end_link, _parsed=self._parsed_source)
+
+    def available_leaf_links(self) -> List[str]:
+        """Return leaf links (no outgoing joints) in the full parsed tree.
+
+        Useful to discover multiple end-effectors (e.g., left/right grippers) for spawn_chain.
+        """
+        parents = set(j.parent for j in self._raw_joints)
+        children = set(j.child for j in self._raw_joints)
+        # Leaf = appears as child but never as parent
+        return sorted(list(children - parents))
 
     def random_q_batch(self, batch_size: int, seed: int = None, scale: float = 0.5):
         """
@@ -348,6 +398,99 @@ class RobotModel:
 
         return q_batch
 
+    # -------- Workspace Analysis (lazy-loaded) ---------
+    def compute_workspace(self, num_samples: int = 5000, method: str = 'monte_carlo',
+                          force_recompute: bool = False, verbose: bool = True) -> np.ndarray:
+        """Compute and cache reachable workspace for this chain.
+
+        This method samples the joint space and computes FK to build a point cloud
+        representing the end-effector's reachable positions. The result is cached
+        for fast subsequent reachability checks.
+
+        :param num_samples: number of random joint configurations to sample
+        :param method: sampling method ('monte_carlo', 'grid', 'sobol')
+        :param force_recompute: if True, ignore cached workspace and recompute
+        :param verbose: print progress messages
+        :return: numpy array of shape (num_samples, 3) containing reachable points
+        """
+        if not force_recompute and self._workspace_points is not None:
+            if verbose:
+                beauty_print(f"Using cached workspace ({len(self._workspace_points)} points)", type="info")
+            return self._workspace_points
+
+        if verbose:
+            beauty_print(f"Computing workspace for {self.end_link} ({num_samples} samples)...", type="info")
+
+        # Lazy-load analyzer
+        if self._workspace_analyzer is None:
+            WorkspaceAnalyzer = _get_workspace_analyzer()
+            self._workspace_analyzer = WorkspaceAnalyzer(self, backend='numpy')
+
+        # Compute workspace
+        points = self._workspace_analyzer.compute_reachable_workspace(
+            num_samples=num_samples,
+            method=method,
+            use_parallel=False,  # Keep simple for MVP
+            seed=None
+        )
+
+        # Cache results
+        self._workspace_points = points
+        self._workspace_bounds = self._workspace_analyzer.get_workspace_bounds(points)
+
+        # Build KDTree for fast lookups
+        try:
+            from scipy.spatial import cKDTree
+            self._workspace_kdtree = cKDTree(points)
+            if verbose:
+                beauty_print(
+                    f"✓ Workspace cached: {len(points)} points, bounds={self._workspace_bounds}", type="success")
+        except ImportError:
+            if verbose:
+                beauty_print("⚠️ scipy not available, reachability checks will be slower", type="warning")
+
+        return points
+
+    def is_point_reachable(self, point: np.ndarray | list, tolerance: float = 0.05,
+                           auto_compute: bool = True, num_samples: int = 5000) -> bool:
+        """Check if a 3D point is within the reachable workspace.
+
+        :param point: 3D position [x, y, z]
+        :param tolerance: distance threshold in meters (default 5cm)
+        :param auto_compute: if True and workspace not cached, compute it automatically
+        :param num_samples: samples to use if auto-computing workspace
+        :return: True if point is reachable (within tolerance of cached workspace)
+        """
+        point = np.asarray(point).flatten()[:3]
+
+        # Auto-compute workspace if needed
+        if self._workspace_points is None:
+            if auto_compute:
+                self.compute_workspace(num_samples=num_samples, verbose=False)
+            else:
+                raise ValueError("Workspace not computed. Call compute_workspace() first or set auto_compute=True.")
+
+        # Fast bounding box check first
+        if self._workspace_bounds is not None:
+            margin = tolerance
+            if not (self._workspace_bounds['x'][0] - margin <= point[0] <= self._workspace_bounds['x'][1] + margin and
+                    self._workspace_bounds['y'][0] - margin <= point[1] <= self._workspace_bounds['y'][1] + margin and
+                    self._workspace_bounds['z'][0] - margin <= point[2] <= self._workspace_bounds['z'][1] + margin):
+                return False
+
+        # KDTree query for precise check
+        if self._workspace_kdtree is not None:
+            dist, _ = self._workspace_kdtree.query(point)
+            return dist <= tolerance
+        else:
+            # Fallback: brute-force distance check
+            dists = np.linalg.norm(self._workspace_points - point, axis=1)
+            return np.min(dists) <= tolerance
+
+    def get_workspace_bounds(self) -> Dict[str, Tuple[float, float]] | None:
+        """Return cached workspace bounding box or None if not computed."""
+        return self._workspace_bounds
+
     def summary(self, show_chain: bool = False, title: str = "Robot Model Summary"):
         """Print a concise summary of the robot model.
 
@@ -371,65 +514,100 @@ class RobotModel:
                     f"      axis: {beauty_print_array(j.axis)}  limits: {limit_str}"
                 )
 
-    def print_tree(self, show_fixed: bool = False):
+    def print_tree(self, show_joints: bool = True, show_fixed: bool = False):
         """Print kinematic tree structure showing body/link connections.
-
+        
+        :param show_joints: Whether to include joint names/types in the tree
         :param show_fixed: Whether to include fixed joints in the tree
         """
         beauty_print("Kinematic Tree Structure", type="module", centered=True)
-
         # Build a complete parent-child graph for tree visualization
         visited = set()
+        chain_child_links = {j.child for j in self._chain_joints}
+        # Choose an even lighter pastel green; fallback to basic bright green if 256-color unsupported.
+        import os
+        term = os.environ.get("TERM", "")
+        if "256" in term or "xterm" in term or "screen" in term:
+            GREEN = "\033[38;5;157m"  # very light mint green
+        else:
+            GREEN = "\033[92m"  # basic bright green fallback
+        RESET = "\033[0m"
 
         def print_subtree(link: str, prefix: str = "", is_last: bool = True):
-            """Recursively print tree structure."""
+            """Recursively print tree structure.
+
+            When show_joints is False only link hierarchy is shown (no joint rows).
+            """
             if link in visited:
                 return
             visited.add(link)
 
-            # Determine connector symbols
+            # Determine connector symbols (for this link relative to its parent)
             connector = "└── " if is_last else "├── "
             extension = "    " if is_last else "│   "
 
+            # Whether this link is on active chain
+            link_on_chain = (link == self.base_link) or (link in chain_child_links)
+
             # Print current link
             if link == self.base_link:
-                beauty_print(f"{link} (base)")
+                base_label = f"{link} (base)"
+                if link_on_chain:
+                    base_label = f"{GREEN}{base_label}{RESET}"
+                beauty_print(base_label)
             else:
-                print(f"{prefix}{connector}{link}")
+                line = f"{prefix}{connector}{link}"
+                if link_on_chain:
+                    line = f"{GREEN}{line}{RESET}"
+                print(line)
 
-            # Get children from graph
-            children_joints = self._graph.get(link, [])
+            # Children (full list for traversal)
+            children_all = self._graph.get(link, [])
 
-            # Filter based on show_fixed flag
-            if not show_fixed:
-                children_joints = [j for j in children_joints if j.joint_type in ("revolute", "prismatic")]
+            if show_joints:
+                # Visible joints for printing
+                if show_fixed:
+                    children_print = children_all
+                else:
+                    children_print = [j for j in children_all if j.joint_type in ("revolute", "prismatic")]
 
-            # Print children
-            for i, joint in enumerate(children_joints):
-                is_last_child = (i == len(children_joints) - 1)
+                # Print visible joints
+                for i, joint in enumerate(children_print):
+                    is_last_child = (i == len(children_print) - 1)
+                    joint_symbol = "⚙" if joint.joint_type in ("revolute", "prismatic") else "⊗"
+                    joint_prefix = prefix + extension
+                    joint_connector = "└── " if is_last_child else "├── "
+                    in_chain = any(j.name == joint.name for j in self._chain_joints)
+                    joint_line = f"{joint_prefix}{joint_connector}{joint_symbol} {joint.name} ({joint.joint_type})"
+                    if in_chain:
+                        joint_line = f"{GREEN}{joint_line}{RESET}"
+                    print(joint_line)
+                    child_prefix = prefix + extension + ("    " if is_last_child else "│   ")
+                    print_subtree(joint.child, child_prefix, True)
 
-                # Print joint info
-                joint_symbol = "⚙" if joint.joint_type in ("revolute", "prismatic") else "⊗"
-                joint_prefix = prefix + extension
-                joint_connector = "└── " if is_last_child else "├── "
-
-                # Check if this joint is in the active chain
-                in_chain = any(j.name == joint.name for j in self._chain_joints)
-                chain_marker = " ★" if in_chain else ""
-
-                print(f"{joint_prefix}{joint_connector}{joint_symbol} {joint.name} ({joint.joint_type}){chain_marker}")
-
-                # Recursively print child link
-                child_prefix = prefix + extension + ("    " if is_last_child else "│   ")
-                print_subtree(joint.child, child_prefix, True)
+                # Recurse through hidden (filtered-out) joints so deeper actuated joints are not lost
+                hidden = [j for j in children_all if j not in children_print]
+                for hidden_joint in hidden:
+                    # Do not alter prefix depth since no joint line printed
+                    print_subtree(hidden_joint.child, prefix + extension, False)
+            else:
+                # Link-only view: consider all joints to derive child links (including fixed)
+                child_links = [j.child for j in children_all]
+                for i, child_link in enumerate(child_links):
+                    is_last_child = (i == len(child_links) - 1)
+                    next_prefix = prefix + extension
+                    print_subtree(child_link, next_prefix, is_last_child)
 
         print_subtree(self.base_link)
 
         # Legend
         beauty_print("\nLegend:")
-        print("  ⚙  = Actuated joint (revolute/prismatic)")
-        print("  ⊗  = Fixed joint")
-        print("  ★  = Part of active chain to end-effector")
+        if show_joints:
+            print("  ⚙  = Actuated joint (revolute/prismatic)")
+            print("  ⊗  = Fixed joint")
+            print("  Green = Active chain (links & joints) to selected end-effector")
+        else:
+            print("  Green = Active chain (links) to selected end-effector")
 
 
 __all__ = ["RobotModel", "JointSpec"]

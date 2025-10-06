@@ -30,8 +30,6 @@
 ### Backend Support
 - ✅ **NumPy** - CPU-optimized, 50-100x faster than pure Python
 - ✅ **PyTorch** - GPU acceleration for batch operations
-- 🎯 **CuPy** - Planned
-- 🎯 **JAX** - Planned
 
 ---
 
@@ -165,22 +163,14 @@ pytest --cov=robocore --cov-report=html
 - [ ] **Control** - PID, MPC, impedance controllers
 
 ### Medium Priority 🟡
-- [ ] **Additional Backends** - CuPy, JAX support
 - [ ] **Optimization** - Further SIMD/vectorization improvements
 - [ ] **Mobile Manipulators** - Support for mobile bases
 - [ ] **Multi-Arm Systems** - Coordinated multi-robot control
 
 ### Low Priority 🟢
-- [ ] **ROS Integration** - ROS/ROS2 bridges
 - [ ] **Visualization** - 3D interactive visualization (PyBullet/MuJoCo)
-- [ ] **URDF Extensions** - Transmission, sensor support
 - [ ] **Documentation** - API docs, tutorials, best practices
 
-### Research & Experimental 🔬
-- [ ] **Learning-based IK** - Neural network IK solvers
-- [ ] **Differentiable Simulation** - End-to-end gradient flow
-- [ ] **Parallel Manipulators** - Stewart platform, delta robots
-- [ ] **Soft Robotics** - Continuum manipulator support
 
 ---
 

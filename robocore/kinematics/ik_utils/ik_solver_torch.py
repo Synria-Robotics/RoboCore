@@ -22,7 +22,7 @@ Website: https://synriarobotics.ai
 from __future__ import annotations
 
 import math
-from typing import Dict, Optional, TYPE_CHECKING
+from typing import Dict, Optional, TYPE_CHECKING, Sequence
 
 try:
     import torch
@@ -91,6 +91,14 @@ class IKSolverTorch:
         method: str = "pinv",
         pos_weight: float = 1.0,
         ori_weight: float = 1.0,
+        # Local task options
+        target_link: str | None = None,
+        row_mask: Optional[Sequence[int | bool]] = None,
+        # Redundancy / nullspace
+        nullspace_gain: float = 0.0,
+        joint_centering: bool = True,
+        joint_center_gain: float = 0.2,
+        joint_center_weights: Optional[Sequence[float]] = None,
         transpose_gain: Optional[float] = None,
         adaptive_damping: bool = True,
         adaptive_step: bool = True,
@@ -145,6 +153,12 @@ class IKSolverTorch:
                 method=method,
                 pos_weight=pos_weight,
                 ori_weight=ori_weight,
+                target_link=target_link,
+                row_mask=row_mask,
+                nullspace_gain=nullspace_gain,
+                joint_centering=joint_centering,
+                joint_center_gain=joint_center_gain,
+                joint_center_weights=joint_center_weights,
                 transpose_gain=transpose_gain,
                 adaptive_damping=adaptive_damping,
                 adaptive_step=adaptive_step,
@@ -169,6 +183,12 @@ class IKSolverTorch:
         method: str = "pinv",
         pos_weight: float = 1.0,
         ori_weight: float = 1.0,
+        target_link: str | None = None,
+        row_mask: Optional[Sequence[int | bool]] = None,
+        nullspace_gain: float = 0.0,
+        joint_centering: bool = True,
+        joint_center_gain: float = 0.2,
+        joint_center_weights: Optional[Sequence[float]] = None,
         transpose_gain: Optional[float] = None,
         adaptive_damping: bool = True,
         adaptive_step: bool = True,
@@ -196,8 +216,16 @@ class IKSolverTorch:
         if base_q0.numel() != self.n:
             raise ValueError(f"q0 size {base_q0.numel()} != dof {self.n}")
 
+        # target_link support: treat intermediate link as effective end-effector if provided
         R_target = target_pose[:3, :3]
         p_target = target_pose[:3, 3]
+
+        if row_mask is not None:
+            mask_bool = [bool(m) for m in row_mask]
+            if len(mask_bool) != 6:
+                raise ValueError("row_mask must have length 6")
+        else:
+            mask_bool = None
 
         attempt_results = []
 
@@ -215,7 +243,10 @@ class IKSolverTorch:
                 # Set backend to torch for transform operations
                 set_backend("torch", device=str(self.device), dtype=self.dtype)
                 
-                T_cur = self.fk_solver.solve(q, return_end_only=True, device=self.device, dtype=self.dtype)["end"]
+                if target_link is None:
+                    T_cur = self.fk_solver.solve(q, return_end_only=True, device=self.device, dtype=self.dtype)["end"]
+                else:
+                    T_cur = self._fk_until_torch(q, target_link)
                 R_cur = T_cur[:3, :3]
                 p_cur = T_cur[:3, 3]
                 pos_err_v = p_target - p_cur
@@ -229,7 +260,11 @@ class IKSolverTorch:
                 ori_err_norm_t = torch.linalg.norm(ori_err_v)  # 保持为tensor
 
                 # 与 NumPy 一致：不使用动态姿态权重调整
-                err = torch.cat([pos_weight * pos_err_v, ori_weight * ori_err_v])
+                full_err = torch.cat([pos_weight * pos_err_v, ori_weight * ori_err_v])
+                if mask_bool is not None:
+                    err = full_err[mask_bool]
+                else:
+                    err = full_err
                 err_norm = torch.linalg.norm(err)
 
                 # 更新最优解 - 使用tensor比较
@@ -298,7 +333,7 @@ class IKSolverTorch:
 
                 # Jacobian using solver
                 if use_numeric_jacobian:
-                    J = self.jacobian_solver.solve(
+                    J_full = self.jacobian_solver.solve(
                         q,
                         method="numeric",
                         use_central_diff=use_central_diff,
@@ -306,22 +341,29 @@ class IKSolverTorch:
                         dtype=self.dtype
                     )
                     jac_type_local = "numeric_central" if use_central_diff else "numeric_forward"
+                    J = J_full
                 else:
-                    J = self.jacobian_solver.solve(
+                    J_full = self.jacobian_solver.solve(
                         q,
                         method="analytic",
                         device=self.device,
-                        dtype=self.dtype
+                        dtype=self.dtype,
+                        target_link=target_link,
                     )
                     jac_type_local = "analytic"
+                    J = J_full
                 if pos_weight != 1.0:
                     J[:3, :] *= pos_weight
                 if ori_weight != 1.0:
                     J[3:6, :] *= ori_weight
+                if mask_bool is not None:
+                    J_eff = J[mask_bool, :]
+                else:
+                    J_eff = J
 
                 # 阻尼
                 if adaptive_damping:
-                    damping = self._compute_adaptive_damping(J, pos_err_norm, ori_err_norm)
+                    damping = self._compute_adaptive_damping(J_eff, pos_err_norm, ori_err_norm)
                 else:
                     damping = 0.5 * (self.min_damping + self.max_damping)
                 if plateau_counter >= 4:
@@ -331,9 +373,9 @@ class IKSolverTorch:
                     damping = max(damping * 1.5, self.max_damping * 2.0)
                 # 解
                 if method == "dls":
-                    dq = self._solve_dls(J, err, damping)
+                    dq = self._solve_dls(J_eff, err, damping)
                 elif method == "pinv":
-                    dq = self._solve_pinv(J, err, damping)
+                    dq = self._solve_pinv(J_eff, err, damping)
                 else:
                     # Jacobian Transpose 方法
                     # 使用自适应增益：alpha = ||err||² / ||J @ J.T @ err||²
@@ -352,7 +394,36 @@ class IKSolverTorch:
                             alpha_raw = 0.01
                         # 限制 alpha 范围避免步长过大
                         alpha = max(0.001, min(alpha_raw, 0.5))
-                    dq = alpha * (J.transpose(0, 1) @ err)
+                    dq = alpha * (J_eff.transpose(0, 1) @ err)
+
+                # Nullspace redundancy (only if n > task_rows)
+                if nullspace_gain > 0 and self.n > J_eff.shape[0]:
+                    try:
+                        U_ns, S_ns, Vt_ns = torch.linalg.svd(J_eff, full_matrices=False)
+                        S_inv_ns = torch.where(S_ns > 1e-9, 1.0 / S_ns, torch.zeros_like(S_ns))
+                        J_pinv_eff = (Vt_ns.transpose(0, 1) * S_inv_ns) @ U_ns.transpose(0, 1)
+                        N = torch.eye(self.n, dtype=self.dtype, device=self.device) - J_pinv_eff @ J_eff
+                        if joint_centering:
+                            centers = []
+                            for js in self.model._actuated:  # type: ignore[attr-defined]
+                                lo, hi = -1.0, 1.0
+                                if js.limit:
+                                    if js.limit[0] is not None:
+                                        lo = js.limit[0]
+                                    if js.limit[1] is not None:
+                                        hi = js.limit[1]
+                                centers.append(0.5 * (lo + hi))
+                            centers_t = torch.tensor(centers, dtype=self.dtype, device=self.device)
+                            delta_center = centers_t - q
+                            if joint_center_weights is not None and len(joint_center_weights) == self.n:
+                                w = torch.tensor(joint_center_weights, dtype=self.dtype, device=self.device)
+                                delta_center = delta_center * w
+                            dq_sec = joint_center_gain * delta_center
+                        else:
+                            dq_sec = torch.zeros(self.n, dtype=self.dtype, device=self.device)
+                        dq = dq + nullspace_gain * (N @ dq_sec)
+                    except Exception:
+                        pass
 
                 # 步长 (transpose 方法的 alpha 已经是最优步长，不需要额外缩放)
                 if method != "transpose" and adaptive_step:
@@ -485,6 +556,49 @@ class IKSolverTorch:
                 if hi is not None:
                     out[js.index] = torch.clamp(out[js.index], max=float(hi))
         return out
+
+    # ==================== Partial FK (single) ====================
+    def _fk_until_torch(self, q: Tensor, target_link: str) -> Tensor:
+        """Compute 4x4 pose of an intermediate link (target_link).
+
+        Mirrors the early-stop traversal logic used in the Torch Jacobian solver
+        (analytic path) to ensure consistent frames and axis extraction.
+        """
+        if not torch.is_tensor(q):
+            q = torch.tensor(q, dtype=self.dtype, device=self.device)
+        q_map = {js.name: q[js.index] for js in self.model._actuated}  # type: ignore[attr-defined]
+        T_parent = torch.eye(4, dtype=self.dtype, device=self.device)
+        for urdf_joint in self.model._chain_joints:  # type: ignore[attr-defined]
+            R_origin = self.jacobian_solver._rpy_matrix_torch(
+                torch.tensor(urdf_joint.origin_rpy[0], dtype=self.dtype, device=self.device),
+                torch.tensor(urdf_joint.origin_rpy[1], dtype=self.dtype, device=self.device),
+                torch.tensor(urdf_joint.origin_rpy[2], dtype=self.dtype, device=self.device),
+            )
+            t_origin = torch.tensor(urdf_joint.origin_xyz, dtype=self.dtype, device=self.device)
+            T_origin = torch.eye(4, dtype=self.dtype, device=self.device)
+            T_origin[:3, :3] = R_origin
+            T_origin[:3, 3] = t_origin
+            T_joint_origin = T_parent @ T_origin
+            R_motion = torch.eye(3, dtype=self.dtype, device=self.device)
+            t_motion = torch.zeros(3, dtype=self.dtype, device=self.device)
+            if urdf_joint.joint_type == "revolute":
+                theta = q_map.get(urdf_joint.name, torch.tensor(0.0, dtype=self.dtype, device=self.device))
+                R_motion = self.jacobian_solver._axis_rotation_torch(
+                    torch.tensor(urdf_joint.axis, dtype=self.dtype, device=self.device), theta
+                )
+            elif urdf_joint.joint_type == "prismatic":
+                d = q_map.get(urdf_joint.name, torch.tensor(0.0, dtype=self.dtype, device=self.device))
+                t_motion = self.jacobian_solver._axis_translation_torch(
+                    torch.tensor(urdf_joint.axis, dtype=self.dtype, device=self.device), d
+                )
+            T_motion = torch.eye(4, dtype=self.dtype, device=self.device)
+            T_motion[:3, :3] = R_motion
+            T_motion[:3, 3] = t_motion
+            T_child = T_joint_origin @ T_motion
+            T_parent = T_child
+            if urdf_joint.child == target_link:
+                return T_child
+        raise ValueError(f"target_link '{target_link}' not found in kinematic chain")
     
     # ==================== Batch Mode IK ====================
     
