@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import Optional, Sequence, Dict, Any
 
 from robocore.modeling.robot_model import RobotModel
+from robocore.kinematics.ik import inverse_kinematics
 
 
 class BiIndependentIKSolverNumpy:
@@ -27,22 +28,18 @@ class BiIndependentIKSolverNumpy:
               q0_left: Optional[Sequence[float]] = None,
               q0_right: Optional[Sequence[float]] = None,
               **ik_kwargs) -> Dict[str, Any]:
-        # Delegate to single-arm IK for each arm separately.
         if q0_left is None:
             q0_left = [0.0] * self.left.num_dof()
         if q0_right is None:
             q0_right = [0.0] * self.right.num_dof()
 
-        res_left = {'q': q0_left, 'success': True, 'pos_err': 0.0, 'ori_err': 0.0, 'iters': 0}
-        res_right = {'q': q0_right, 'success': True, 'pos_err': 0.0, 'ori_err': 0.0, 'iters': 0}
+        tgt_left = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
+        tgt_right = target_right.tolist() if hasattr(target_right, 'tolist') else target_right
 
-        if target_left is not None:
-            tgt_left = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
-            res_left = self.left.ik(tgt_left, q_initial=q0_left, **ik_kwargs)
-
-        if target_right is not None:
-            tgt_right = target_right.tolist() if hasattr(target_right, 'tolist') else target_right
-            res_right = self.right.ik(tgt_right, q_initial=q0_right, **ik_kwargs)
+        res_left = (inverse_kinematics(self.left, tgt_left, q0_left, backend='numpy', **ik_kwargs)
+                    if tgt_left is not None else {'q': q0_left, 'success': True})
+        res_right = (inverse_kinematics(self.right, tgt_right, q0_right, backend='numpy', **ik_kwargs)
+                     if tgt_right is not None else {'q': q0_right, 'success': True})
 
         return {
             'q_left': res_left.get('q', q0_left),
@@ -67,6 +64,7 @@ class BiRelativeIKSolverNumpy(BiIndependentIKSolverNumpy):
               q0_left: Optional[Sequence[float]] = None,
               q0_right: Optional[Sequence[float]] = None,
               constraint_type: str = 'pose',
+              T_rel_grasp=None,
               **ik_kwargs) -> Dict[str, Any]:
         """
         :param target_left: Left target pose
@@ -74,11 +72,30 @@ class BiRelativeIKSolverNumpy(BiIndependentIKSolverNumpy):
         :param q0_left: Initial left configuration
         :param q0_right: Initial right configuration
         :param constraint_type: 'pose'|'position'|'orientation'
+        :param T_rel_grasp: 相对抓取变换（左^-1 @ 右）
         :return: Result dict
         """
-        # For now, delegate to independent IK per arm; future work will use
-        # relative Jacobian-based coupling.
-        return super().solve(target_left, target_right, q0_left, q0_right, **ik_kwargs)
+        # 1. 先解左臂
+        tgt_left = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
+        res_left = (inverse_kinematics(self.left, tgt_left, q0_left, backend='numpy', **ik_kwargs)
+                    if tgt_left is not None else {'q': q0_left, 'success': True})
+        q_left = res_left.get('q', q0_left)
+
+        # 2. 用左臂当前末端和 T_rel_grasp 计算右臂目标
+        T_left_current = self.left.fk(q_left)['end']
+        T_right_constrained = T_left_current @ T_rel_grasp if T_rel_grasp is not None else None
+
+        res_right = (inverse_kinematics(self.right, T_right_constrained, q0_right, backend='numpy', **ik_kwargs)
+                     if T_right_constrained is not None else {'q': q0_right, 'success': True})
+
+        return {
+            'q_left': q_left,
+            'q_right': res_right.get('q', q0_right),
+            'success_left': bool(res_left.get('success', False)),
+            'success_right': bool(res_right.get('success', False)),
+            'res_left': res_left,
+            'res_right': res_right,
+        }
 
 
 class BiMirrorIKSolverNumpy(BiIndependentIKSolverNumpy):
@@ -92,7 +109,9 @@ class BiMirrorIKSolverNumpy(BiIndependentIKSolverNumpy):
               target_right: Optional[Sequence[Sequence[float]]],
               q0_left: Optional[Sequence[float]] = None,
               q0_right: Optional[Sequence[float]] = None,
-              mirror_axis: str = 'y',
+              mirror_axis: str = 'x',
+              T_left_initial=None,
+              T_right_initial=None,
               **ik_kwargs) -> Dict[str, Any]:
         """
         :param target_left: Left target pose
@@ -100,25 +119,34 @@ class BiMirrorIKSolverNumpy(BiIndependentIKSolverNumpy):
         :param q0_left: Initial left configuration
         :param q0_right: Initial right configuration
         :param mirror_axis: Mirror axis 'x'|'y'|'z'
+        :param T_left_initial: 左臂初始参考位姿
+        :param T_right_initial: 右臂初始参考位姿
         :return: Result dict
         """
-        # If only one side provided, mirror it to the other side.
-        def mirror_pose(T):
-            import numpy as np
-            M = np.eye(4)
-            if mirror_axis == 'x':
-                M[0, 0] = -1
-            elif mirror_axis == 'y':
-                M[1, 1] = -1
-            elif mirror_axis == 'z':
-                M[2, 2] = -1
-            return T @ M
+        import numpy as np
+        # 只处理左臂拖动，右臂镜像
+        if target_left is not None and T_left_initial is not None and T_right_initial is not None:
+            # 1. 镜像位置
+            pos_left = np.array(target_left)[0:3, 3]
+            pos_right_mirrored = np.array([-pos_left[0], pos_left[1], pos_left[2]])
 
-        if target_left is None and target_right is not None:
-            T_r = target_right.tolist() if hasattr(target_right, 'tolist') else target_right
-            target_left = mirror_pose(T_r)
-        elif target_right is None and target_left is not None:
-            T_l = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
-            target_right = mirror_pose(T_l)
+            # 2. 镜像旋转
+            R_left_current = np.array(target_left)[0:3, 0:3]
+            R_left_initial = np.array(T_left_initial)[0:3, 0:3]
+            R_delta_left = R_left_current @ R_left_initial.T
+            M_mirror = np.diag([-1, 1, 1])
+            R_delta_right = M_mirror @ R_delta_left @ M_mirror.T
+            R_right_initial = np.array(T_right_initial)[0:3, 0:3]
+            R_right_mirrored = R_delta_right @ R_right_initial
 
-        return super().solve(target_left, target_right, q0_left, q0_right, **ik_kwargs)
+            # 构造右臂目标
+            T_right_mirrored = np.eye(4)
+            T_right_mirrored[0:3, 3] = pos_right_mirrored
+            T_right_mirrored[0:3, 0:3] = R_right_mirrored
+            tgt_right = T_right_mirrored
+        else:
+            tgt_right = target_right
+
+        tgt_left = target_left
+
+        return super().solve(tgt_left, tgt_right, q0_left, q0_right, **ik_kwargs)

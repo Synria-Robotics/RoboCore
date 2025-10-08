@@ -400,53 +400,6 @@ class RobotModel:
         """
         return dict(self._groups)
 
-    def block_jacobian(self, q_by_group: Dict[str, Sequence[float]], *, backend: str = 'auto') -> np.ndarray:
-        """
-        :param q_by_group: Mapping name -> joint vector
-        :param backend: 'auto'|'numpy'|'torch'
-        :return: Block-diagonal Jacobian for all groups stacked as 6*k rows
-        """
-        if not self._groups:
-            raise ValueError("No groups defined. Call add_groups first.")
-
-        b = get_backend() if backend == 'auto' else backend
-        if b == 'numpy':
-            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_numpy import BiMultiLinkJacobianSolverNumpy
-            solver = BiMultiLinkJacobianSolverNumpy(self._groups)
-            return solver.block_jacobian(q_by_group, backend='numpy')
-        elif b == 'torch':
-            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_torch import BiMultiLinkJacobianSolverTorch
-            solver = BiMultiLinkJacobianSolverTorch(self._groups)
-            return solver.block_jacobian(q_by_group, backend='torch')
-        else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
-
-    def relative_jacobian_between(self, group_a: str, group_b: str,
-                                  q_a: Sequence[float], q_b: Sequence[float], *,
-                                  backend: str = 'auto') -> np.ndarray:
-        """
-        :param group_a: First group name
-        :param group_b: Second group name
-        :param q_a: Joint vector of group_a
-        :param q_b: Joint vector of group_b
-        :param backend: 'auto'|'numpy'|'torch'
-        :return: 6 x (n_a + n_b) relative Jacobian (pose)
-        """
-        if not self._groups:
-            raise ValueError("No groups defined. Call add_groups first.")
-
-        b = get_backend() if backend == 'auto' else backend
-        if b == 'numpy':
-            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_numpy import BiMultiLinkJacobianSolverNumpy
-            solver = BiMultiLinkJacobianSolverNumpy(self._groups)
-            return solver.relative_jacobian_between(group_a, group_b, q_a, q_b, backend='numpy')
-        elif b == 'torch':
-            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_torch import BiMultiLinkJacobianSolverTorch
-            solver = BiMultiLinkJacobianSolverTorch(self._groups)
-            return solver.relative_jacobian_between(group_a, group_b, q_a, q_b, backend='torch')
-        else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
-
     def ik_tasks(self, tasks: List[Union[Dict[str, Any], Any]], q0_by_group: Dict[str, Sequence[float]], *,
                  mode: str = 'weighted', max_iters: int = 100, tol: float = 1e-3,
                  damping: float = 1e-3, step_limit: float = 0.2, backend: str = 'auto',
@@ -524,67 +477,6 @@ class RobotModel:
             )
         else:
             raise ValueError("Unknown mode, expected 'weighted'|'hierarchical'")
-
-    def ik_bimanual_absolute(self, target_left: np.ndarray, target_right: np.ndarray,
-                             q0_left: Sequence[float], q0_right: Sequence[float], *,
-                             weights: Optional[Dict[str, float]] = None, **kwargs) -> Dict[str, Any]:
-        """
-        :param target_left: Left arm target pose
-        :param target_right: Right arm target pose
-        :param q0_left: Left arm initial configuration
-        :param q0_right: Right arm initial configuration
-        :param weights: Task weights
-        :param kwargs: Additional arguments for ik_tasks
-        :return: Solution results
-        """
-        from robocore.kinematics.task import absolute_task
-
-        tasks = [
-            absolute_task('left_arm', target_left, weight=weights.get('left', 1.0) if weights else 1.0),
-            absolute_task('right_arm', target_right, weight=weights.get('right', 1.0) if weights else 1.0)
-        ]
-
-        return self.ik_tasks(tasks, {'left_arm': q0_left, 'right_arm': q0_right}, **kwargs)
-
-    def ik_bimanual_relative(self, target_rel: np.ndarray,
-                             q0_left: Sequence[float], q0_right: Sequence[float], *,
-                             weight: float = 1.0, **kwargs) -> Dict[str, Any]:
-        """
-        :param target_rel: Desired relative transformation
-        :param q0_left: Left arm initial configuration
-        :param q0_right: Right arm initial configuration
-        :param weight: Relative task weight
-        :param kwargs: Additional arguments for ik_tasks
-        :return: Solution results
-        """
-        from robocore.kinematics.task import relative_task
-
-        tasks = [relative_task('left_arm', 'right_arm', target_rel, weight=weight)]
-
-        return self.ik_tasks(tasks, {'left_arm': q0_left, 'right_arm': q0_right}, **kwargs)
-
-    def ik_bimanual_mixed(self, target_left: np.ndarray, target_right: np.ndarray, target_rel: np.ndarray,
-                          q0_left: Sequence[float], q0_right: Sequence[float], *,
-                          weights: Optional[Dict[str, float]] = None, **kwargs) -> Dict[str, Any]:
-        """
-        :param target_left: Left arm target pose
-        :param target_right: Right arm target pose
-        :param target_rel: Desired relative transformation
-        :param q0_left: Left arm initial configuration
-        :param q0_right: Right arm initial configuration
-        :param weights: Task weights {'left', 'right', 'relative'}
-        :param kwargs: Additional arguments for ik_tasks
-        :return: Solution results
-        """
-        from robocore.kinematics.task import absolute_task, relative_task
-
-        tasks = [
-            absolute_task('left_arm', target_left, weight=weights.get('left', 1.0) if weights else 1.0),
-            absolute_task('right_arm', target_right, weight=weights.get('right', 1.0) if weights else 1.0),
-            relative_task('left_arm', 'right_arm', target_rel, weight=weights.get('relative', 1.0) if weights else 1.0)
-        ]
-
-        return self.ik_tasks(tasks, {'left_arm': q0_left, 'right_arm': q0_right}, **kwargs)
 
     def multi_task_ik_weighted(self,
                                tasks: List[Dict[str, Any]],
@@ -984,4 +876,161 @@ class RobotModel:
             print("  Green = Active chain (links) to selected end-effector")
 
 
-__all__ = ["RobotModel", "JointSpec"]
+class BimanualRobotModel(RobotModel):
+    """Bimanual robot model with automatic left/right arm groups.
+    
+    Extends RobotModel to provide dual-arm kinematics with automatic group management.
+    The fk/ik/jacobian methods operate on both arms simultaneously.
+    
+    :param file_path: URDF or MJCF file path
+    :param left_end_link: Left arm end-effector link name
+    :param right_end_link: Right arm end-effector link name
+    """
+
+    def __init__(self, file_path: str | Path, left_end_link: str, right_end_link: str):
+        """Initialize bimanual robot model.
+        
+        :param file_path: Path to URDF or MJCF file
+        :param left_end_link: Left arm end-effector link name
+        :param right_end_link: Right arm end-effector link name
+        """
+        # Initialize base RobotModel (full kinematic tree)
+        super().__init__(file_path, end_link=None)
+
+        # Create left and right arm groups
+        self.add_groups({
+            'left_arm': left_end_link,
+            'right_arm': right_end_link
+        })
+
+        self.left_model = self._groups['left_arm']
+        self.right_model = self._groups['right_arm']
+        self.left_end_link = left_end_link
+        self.right_end_link = right_end_link
+
+        beauty_print(f"✓ Bimanual robot initialized:", type="success")
+        beauty_print(f"  Left arm: {self.left_model.num_dof()} DOF, end: {left_end_link}")
+        beauty_print(f"  Right arm: {self.right_model.num_dof()} DOF, end: {right_end_link}")
+
+    def fk(self, q_left: Sequence[float], q_right: Sequence[float],
+           *, backend: str = 'auto', mode: str = 'indep', **kwargs) -> Dict[str, Any]:
+        """Compute forward kinematics for both arms.
+        
+        :param q_left: Left arm joint configuration
+        :param q_right: Right arm joint configuration
+        :param backend: 'auto'|'numpy'|'torch'
+        :param mode: 'indep'|'relative'|'mirror'
+        :return: Dict with 'left' and 'right' end-effector poses
+        """
+        from robocore.kinematics.bimanual import bimanual_forward_kinematics
+        return bimanual_forward_kinematics(
+            self.left_model, self.right_model,
+            q_left, q_right,
+            backend=backend, mode=mode, **kwargs
+        )
+
+    def ik(self, target_left=None, target_right=None,
+           q0_left: Optional[Sequence[float]] = None,
+           q0_right: Optional[Sequence[float]] = None,
+           *, backend: str = 'auto', method: str = 'dls',
+           coordination: str = 'indep',
+           T_rel_grasp=None, T_left_initial=None, T_right_initial=None,
+           **kwargs) -> Dict[str, Any]:
+        """Compute inverse kinematics for both arms.
+        
+        :param target_left: Left arm target pose (4x4)
+        :param target_right: Right arm target pose (4x4)
+        :param q0_left: Initial left configuration
+        :param q0_right: Initial right configuration
+        :param backend: 'auto'|'numpy'|'torch'
+        :param method: 'dls'|'pinv'|'transpose'
+        :param coordination: 'indep'|'relative_pose'|'mirror'
+        :param T_rel_grasp: Relative grasp transform (for relative_pose mode)
+        :param T_left_initial: Left initial reference (for mirror mode)
+        :param T_right_initial: Right initial reference (for mirror mode)
+        :return: Dict with 'q_left', 'q_right', 'success_left', 'success_right'
+        """
+        from robocore.kinematics.bimanual import bimanual_inverse_kinematics
+
+        if q0_left is None:
+            q0_left = [0.0] * self.left_model.num_dof()
+        if q0_right is None:
+            q0_right = [0.0] * self.right_model.num_dof()
+
+        return bimanual_inverse_kinematics(
+            self.left_model, self.right_model,
+            target_left=target_left, target_right=target_right,
+            q0_left=q0_left, q0_right=q0_right,
+            backend=backend, method=method, coordination=coordination,
+            T_rel_grasp=T_rel_grasp,
+            T_left_initial=T_left_initial,
+            T_right_initial=T_right_initial,
+            **kwargs
+        )
+
+    def jacobian(self, q_left: Sequence[float], q_right: Sequence[float],
+                 *, backend: str = 'auto', mode: str = 'indep', **kwargs) -> Any:
+        """Compute Jacobian for both arms.
+        
+        :param q_left: Left arm joint configuration
+        :param q_right: Right arm joint configuration
+        :param backend: 'auto'|'numpy'|'torch'
+        :param mode: 'indep'|'relative'
+        :return: Block-diagonal or relative Jacobian matrix
+        """
+        from robocore.kinematics.bimanual import bimanual_jacobian
+        return bimanual_jacobian(
+            self.left_model, self.right_model,
+            q_left, q_right,
+            backend=backend, mode=mode, **kwargs
+        )
+
+    def block_jacobian(self, q_by_group: Dict[str, Sequence[float]], *, backend: str = 'auto') -> np.ndarray:
+        """
+        :param q_by_group: Mapping name -> joint vector
+        :param backend: 'auto'|'numpy'|'torch'
+        :return: Block-diagonal Jacobian for all groups stacked as 6*k rows
+        """
+        if not self._groups:
+            raise ValueError("No groups defined. Call add_groups first.")
+
+        b = get_backend() if backend == 'auto' else backend
+        if b == 'numpy':
+            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_numpy import BiMultiLinkJacobianSolverNumpy
+            solver = BiMultiLinkJacobianSolverNumpy(self._groups)
+            return solver.block_jacobian(q_by_group, backend='numpy')
+        elif b == 'torch':
+            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_torch import BiMultiLinkJacobianSolverTorch
+            solver = BiMultiLinkJacobianSolverTorch(self._groups)
+            return solver.block_jacobian(q_by_group, backend='torch')
+        else:
+            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+    
+    def relative_jacobian_between(self, group_a: str, group_b: str,
+                                      q_a: Sequence[float], q_b: Sequence[float], *,
+                                      backend: str = 'auto') -> np.ndarray:
+        """
+        :param group_a: First group name
+        :param group_b: Second group name
+        :param q_a: Joint vector of group_a
+        :param q_b: Joint vector of group_b
+        :param backend: 'auto'|'numpy'|'torch'
+        :return: 6 x (n_a + n_b) relative Jacobian (pose)
+        """
+        if not self._groups:
+            raise ValueError("No groups defined. Call add_groups first.")
+
+        b = get_backend() if backend == 'auto' else backend
+        if b == 'numpy':
+            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_numpy import BiMultiLinkJacobianSolverNumpy
+            solver = BiMultiLinkJacobianSolverNumpy(self._groups)
+            return solver.relative_jacobian_between(group_a, group_b, q_a, q_b, backend='numpy')
+        elif b == 'torch':
+            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_torch import BiMultiLinkJacobianSolverTorch
+            solver = BiMultiLinkJacobianSolverTorch(self._groups)
+            return solver.relative_jacobian_between(group_a, group_b, q_a, q_b, backend='torch')
+        else:
+            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+
+
+__all__ = ["RobotModel", "BimanualRobotModel", "JointSpec"]

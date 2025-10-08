@@ -26,7 +26,7 @@ def main():
     controller = InteractiveDualArmIK(mjcf_path, left_end, right_end)
     
     # Run in cooperative mode
-    controller.run(mode='cooperative')
+    controller.run(mode='relative')
 
 
 if __name__ == '__main__':

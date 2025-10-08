@@ -6,9 +6,9 @@ DEMO=$1
 if [ -z "$DEMO" ]; then
     echo "Usage: $0 <demo_name>"
     echo "Available demos:"
-    echo "  independent - Independent dual-arm control"
-    echo "  cooperative - Cooperative control with relative constraint"
-    echo "  mirror      - Mirror symmetric control"
+    echo "  bi_independent - Independent dual-arm control"
+    echo "  bi_relative - relative control with relative constraint"
+    echo "  bi_mirror      - Mirror symmetric control"
     exit 1
 fi
 

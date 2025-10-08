@@ -44,6 +44,7 @@ class BiRelativeJacobianSolverTorch:
     """Relative bimanual Jacobian (Torch).
 
     Assemble Jacobian for relative constraints between right and left arm.
+    Uses numerical differentiation for correctness (adjoint transform is complex).
     """
 
     def __init__(self, left_model: RobotModel, right_model: RobotModel):
@@ -58,37 +59,22 @@ class BiRelativeJacobianSolverTorch:
         :param constraint_type: 'pose'|'position'|'orientation'
         :return: Relative constraint Jacobian
         """
-        J_L = single_jacobian(self.left, q_left, backend=backend)
-        J_R = single_jacobian(self.right, q_right, backend=backend)
-
-        if hasattr(J_L, 'detach'):
-            J_L = J_L.detach()
-        else:
-            J_L = torch.tensor(J_L, dtype=torch.float32)
-        if hasattr(J_R, 'detach'):
-            J_R = J_R.detach()
-        else:
-            J_R = torch.tensor(J_R, dtype=torch.float32)
-
-        nL = J_L.shape[1]
-        nR = J_R.shape[1]
-
+        # Use numerical relative Jacobian from utils (correct adjoint handling)
+        # NOTE: This returns numpy array, so convert to torch
+        from robocore.kinematics.utils import relative_jacobian
+        
+        J_rel_full = relative_jacobian(self.left, self.right, q_left, q_right, backend='numpy')
+        J_rel_full = torch.tensor(J_rel_full, dtype=torch.float64)
+        
+        # Apply constraint type filtering
         if constraint_type == 'pose':
-            J_rel = torch.zeros((6, nL + nR), dtype=torch.float32)
-            J_rel[:, nL:] = J_R
-            J_rel[:, :nL] = -J_L
-            return J_rel
-        if constraint_type == 'position':
-            J_rel = torch.zeros((3, nL + nR), dtype=torch.float32)
-            J_rel[:, nL:] = J_R[:3, :]
-            J_rel[:, :nL] = -J_L[:3, :]
-            return J_rel
-        if constraint_type == 'orientation':
-            J_rel = torch.zeros((3, nL + nR), dtype=torch.float32)
-            J_rel[:, nL:] = J_R[3:, :]
-            J_rel[:, :nL] = -J_L[3:, :]
-            return J_rel
-        raise ValueError("Unknown constraint_type")
+            return J_rel_full
+        elif constraint_type == 'position':
+            return J_rel_full[:3, :]
+        elif constraint_type == 'orientation':
+            return J_rel_full[3:, :]
+        else:
+            raise ValueError("Unknown constraint_type")
 
 
 class BiMultiLinkJacobianSolverTorch:

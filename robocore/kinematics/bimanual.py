@@ -98,6 +98,76 @@ def bimanual_forward_kinematics(
         raise ValueError("Unknown mode, expected 'indep'|'relative'|'mirror'")
 
 
+def bimanual_inverse_kinematics(
+    left_model,
+    right_model,
+    *,
+    target_left=None,
+    target_right=None,
+    q0_left=None,
+    q0_right=None,
+    backend: str = 'auto',
+    method: str = 'dls',
+    coordination: str = 'indep',
+    # Optional advanced params
+    T_rel_grasp=None,
+    T_left_initial=None,
+    T_right_initial=None,
+    return_all: bool = False,
+    **solver_kwargs,
+):
+    """
+    :param left_model: Left arm RobotModel
+    :param right_model: Right arm RobotModel
+    :param target_left: Left target pose
+    :param target_right: Right target pose
+    :param q0_left: Initial left configuration
+    :param q0_right: Initial right configuration
+    :param backend: 'auto'|'numpy'|'torch'
+    :param method: 'dls'|'pinv'|'transpose'
+    :param coordination: 'indep'|'relative_pose'|'relative_pos'|'relative_ori'|'mirror'
+    :param return_all: Return all candidates if available
+    :return: Result dict
+    """
+    b = get_backend() if backend == 'auto' else backend
+    if coordination == 'indep':
+        if b == 'numpy':
+            from robocore.kinematics.ik_utils.bimanual_ik_solver_numpy import BiIndependentIKSolverNumpy
+
+            solver = BiIndependentIKSolverNumpy(left_model, right_model)
+            return solver.solve(target_left, target_right, q0_left, q0_right, method=method, **solver_kwargs)
+        elif b == 'torch':
+            from robocore.kinematics.ik_utils.bimanual_ik_solver_torch import BiIndependentIKSolverTorch
+            solver = BiIndependentIKSolverTorch(left_model, right_model)
+            return solver.solve(target_left, target_right, q0_left, q0_right, method=method, **solver_kwargs)
+        else:
+            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+    elif coordination in ('relative_pose', 'relative_pos', 'relative_ori'):
+        if b == 'numpy':
+            from robocore.kinematics.ik_utils.bimanual_ik_solver_numpy import BiRelativeIKSolverNumpy
+            solver = BiRelativeIKSolverNumpy(left_model, right_model)
+            return solver.solve(target_left, target_right, q0_left, q0_right, constraint_type=('pose' if coordination == 'relative_pose' else 'position' if coordination == 'relative_pos' else 'orientation'), T_rel_grasp=T_rel_grasp, **solver_kwargs)
+        elif b == 'torch':
+            from robocore.kinematics.ik_utils.bimanual_ik_solver_torch import BiRelativeIKSolverTorch
+            solver = BiRelativeIKSolverTorch(left_model, right_model)
+            return solver.solve(target_left, target_right, q0_left, q0_right, constraint_type=('pose' if coordination == 'relative_pose' else 'position' if coordination == 'relative_pos' else 'orientation'), backend='torch', **solver_kwargs)
+        else:
+            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+    elif coordination == 'mirror':
+        if b == 'numpy':
+            from robocore.kinematics.ik_utils.bimanual_ik_solver_numpy import BiMirrorIKSolverNumpy
+            solver = BiMirrorIKSolverNumpy(left_model, right_model)
+            return solver.solve(target_left, target_right, q0_left, q0_right, T_left_initial=T_left_initial, T_right_initial=T_right_initial, **solver_kwargs)
+        elif b == 'torch':
+            from robocore.kinematics.ik_utils.bimanual_ik_solver_torch import BiMirrorIKSolverTorch
+            solver = BiMirrorIKSolverTorch(left_model, right_model)
+            return solver.solve(target_left, target_right, q0_left, q0_right, backend='torch', **solver_kwargs)
+        else:
+            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+    else:
+        raise ValueError("Unknown coordination mode")
+
+
 def bimanual_jacobian(
     left_model,
     right_model,
@@ -167,82 +237,8 @@ def bimanual_jacobian(
             raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
     elif mode == 'mirror':
         raise NotImplementedError("Jacobian mode not implemented yet: mirror")
-
-
-def bimanual_inverse_kinematics(
-    left_model,
-    right_model,
-    *,
-    target_left=None,
-    target_right=None,
-    q0_left=None,
-    q0_right=None,
-    backend: str = 'auto',
-    method: str = 'dls',
-    coordination: str = 'indep',
-    return_all: bool = False,
-    **solver_kwargs,
-):
-    """
-    :param left_model: Left arm RobotModel
-    :param right_model: Right arm RobotModel
-    :param target_left: Left target pose
-    :param target_right: Right target pose
-    :param q0_left: Initial left configuration
-    :param q0_right: Initial right configuration
-    :param backend: 'auto'|'numpy'|'torch'
-    :param method: 'dls'|'pinv'|'transpose'
-    :param coordination: 'indep'|'relative_pose'|'relative_pos'|'relative_ori'|'mirror'
-    :param return_all: Return all candidates if available
-    :return: Result dict
-    """
-    b = get_backend() if backend == 'auto' else backend
-    if coordination == 'indep':
-        if b == 'numpy':
-            from robocore.kinematics.ik_utils.bimanual_ik_solver_numpy import BiIndependentIKSolverNumpy
-
-            solver = BiIndependentIKSolverNumpy(left_model, right_model)
-            return solver.solve(target_left, target_right, q0_left, q0_right, method=method, **solver_kwargs)
-        elif b == 'torch':
-            from robocore.kinematics.ik_utils.bimanual_ik_solver_torch import BiIndependentIKSolverTorch
-            import torch  # type: ignore
-
-            solver = BiIndependentIKSolverTorch(left_model, right_model)
-            return solver.solve(target_left, target_right, q0_left, q0_right, method=method, **solver_kwargs)
-        else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
-    elif coordination in ('relative_pose', 'relative_pos', 'relative_ori'):
-        if b == 'numpy':
-            from robocore.kinematics.ik_utils.bimanual_ik_solver_numpy import BiRelativeIKSolverNumpy
-
-            solver = BiRelativeIKSolverNumpy(left_model, right_model)
-            return solver.solve(target_left, target_right, q0_left, q0_right, constraint_type=('pose' if coordination == 'relative_pose' else 'position' if coordination == 'relative_pos' else 'orientation'), **solver_kwargs)
-        elif b == 'torch':
-            from robocore.kinematics.ik_utils.bimanual_ik_solver_torch import BiRelativeIKSolverTorch
-            import torch  # type: ignore
-
-            solver = BiRelativeIKSolverTorch(left_model, right_model)
-            return solver.solve(target_left, target_right, q0_left, q0_right, constraint_type=('pose' if coordination == 'relative_pose' else 'position' if coordination == 'relative_pos' else 'orientation'), backend='torch', **solver_kwargs)
-        else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
-    elif coordination == 'mirror':
-        if b == 'numpy':
-            from robocore.kinematics.ik_utils.bimanual_ik_solver_numpy import BiMirrorIKSolverNumpy
-
-            solver = BiMirrorIKSolverNumpy(left_model, right_model)
-            return solver.solve(target_left, target_right, q0_left, q0_right, **solver_kwargs)
-        elif b == 'torch':
-            from robocore.kinematics.ik_utils.bimanual_ik_solver_torch import BiMirrorIKSolverTorch
-            import torch  # type: ignore
-
-            solver = BiMirrorIKSolverTorch(left_model, right_model)
-            return solver.solve(target_left, target_right, q0_left, q0_right, backend='torch', **solver_kwargs)
-        else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
-    else:
-        raise ValueError("Unknown coordination mode")
-
-
+    
+    
 __all__ = [
     'relative_pose_error',
     'relative_jacobian',

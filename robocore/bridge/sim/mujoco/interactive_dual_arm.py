@@ -19,9 +19,7 @@ except ImportError:
     MUJOCO_AVAILABLE = False
     print("⚠️  MuJoCo not available. Install with: pip install mujoco")
 
-from robocore.modeling.robot_model import RobotModel
-from robocore.kinematics.task import absolute_task, relative_task
-from robocore.utils.path import get_robocore_path
+from robocore.modeling.robot_model import BimanualRobotModel
 
 
 class InteractiveDualArmIK:
@@ -51,18 +49,11 @@ class InteractiveDualArmIK:
         # Center is at 0.14128 m in X direction from link7
         self.gripper_offset = np.array([0.14128, 0.0, 0.00015, 1.0])  # Homogeneous coordinates
         
-        # Load RoboCore models
-        self.robot = RobotModel(str(self.mjcf_path))
-        self.robot.add_groups({
-            'left_arm': left_end_link,
-            'right_arm': right_end_link
-        })
+        # Load RoboCore bimanual model
+        self.robot = BimanualRobotModel(str(self.mjcf_path), left_end_link, right_end_link)
         
-        self.left_model = self.robot.groups()['left_arm']
-        self.right_model = self.robot.groups()['right_arm']
-        
-        print(f"✓ Left arm: {self.left_model.num_dof()} DOF, end: {left_end_link}")
-        print(f"✓ Right arm: {self.right_model.num_dof()} DOF, end: {right_end_link}")
+        self.left_model = self.robot.left_model
+        self.right_model = self.robot.right_model
         
         # Current joint configuration
         self.q_left = np.zeros(self.left_model.num_dof())
@@ -71,10 +62,14 @@ class InteractiveDualArmIK:
         # Target poses
         self.T_left_target = None
         self.T_right_target = None
-        self.T_center_target = None  # For cooperative mode
-        
+        self.T_center_target = None  # For relative mode
+
+        # Initial reference poses (for mirror mode)
+        self.T_left_initial = None
+        self.T_right_initial = None
+
         # Coordination mode
-        self.mode = 'independent'  # 'independent', 'cooperative', 'mirror'
+        self.mode = 'independent'  # 'independent', 'relative', 'mirror'
         
         # Mocap body IDs (for interactive markers)
         self.left_marker_id = None
@@ -87,13 +82,14 @@ class InteractiveDualArmIK:
         # Initialize targets from current FK
         self._initialize_targets()
         
-        # Relative grasp transform (for cooperative mode)
+        # Relative grasp transform (for relative mode)
         # T_rel = T_left^-1 @ T_right
         self.T_rel_grasp = None
         self._initialize_relative_transform()
         
         self.is_running = False
         self.viewer = None
+        self.reset_requested = False  # Flag for reset request
     
     def _initialize_mocap_ids(self):
         """Find mocap body IDs by name."""
@@ -129,6 +125,10 @@ class InteractiveDualArmIK:
         self.T_left_target = T_left_link7 @ T_offset
         self.T_right_target = T_right_link7 @ T_offset
         
+        # Save initial poses for mirror mode reference
+        self.T_left_initial = self.T_left_target.copy()
+        self.T_right_initial = self.T_right_target.copy()
+
         # Center target is midpoint of left and right
         self.T_center_target = np.eye(4)
         self.T_center_target[0:3, 3] = 0.5 * (self.T_left_target[0:3, 3] + self.T_right_target[0:3, 3])
@@ -149,6 +149,15 @@ class InteractiveDualArmIK:
         self.T_rel_grasp = np.linalg.inv(T_left_link7) @ T_right_link7
         print(f"✓ Initial relative grasp transform set")
     
+    def _keyboard_callback(self, keycode):
+        """Handle keyboard events.
+        
+        :param keycode: Integer keycode from MuJoCo viewer
+        """
+        # Space key (ASCII 32)
+        if keycode == 32:
+            self.reset_requested = True
+
     def _update_markers(self):
         """Update mocap marker poses to match current targets."""
         if self.left_marker_id is not None:
@@ -244,105 +253,87 @@ class InteractiveDualArmIK:
         return T_gripper @ np.linalg.inv(T_offset)
     
     def solve_ik_independent(self):
-        """Solve IK for independent dual-arm control (Demo 1)."""
-        # Convert gripper center targets to link7 targets
-        T_left_link7 = self._gripper_to_link7(self.T_left_target)
-        T_right_link7 = self._gripper_to_link7(self.T_right_target)
+        """Solve IK for independent dual-arm control (Demo 1).
         
-        # Full 6-DOF constraint (position + orientation)
-        tasks = [
-            absolute_task('left_arm', T_left_link7, weight=1.0, row_mask=[1,1,1,1,1,1]),
-            absolute_task('right_arm', T_right_link7, weight=1.0, row_mask=[1,1,1,1,1,1])
-        ]
-        
-        result = self.robot.ik_tasks(
-            tasks,
-            {'left_arm': self.q_left, 'right_arm': self.q_right},
-            mode='weighted',
-            max_iters=15,  # 减少迭代次数
-            tol=1e-2,  # 增大容差到1cm，减少微小振荡
-            verbose=False
+        Uses separate IK solving for each arm to avoid coupling (like JS version).
+        """
+        # Use BimanualRobotModel.ik() with independent coordination
+        res = self.robot.ik(
+            target_left=self._gripper_to_link7(self.T_left_target),
+            target_right=self._gripper_to_link7(self.T_right_target),
+            q0_left=self.q_left,
+            q0_right=self.q_right,
+            backend='numpy',
+            method='dls',
+            coordination='indep',
+            max_iters=15,
+            pos_tol=1e-2,
+            ori_tol=1e-2,
         )
-        
-        if result['success']:
-            self.q_left = np.array(result['q_by_group']['left_arm'])
-            self.q_right = np.array(result['q_by_group']['right_arm'])
+
+        self.q_left = np.array(res['q_left'])
+        self.q_right = np.array(res['q_right'])
     
-    def solve_ik_cooperative(self):
-        """Solve IK for cooperative control with relative constraint (Demo 2)."""
-        # Convert gripper center targets to link7 targets
-        T_left_link7 = self._gripper_to_link7(self.T_left_target)
-        T_right_link7 = self._gripper_to_link7(self.T_right_target)
+    def solve_ik_relative(self):
+        """Solve IK for relative control with master-slave approach (Demo 2).
         
-        # Targets already updated in step(), just solve with relative constraint
-        # Full 6-DOF constraint for absolute tasks
-        tasks = [
-            absolute_task('left_arm', T_left_link7, weight=1.0, row_mask=[1,1,1,1,1,1]),
-            absolute_task('right_arm', T_right_link7, weight=1.0, row_mask=[1,1,1,1,1,1]),
-            relative_task('left_arm', 'right_arm', self.T_rel_grasp, 
-                         weight=2.0, row_mask=[1, 1, 1, 0, 0, 0])  # Only constrain relative position
-        ]
+        Strategy: Left arm is master, right arm follows with relative constraint.
+        This avoids 14-DOF optimization and eliminates coupling oscillations.
         
-        result = self.robot.ik_tasks(
-            tasks,
-            {'left_arm': self.q_left, 'right_arm': self.q_right},
-            mode='weighted',
-            max_iters=15,  # 减少迭代次数
-            tol=1e-2,  # 增大容差
-            verbose=False
+        IMPORTANT: Uses the current T_rel_grasp to maintain relative pose.
+        When dragging green ball, T_rel_grasp should remain constant.
+        When dragging red/blue balls, T_rel_grasp should be updated.
+        """
+        # Use BimanualRobotModel.ik() with relative_pose coordination
+        res = self.robot.ik(
+            target_left=self._gripper_to_link7(self.T_left_target),
+            target_right=None,  # right is constrained by T_rel_grasp
+            q0_left=self.q_left,
+            q0_right=self.q_right,
+            backend='numpy',
+            method='dls',
+            coordination='relative_pose',
+            T_rel_grasp=self.T_rel_grasp,
+            max_iters=15,
+            pos_tol=1e-2,
+            ori_tol=1e-2,
         )
-        
-        if result['success']:
-            self.q_left = np.array(result['q_by_group']['left_arm'])
-            self.q_right = np.array(result['q_by_group']['right_arm'])
+
+        self.q_left = np.array(res['q_left'])
+        self.q_right = np.array(res['q_right'])
     
     def solve_ik_mirror(self):
-        """Solve IK for mirror symmetric control (Demo 3).
+        """Solve IK for mirror symmetric control with independent solving (Demo 3).
         
-        Mirrors left arm to right arm across YZ plane (X-axis reflection).
-        Left and right arms should be symmetric at initialization.
+        Mirrors left arm to right arm across YZ plane:
+        1. Position: Mirror X coordinate (x -> -x)
+        2. Rotation: Apply mirrored rotation delta to each arm's initial orientation
+        
+        Strategy:
+        - Compute rotation change from left initial to left current
+        - Mirror this rotation change across YZ plane
+        - Apply mirrored rotation to right initial orientation
         """
-        # Mirror transformation matrix for reflection across YZ plane
-        M_mirror = np.array([
-            [-1,  0,  0,  0],
-            [ 0,  1,  0,  0],
-            [ 0,  0,  1,  0],
-            [ 0,  0,  0,  1]
-        ])
-        
-        # Mirror left target to get right target
-        # This reflects position and orientation across YZ plane
-        self.T_right_target = M_mirror @ self.T_left_target @ M_mirror.T
-        
-        # Update right mocap marker to show mirrored position
-        if self.right_marker_id is not None:
-            self.mj_data.mocap_pos[self.right_marker_id] = self.T_right_target[0:3, 3]
-            # In mirror mode, use the mirrored orientation
-            R_right_mirror = self.T_right_target[0:3, 0:3]
-            self.mj_data.mocap_quat[self.right_marker_id] = self._mat2quat(R_right_mirror)
-        
-        # Convert gripper center targets to link7 targets
+        # Convert gripper center targets to link7 targets and solve independently
         T_left_link7 = self._gripper_to_link7(self.T_left_target)
         T_right_link7 = self._gripper_to_link7(self.T_right_target)
-        
-        # Full 6-DOF constraint (position + orientation)
-        tasks = [
-            absolute_task('left_arm', T_left_link7, weight=1.0, row_mask=[1,1,1,1,1,1]),
-            absolute_task('right_arm', T_right_link7, weight=1.0, row_mask=[1,1,1,1,1,1])
-        ]
-        
-        result = self.robot.ik_tasks(
-            tasks,
-            {'left_arm': self.q_left, 'right_arm': self.q_right},
-            mode='weighted',
-            max_iters=15,  # 减少迭代次数
-            tol=1e-2,  # 增大容差
-            verbose=False
+
+        # Use BimanualRobotModel.ik() with independent coordination
+        res = self.robot.ik(
+            target_left=T_left_link7,
+            target_right=T_right_link7,
+            q0_left=self.q_left,
+            q0_right=self.q_right,
+            backend='numpy',
+            method='dls',
+            coordination='indep',
+            max_iters=15,
+            pos_tol=1e-2,
+            ori_tol=1e-2,
         )
-        
-        if result['success']:
-            self.q_left = np.array(result['q_by_group']['left_arm'])
-            self.q_right = np.array(result['q_by_group']['right_arm'])
+
+        self.q_left = np.array(res['q_left'])
+        self.q_right = np.array(res['q_right'])
     
     def _update_robot_pose(self):
         """Update MuJoCo robot joint positions."""
@@ -377,8 +368,8 @@ class InteractiveDualArmIK:
                     self.T_right_target = T_right_dragged
                 self.solve_ik_independent()
         
-        elif self.mode == 'cooperative':
-            # Check if center was dragged (cooperative move)
+        elif self.mode == 'relative':
+            # Check if center was dragged (relative move)
             center_moved = np.linalg.norm(T_center_dragged[0:3, 3] - self.T_center_target[0:3, 3]) > 0.001
             
             # Check if individual targets were dragged
@@ -387,6 +378,8 @@ class InteractiveDualArmIK:
             
             if center_moved:
                 # Green sphere dragged: move both arms together maintaining relative pose
+                # IMPORTANT: Do NOT update T_rel_grasp here - keep it constant!
+
                 # Support both translation and rotation
                 delta_pos = T_center_dragged[0:3, 3] - self.T_center_target[0:3, 3]
                 
@@ -416,18 +409,24 @@ class InteractiveDualArmIK:
                     self.mj_data.mocap_pos[self.right_marker_id] = self.T_right_target[0:3, 3]
                     self.mj_data.mocap_quat[self.right_marker_id] = self._mat2quat(self.T_right_target[0:3, 0:3])
                 
-                self.solve_ik_cooperative()
+                # Solve IK with UNCHANGED T_rel_grasp
+                self.solve_ik_relative()
                 
             elif left_moved or right_moved:
-                # Red/blue spheres dragged: update grasp, move green to midpoint
+                # Red/blue spheres dragged: update individual arms and recompute grasp
+                # This is when we ALLOW changing the relative pose
                 self.T_left_target = T_left_dragged
                 self.T_right_target = T_right_dragged
                 
-                # Update relative transform (in link7 frame)
+                # CRITICAL: Update relative transform when red/blue balls are dragged
+                # This redefines the relative grasp configuration
                 T_left_link7 = self._gripper_to_link7(self.T_left_target)
                 T_right_link7 = self._gripper_to_link7(self.T_right_target)
                 self.T_rel_grasp = np.linalg.inv(T_left_link7) @ T_right_link7
                 
+                print(
+                    f"🔄 relative grasp updated! Relative distance: {np.linalg.norm(self.T_rel_grasp[0:3, 3]):.3f}m")
+
                 # Update center to midpoint (position and average orientation)
                 self.T_center_target[0:3, 3] = 0.5 * (self.T_left_target[0:3, 3] + self.T_right_target[0:3, 3])
                 # Use left orientation for center (or could average quaternions)
@@ -438,22 +437,120 @@ class InteractiveDualArmIK:
                     self.mj_data.mocap_pos[self.center_marker_id] = self.T_center_target[0:3, 3]
                     self.mj_data.mocap_quat[self.center_marker_id] = self._mat2quat(self.T_center_target[0:3, 0:3])
                 
+                # Solve as independent (both arms to their new targets)
                 self.solve_ik_independent()
         
         elif self.mode == 'mirror':
-            self.T_left_target = T_left_dragged
-            self.solve_ik_mirror()
+            # Check if left or right marker was dragged
+            left_moved = np.linalg.norm(T_left_dragged[0:3, 3] - self.T_left_target[0:3, 3]) > 0.001
+            right_moved = np.linalg.norm(T_right_dragged[0:3, 3] - self.T_right_target[0:3, 3]) > 0.001
+
+            if left_moved:
+                # Red ball (left) dragged: update left, mirror to right
+                self.T_left_target = T_left_dragged.copy()
+
+                # Compute mirrored right target from left drag (position + rotation delta)
+                # 1. Mirror position (x -> -x)
+                pos_left = T_left_dragged[0:3, 3]
+                pos_right_mirrored = np.array([-pos_left[0], pos_left[1], pos_left[2]])
+
+                # 2. Compute rotation change from left initial
+                R_left_current = T_left_dragged[0:3, 0:3]
+                R_left_initial = self.T_left_initial[0:3, 0:3]
+                R_delta_left = R_left_current @ R_left_initial.T
+
+                # 3. Mirror the rotation change
+                M_mirror = np.diag([-1, 1, 1])
+                R_delta_right = M_mirror @ R_delta_left @ M_mirror.T
+
+                # 4. Apply to right initial orientation
+                R_right_initial = self.T_right_initial[0:3, 0:3]
+                R_right_mirrored = R_delta_right @ R_right_initial
+
+                # 5. Update right target pose and mocap marker so the blue ball follows
+                self.T_right_target[0:3, 3] = pos_right_mirrored
+                self.T_right_target[0:3, 0:3] = R_right_mirrored
+
+                if self.right_marker_id is not None:
+                    self.mj_data.mocap_pos[self.right_marker_id] = self.T_right_target[0:3, 3]
+                    self.mj_data.mocap_quat[self.right_marker_id] = self._mat2quat(R_right_mirrored)
+
+                # Now solve IK with mirrored pose
+                self.solve_ik_mirror()
+            elif right_moved:
+                # Blue ball (right) dragged: update right, reverse mirror to left
+                self.T_right_target = T_right_dragged.copy()
+
+                # 1. Mirror position (reverse: -x -> x)
+                pos_right = T_right_dragged[0:3, 3]
+                pos_left_mirrored = np.array([-pos_right[0], pos_right[1], pos_right[2]])
+
+                # 2. Compute rotation change from right initial
+                R_right_current = T_right_dragged[0:3, 0:3]
+                R_right_initial = self.T_right_initial[0:3, 0:3]
+                R_delta_right = R_right_current @ R_right_initial.T
+
+                # 3. Mirror the rotation change (reverse)
+                M_mirror = np.diag([-1, 1, 1])
+                R_delta_left = M_mirror @ R_delta_right @ M_mirror.T
+
+                # 4. Apply to left initial orientation
+                R_left_initial = self.T_left_initial[0:3, 0:3]
+                R_left_mirrored = R_delta_left @ R_left_initial
+
+                # 5. Update left target
+                self.T_left_target[0:3, 3] = pos_left_mirrored
+                self.T_left_target[0:3, 0:3] = R_left_mirrored
+
+                # Update left mocap marker
+                if self.left_marker_id is not None:
+                    self.mj_data.mocap_pos[self.left_marker_id] = self.T_left_target[0:3, 3]
+                    self.mj_data.mocap_quat[self.left_marker_id] = self._mat2quat(R_left_mirrored)
+
+                # Now solve IK with mirrored poses
+                self.solve_ik_mirror()
         
         # Update robot pose in MuJoCo
         self._update_robot_pose()
         
         # NOTE: Do NOT update markers here! User is dragging them.
-        # Only update them at initialization or when we programmatically move them (cooperative mode)
-    
+        # Only update them at initialization or when we programmatically move them (relative mode)
+
+    def reset(self):
+        """Reset robot and mocap markers to initial state.
+        
+        This method is called when user presses 'Backspace' or clicks reset in viewer.
+        """
+        print("\n🔄 Resetting to initial state...")
+
+        # Reset joint angles to zero
+        self.q_left = np.zeros(self.left_model.num_dof())
+        self.q_right = np.zeros(self.right_model.num_dof())
+
+        # Reset target poses to initial values
+        self.T_left_target = self.T_left_initial.copy()
+        self.T_right_target = self.T_right_initial.copy()
+
+        # Reset center target
+        self.T_center_target[0:3, 3] = 0.5 * (self.T_left_target[0:3, 3] + self.T_right_target[0:3, 3])
+        self.T_center_target[0:3, 0:3] = self.T_left_target[0:3, 0:3].copy()
+
+        # Reset relative grasp transform
+        T_left_link7 = self._gripper_to_link7(self.T_left_target)
+        T_right_link7 = self._gripper_to_link7(self.T_right_target)
+        self.T_rel_grasp = np.linalg.inv(T_left_link7) @ T_right_link7
+
+        # Update MuJoCo state
+        self._update_robot_pose()
+        self._update_markers()
+        mujoco.mj_forward(self.mj_model, self.mj_data)
+
+        print("✅ Reset complete!")
+
     def run(self, mode: str = 'independent'):
         """Run interactive visualization.
         
-        :param mode: Control mode - 'independent', 'cooperative', or 'mirror'
+        :param mode: Control mode - 'independent', 'relative', or 'mirror'
         """
         self.mode = mode
         self.is_running = True
@@ -467,17 +564,18 @@ class InteractiveDualArmIK:
         if mode == 'independent':
             print(f"  - RED sphere: Left arm target")
             print(f"  - BLUE sphere: Right arm target")
-        elif mode == 'cooperative':
+        elif mode == 'relative':
             print(f"  - RED sphere: Left arm target")
             print(f"  - BLUE sphere: Right arm target")
-            print(f"  - GREEN sphere: Center (cooperative motion)")
+            print(f"  - GREEN sphere: Center (relative motion)")
             print(f"  - Drag RED/BLUE to set grasp")
-            print(f"  - Drag GREEN to move cooperatively")
+            print(f"  - Drag GREEN to move relatively")
         elif mode == 'mirror':
             print(f"  - RED sphere: Left arm target")
             print(f"  - Right arm mirrors left automatically")
         
-        print(f"\nPress ESC to exit\n")
+        print(f"\n  - Press SPACE to reset")
+        print(f"  - Press ESC to exit\n")
         
         # Try passive viewer first, fallback on macOS mjpython error
         import platform
@@ -487,6 +585,11 @@ class InteractiveDualArmIK:
             with mujoco.viewer.launch_passive(self.mj_model, self.mj_data) as viewer:
                 self.viewer = viewer
                 
+                # Register keyboard callback
+                viewer.user_scn.flags[mujoco.mjtRndFlag.mjRND_SHADOW] = 1  # Enable shadows
+                # Note: MuJoCo passive viewer doesn't expose keyboard callback API directly
+                # We'll use simulation time reset detection instead
+
                 # CRITICAL: Initialize mocap markers to current end-effector positions
                 # This prevents the initial huge displacement that causes shaking
                 self._update_markers()
@@ -498,9 +601,33 @@ class InteractiveDualArmIK:
                 # Small delay to ensure mocap positions are stable
                 time.sleep(0.1)
                 
+                # Track last reset time to detect reset events
+                last_reset_time = self.mj_data.time
+                last_qpos = self.mj_data.qpos.copy()
+
                 while viewer.is_running() and self.is_running:
                     step_start = time.time()
                     
+                    # Check for reset: either time went backwards OR qpos was reset to zero
+                    current_time = self.mj_data.time
+                    current_qpos = self.mj_data.qpos.copy()
+
+                    # Detect if simulation was reset (MuJoCo viewer Backspace/Space resets qpos to 0)
+                    if current_time < last_reset_time or np.allclose(current_qpos[:14], 0.0, atol=1e-4):
+                        # Only reset if we actually had non-zero joint angles before
+                        if not np.allclose(last_qpos[:14], 0.0, atol=1e-4):
+                            print("\n🔄 Simulation reset detected!")
+                            self.reset()
+
+                    # Also support keyboard-triggered reset (keyboard callback sets flag)
+                    if getattr(self, 'reset_requested', False):
+                        print("\n🔄 Reset requested via keyboard (SPACE)")
+                        self.reset()
+                        self.reset_requested = False
+
+                    last_reset_time = current_time
+                    last_qpos = current_qpos.copy()
+
                     # Update IK
                     self.step()
                     
