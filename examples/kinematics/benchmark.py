@@ -311,7 +311,7 @@ def cmd_parallel(args, model):
 # Main Entry Point
 # ============================================================================
 
-def main():
+def main(args):
 
     model = RobotModel(str(args.urdf), end_link=args.end_link)
     
@@ -326,7 +326,7 @@ def main():
         # Run all benchmarks with default settings
         class DefaultArgs:
             fk_runs = 1000
-            torch_device = 'cpu'
+            torch_device = args.torch_device
             samples = 100
             methods = ['pinv', 'dls']
             backends = ['numpy', 'torch']
@@ -369,7 +369,7 @@ if __name__ == '__main__':
     parser_perf = subparsers.add_parser('performance', help='FK/IK/Jacobian speed benchmark')
     parser_perf.add_argument('--fk-runs', type=int, default=1000,
                              help='Number of FK runs')
-    parser_perf.add_argument('--torch-device', type=str, default='cpu',
+    parser_perf.add_argument('--torch-device', type=str, default='cuda',
                              help='PyTorch device (cpu, cuda)')
 
     # Subcommand: ik-compare
@@ -388,20 +388,21 @@ if __name__ == '__main__':
                            help='Position tolerance (m)')
     parser_ik.add_argument('--ori-tol', type=float, default=1e-4,
                            help='Orientation tolerance (rad)')
-    parser_ik.add_argument('--torch-device', type=str, default='cpu',
+    parser_ik.add_argument('--torch_device', type=str, default='cpu',
                            help='PyTorch device (cpu, cuda)')
     parser_ik.add_argument('--torch-dtype', type=str, default=None,
                            help='PyTorch dtype (float32, float64)')
 
     # Subcommand: parallel
     parser_par = subparsers.add_parser('parallel', help='Parallel/batch processing benchmark')
-    parser_par.add_argument('--batch-size', type=int, default=1000,
+    parser_par.add_argument('--batch-size', type=int, default=100,
                             help='Batch size for parallel processing')
-    parser_par.add_argument('--backends', nargs='+', default=['numpy', 'torch-cpu'],
+    parser_par.add_argument('--backends', nargs='+', default=['numpy', 'torch-cuda'],
                             help='Backends to test (numpy, torch-cpu, torch-cuda)')
 
     # Subcommand: all
     parser_all = subparsers.add_parser('all', help='Run all benchmarks')
-
+    parser_all.add_argument('--torch-device', type=str, default='cpu',
+                            help='PyTorch device (cpu, cuda)')
     args = parser.parse_args()
-    main()
+    main(args)
