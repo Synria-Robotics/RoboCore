@@ -204,7 +204,7 @@ def plan_trajectory_in_workspace(
     print("="*70)
     
     if q_start is None:
-        q_start = np.zeros(model.num_dof())
+        q_start = np.zeros(model.num_dof)
     
     # 选择目标区域
     if use_safe_region and workspace_data['safe_points'] is not None:
@@ -495,7 +495,7 @@ def main():
     print("Loading robot model...")
     if args.robot == 'alicia':
         urdf_path = os.path.join(Path(__file__).parent.parent,
-                                 '../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
+                                 '../robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
         dof = 6
     else:  # bessica
         urdf_path = os.path.join(Path(__file__).parent.parent,

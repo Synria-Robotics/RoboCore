@@ -67,7 +67,7 @@ class JacobianSolverTorch:
         :param model: robot model.
         """
         self.model = model
-        self.n = model.num_dof()
+        self.n = model.num_dof
     
     def solve(
         self,
@@ -150,7 +150,7 @@ class JacobianSolverTorch:
         
         # Build forward transforms
         T_parent = torch.eye(4, dtype=dtype, device=device)
-        q_map = {js.name: q[js.index] for js in self.model._actuated}
+        q_map = {js.name: q[js.index] for js in self.model._chain_actuated}
         
         p_list = [None] * self.n
         z_list = [None] * self.n
@@ -172,7 +172,7 @@ class JacobianSolverTorch:
             T_joint_origin = T_parent @ T_origin
             
             if urdf_joint.joint_type in ("revolute", "prismatic"):
-                js = next(js for js in self.model._actuated if js.name == urdf_joint.name)
+                js = next(js for js in self.model._chain_actuated if js.name == urdf_joint.name)
                 axis_local = torch.tensor(urdf_joint.axis, dtype=dtype, device=device)
                 axis_norm = torch.linalg.norm(axis_local)
                 if axis_norm > 1e-10:
@@ -222,7 +222,7 @@ class JacobianSolverTorch:
                     continue
                 raise RuntimeError("Internal error: missing joint axis or origin position")
 
-            js = self.model._actuated[i]
+            js = self.model._chain_actuated[i]
             if js.joint_type == "revolute":
                 J_geo[:3, i] = torch.linalg.cross(z_i, (p_end - p_i))
                 J_geo[3:6, i] = z_i
@@ -358,7 +358,7 @@ class JacobianSolverTorch:
         p_ee_batch = T_ee_batch[:, :3, 3]  # [B, 3]
         
         # Process each joint
-        for js in self.model._actuated:
+        for js in self.model._chain_actuated:
             joint_idx = js.index
             
             # Compute FK up to this joint for all samples
@@ -412,7 +412,7 @@ class JacobianSolverTorch:
         T_batch = torch.eye(4, device=device, dtype=dtype).unsqueeze(0).repeat(batch_size, 1, 1)
         
         # Get joints up to and including target
-        joint_specs = self.model._actuated[:joint_idx + 1]
+        joint_specs = self.model._chain_actuated[:joint_idx + 1]
         
         # Process each joint in the chain
         for js in joint_specs:

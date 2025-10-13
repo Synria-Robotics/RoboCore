@@ -34,10 +34,10 @@ from robocore.utils.path import get_robocore_path
 
 def main(args):
     # Load model
-    urdf = args.urdf
-    model = RobotModel(urdf, end_link='tool0')
+    model_path = args.model_path
+    model = RobotModel(model_path, end_link=args.end_link)
 
-    beauty_print(f"Jacobian Validation: {model.name} ({model.num_dof()} DOF)", type="module")
+    beauty_print(f"Jacobian Validation: {model.name} ({model.num_dof} DOF)", type="module")
     beauty_print(f"Backend: {args.backend}", type="info")
 
     rng = np.random.default_rng(args.seed)
@@ -46,7 +46,7 @@ def main(args):
         # NumPy backend comparison
         beauty_print("[1] Analytic vs Numeric Jacobian (NumPy)", type="module", centered=False)
 
-        q = np.zeros(model.num_dof())
+        q = np.zeros(model.num_chain_dof)
 
         # Warmup
         jacobian(model, q, backend='numpy', method='analytic')
@@ -83,15 +83,7 @@ def main(args):
 
         max_diffs = []
         for i in range(args.samples):
-            q_rand = []
-            for js in model._actuated:  # type: ignore[attr-defined]
-                lo, hi = -1.0, 1.0
-                if js.limit:
-                    if js.limit[0] is not None:
-                        lo = js.limit[0]
-                    if js.limit[1] is not None:
-                        hi = js.limit[1]
-                q_rand.append(float(rng.uniform(lo * 0.7, hi * 0.7)))
+            q_rand = model.random_q(rng)
 
             Ja = jacobian(model, q_rand, backend='numpy', method='analytic')
             Jn = jacobian(model, q_rand, backend='numpy', method='numeric')
@@ -115,7 +107,7 @@ def main(args):
         beauty_print(f"PyTorch device: {device}", type="info")
         beauty_print("[1] Analytic vs Numeric vs Autograd Jacobian (PyTorch)", type="module")
 
-        q = torch.zeros(model.num_dof(), dtype=torch.float64, device=device)
+        q = torch.zeros(model.num_dof, dtype=torch.float64, device=device)
 
         # Compute all three using unified interface
         Ja = jacobian(model, q, backend='torch', method='analytic', device=device)
@@ -167,10 +159,12 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Jacobian validation")
-    parser.add_argument('--urdf', type=str, default=get_robocore_path("assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf"),
+    parser.add_argument('--model-path', type=str, 
+                        # default=get_robocore_path("assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf"),
+                        default=get_robocore_path("assets/robot/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml"),
                         help='Path to URDF file (default: Alicia-D)')
-    parser.add_argument('--backend', choices=['numpy', 'torch'], default='numpy',
-                        help='Backend to test')
+    parser.add_argument('--backend', choices=['numpy', 'torch'], default='numpy', help='Backend to test')
+    parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')    
     parser.add_argument('--device', default='cpu', help='PyTorch device (if torch backend)')
     parser.add_argument('--samples', type=int, default=10, help='Number of test configurations')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')

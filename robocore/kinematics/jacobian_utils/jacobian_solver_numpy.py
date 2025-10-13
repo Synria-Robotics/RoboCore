@@ -50,7 +50,7 @@ class JacobianSolverNumPy:
         :param model: robot model.
         """
         self.model = model
-        self.n = model.num_dof()
+        self.n = model.num_chain_dof
     
     def solve(
         self,
@@ -105,7 +105,7 @@ class JacobianSolverNumPy:
         
         # Build forward transforms to get joint origins and axes in world frame
         T_parent = np.eye(4, dtype=np.float64)
-        q_map = {js.name: q[js.index] for js in self.model._actuated}
+        q_map = {js.name: q[js.index] for js in self.model._chain_actuated}
         
         # Storage for each actuated joint
         p_list = [None] * self.n
@@ -126,7 +126,7 @@ class JacobianSolverNumPy:
             
             # If actuated, record axis & origin position BEFORE motion transform
             if urdf_joint.joint_type in ("revolute", "prismatic"):
-                js = next(js for js in self.model._actuated if js.name == urdf_joint.name)
+                js = next(js for js in self.model._chain_actuated if js.name == urdf_joint.name)
                 axis_local = np.asarray(urdf_joint.axis, dtype=np.float64)
                 axis_norm = np.linalg.norm(axis_local)
                 if axis_norm > 1e-10:
@@ -170,7 +170,7 @@ class JacobianSolverNumPy:
                 if target_link is not None:
                     continue
                 raise RuntimeError("Internal error: missing joint axis or origin position")
-            js = self.model._actuated[i]
+            js = self.model._chain_actuated[i]
             if js.joint_type == "revolute":
                 J_geo[:3, i] = np.cross(z_i, (p_end - p_i))
                 J_geo[3:6, i] = z_i
@@ -302,7 +302,7 @@ class JacobianSolverNumPy:
         q = np.asarray(q, dtype=np.float64)
         if q.shape[0] != self.n:
             raise ValueError(f"Configuration length {q.shape[0]} != dof {self.n}")
-        q_map = {js.name: q[js.index] for js in self.model._actuated}
+        q_map = {js.name: q[js.index] for js in self.model._chain_actuated}
         T_parent = np.eye(4, dtype=np.float64)
         for urdf_joint in self.model._chain_joints:
             R_origin = self._rpy_matrix(*urdf_joint.origin_rpy)

@@ -357,7 +357,8 @@ def main():
     # Load robot model
     print("Loading robot model...")
     if args.robot == 'alicia':
-        urdf_path = os.path.join(Path(__file__).parent.parent, '../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
+        urdf_path = os.path.join(Path(__file__).parent.parent,
+                                 '../robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
         end_link = 'tool0'
         dof = 6
     else:  # bessica

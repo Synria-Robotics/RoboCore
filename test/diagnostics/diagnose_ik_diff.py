@@ -139,8 +139,8 @@ def batch_analysis(model, n_samples=20):
     # Generate test cases
     test_cases = []
     for _ in range(n_samples):
-        q_rand = np.zeros(model.num_dof())
-        for js in model._actuated:
+        q_rand = np.zeros(model.num_dof)
+        for js in model._chain_actuated:
             lo, hi = -1.0, 1.0
             if js.limit and js.limit[0] is not None and js.limit[1] is not None:
                 lo, hi = js.limit[0], js.limit[1]
@@ -149,7 +149,7 @@ def batch_analysis(model, n_samples=20):
             q_rand[js.index] = float(rng.uniform(mid - span, mid + span))
         
         pose = model.forward_kinematics(q_rand.tolist())['end']
-        test_cases.append((pose, np.zeros(model.num_dof())))
+        test_cases.append((pose, np.zeros(model.num_dof)))
     
     # Test with both methods
     for method in ['pinv', 'dls']:
@@ -212,15 +212,15 @@ def batch_analysis(model, n_samples=20):
 def main():
     # Load model
     base = Path(__file__).resolve().parents[1]
-    urdf = os.path.join(base, "../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
+    urdf = os.path.join(base, "../robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf")
     model = RobotModel(str(urdf), end_link='tool0')
     
-    beauty_print(f"IK Diagnostic Tool: {model.name} ({model.num_dof()} DOF)", type="module")
+    beauty_print(f"IK Diagnostic Tool: {model.name} ({model.num_dof} DOF)", type="module")
     
     # Single case analysis
     rng = np.random.default_rng(42)
-    q_test = np.zeros(model.num_dof())
-    for js in model._actuated:
+    q_test = np.zeros(model.num_dof)
+    for js in model._chain_actuated:
         lo, hi = -1.0, 1.0
         if js.limit and js.limit[0] is not None and js.limit[1] is not None:
             lo, hi = js.limit[0], js.limit[1]
@@ -229,7 +229,7 @@ def main():
         q_test[js.index] = float(rng.uniform(mid - span, mid + span))
     
     pose_test = model.forward_kinematics(q_test.tolist())['end']
-    q0_test = np.zeros(model.num_dof())
+    q0_test = np.zeros(model.num_dof)
     
     # Compare both methods
     for method in ['pinv', 'dls']:

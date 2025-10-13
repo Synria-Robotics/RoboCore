@@ -32,9 +32,9 @@ from robocore.kinematics.jacobian import jacobian
 def random_q_in_limits(model, seed=42):
     """Generate random joint configuration within limits."""
     rng = np.random.default_rng(seed)
-    n = model.num_dof()
+    n = model.num_dof
     q = np.zeros(n)
-    for js in model._actuated:
+    for js in model._chain_actuated:
         lo, hi = -1.0, 1.0
         if js.limit:
             if js.limit[0] is not None:
@@ -50,7 +50,7 @@ def random_q_in_limits(model, seed=42):
 @pytest.fixture(scope="module")
 def robot_model():
     """Load robot model for singularity testing."""
-    urdf_path = Path('robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
+    urdf_path = Path('robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
     if not urdf_path.exists():
         pytest.skip(f"URDF not found: {urdf_path}")
     return RobotModel(str(urdf_path), end_link='tool0')
@@ -192,7 +192,7 @@ class TestSingularityTypes:
         analyzer = SingularityAnalyzer(robot_model)
         
         # Zero configuration (often singular)
-        q_zero = np.zeros(robot_model.num_dof())
+        q_zero = np.zeros(robot_model.num_dof)
         
         try:
             sing_type = analyzer.classify_singularity(q_zero, backend='numpy')
@@ -216,7 +216,7 @@ class TestSingularityTypes:
         assert null_dim >= 0
         
         # For redundant manipulators, null space should exist
-        if robot_model.num_dof() > 6:
+        if robot_model.num_dof > 6:
             # Most configurations should have null space
             assert null_dim >= 0
 

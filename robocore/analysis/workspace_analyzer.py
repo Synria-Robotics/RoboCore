@@ -74,7 +74,7 @@ class WorkspaceAnalyzer:
         """
         self.model = model
         self.backend = backend
-        self.num_dof = model.num_dof()
+        self.num_dof = model.num_dof
         
         # Cache for workspace data
         self._workspace_cache: Dict[str, Any] = {}

@@ -29,9 +29,9 @@ class BiIndependentIKSolverNumpy:
               q0_right: Optional[Sequence[float]] = None,
               **ik_kwargs) -> Dict[str, Any]:
         if q0_left is None:
-            q0_left = [0.0] * self.left.num_dof()
+            q0_left = [0.0] * self.left.num_dof
         if q0_right is None:
-            q0_right = [0.0] * self.right.num_dof()
+            q0_right = [0.0] * self.right.num_dof
 
         tgt_left = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
         tgt_right = target_right.tolist() if hasattr(target_right, 'tolist') else target_right

@@ -21,20 +21,23 @@ Website: https://synriarobotics.ai
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Any, ClassVar, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Any, Tuple, Union
+import numpy as np
+import trimesh
+import os
 
-from .parser.urdf_parser import load_urdf, URDFJoint
-from .parser.mjcf_parser import load_mjcf
+from robocore.modeling.parser.urdf_parser import load_urdf
+from robocore.modeling.parser.mjcf_parser import MJCFParser
+from robocore.modeling.parser.utils import JointSpec
 from robocore.kinematics.fk import forward_kinematics
 from robocore.kinematics.ik import inverse_kinematics
 from robocore.kinematics.jacobian import jacobian
 from robocore.kinematics.utils import relative_pose_error, relative_jacobian
 from robocore.utils.backend import get_backend
-import numpy as np
-
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+
+import torch
 
 
 # Lazy import to avoid circular dependency
@@ -42,98 +45,34 @@ def _get_workspace_analyzer():
     from robocore.analysis.workspace_analyzer import WorkspaceAnalyzer
     return WorkspaceAnalyzer
 
-
-@dataclass
-class JointSpec:
-    """Actuated joint specification.
-
-    :param name: joint name.
-    :param index: index in configuration.
-    :param joint_type: revolute/prismatic.
-    :param axis: axis vector (3,).
-    :param parent: parent link.
-    :param child: child link.
-    :param origin_xyz: translation of joint frame.
-    :param origin_rpy: rpy of joint frame.
-    :param limit: (lower, upper) or None.
-    """
-
-    name: str
-    index: int
-    joint_type: str
-    axis: List[float]
-    parent: str
-    child: str
-    origin_xyz: List[float]
-    origin_rpy: List[float]
-    limit: Optional[Sequence[Optional[float]]]
-
-
 _PARSED_ROBOT_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 class RobotModel:
     """Generic serial chain robot.
 
-    :param file_path: URDF (or MJCF in future) path.
+    :param model_path: URDF (or MJCF in future) path.
     :param end_link: override end-effector link name.
     """
 
-    def __init__(self, file_path: str | Path, end_link: Optional[str] = None, _parsed: Optional[Dict[str, Any]] = None):
+    def __init__(self, model_path: str | Path, base_link: Optional[str] = None, end_link: Optional[str] = None, _parsed: Optional[Dict[str, Any]] = None, load_mesh_flag=False):
         """Initialize robot model.
 
-        :param file_path: path to URDF or MJCF file.
+        :param model_path: path to URDF or MJCF file.
         :param end_link: end-effector link name (auto-detect if None).
         """
-        self.file_path = str(file_path)
-        # Auto-detect format by file extension (simple heuristic). If '.xml' we try MJCF first.
-        path_lower = str(self.file_path).lower()
-        parsed: Dict[str, Any] | None = _parsed
-        # Cache key (normalize path)
-        cache_key = str(Path(self.file_path).resolve())
-        if parsed is None:
-            # Try cache first
-            cached = _PARSED_ROBOT_CACHE.get(cache_key)
-            if cached is not None:
-                parsed = cached
-            else:
-                # Parse new
-                parsed = None
-                if path_lower.endswith('.xml'):
-                    try:
-                        parsed = load_mjcf(self.file_path)
-                    except Exception as e:
-                        beauty_print(f"⚠️ MJCF parse failed ({e}); falling back to URDF parser", type="warning")
-                if parsed is None:
-                    parsed = load_urdf(self.file_path)
-                # Store in cache (shallow dict copy to avoid accidental mutation)
-                _PARSED_ROBOT_CACHE[cache_key] = parsed
-        # Keep reference for spawn_chain
-        self._parsed_source = parsed
-        self.name = parsed.get("name", "")
-        self._raw_joints = parsed["joints"]
-        self.base_link = parsed["base_links"][0] if parsed["base_links"] else self._raw_joints[0].parent
-        self._graph = self._build_graph(self._raw_joints)
-        self._chain_joints = self._linearize_chain(self.base_link, end_link)
-        self._actuated = []
-        idx = 0
-        for j in self._chain_joints:
-            if j.joint_type in ("revolute", "prismatic"):
-                self._actuated.append(
-                    JointSpec(
-                        name=j.name,
-                        index=idx,
-                        joint_type=j.joint_type,
-                        axis=j.axis,
-                        parent=j.parent,
-                        child=j.child,
-                        origin_xyz=j.origin_xyz,
-                        origin_rpy=j.origin_rpy,
-                        limit=(j.limit_lower, j.limit_upper),
-                    )
-                )
-                idx += 1
-        self.end_link = end_link or (self._chain_joints[-1].child if self._chain_joints else self.base_link)
+        self.load_mesh_flag = load_mesh_flag
+        self.model_path = str(model_path)
+        self.name = os.path.basename(model_path)
+        self._load_model(_parsed)
+        self._load_joint_info()
+        self._load_mesh_info()
+        self._load_link_info()
+
+        self.base_link = base_link or self.real_link[0]
+        self.end_link = end_link or self.real_link[-1]
+        self._build_graph()
+        self._build_chain()
 
         # Workspace cache (lazy-loaded on first access)
         self._workspace_analyzer = None
@@ -144,28 +83,134 @@ class RobotModel:
         # Multi-link groups (name -> RobotModel via spawn_chain)
         self._groups: Dict[str, "RobotModel"] = {}
 
-        # Only print load message if this is the first parse (heuristic: not from cache or explicit _parsed)
-        if cache_key not in _PARSED_ROBOT_CACHE or _parsed is not None:
-            # already handled above; but avoid duplicate logs for spawn_chain
-            pass
+        # Only print load message if this is not from spawn_chain (heuristic: explicit _parsed means spawned)
+        if _parsed is None:
+            beauty_print(f"📦 Loading robot model from: {self.model_path}")
+            beauty_print(f"✓ Robot loaded: {self.num_dof} DOF, end_link={self.end_link}", type="success")
+
+    def _load_model(self, _parsed: Optional[Dict[str, Any]] = None):
+        self.parsed_model: Dict[str, Any] | None = _parsed
+        cache_key = str(Path(self.model_path).resolve())
+        if self.parsed_model is None:
+            cached = _PARSED_ROBOT_CACHE.get(cache_key)
+            if cached is not None:
+                self.parsed_model = cached
+            else:
+                # Parse new
+                self.parsed_model = None
+                if self.model_path.endswith('.xml'):
+                    self.parsed_model = MJCFParser(self.model_path)
+                elif self.model_path.endswith('.urdf'):
+                    self.parsed_model = load_urdf(self.model_path)
+                else:
+                    raise ValueError("Unsupported model file format. Only URDF and MJCF are supported.")
+                _PARSED_ROBOT_CACHE[cache_key] = self.parsed_model
+
+    def _load_joint_info(self):
+        """Loads joint information."""
+        self.joint_list = self.parsed_model.get_joint_names()
+        self.num_dof = self.num_joint = len(self.joint_list)
+        self.joint_limit = self.parsed_model.get_joint_limits()
+        self.joint_limit_max = self.joint_limit[:, 1]
+        self.joint_limit_min = self.joint_limit[:, 0]
+
+    def _load_mesh_info(self):
+        """Loads mesh information for the robot."""
+        self.link_mesh_map = self.parsed_model.get_link_mesh_map()
+        self.link_meshname_map = self.parsed_model.get_link_meshname_map()
+        if self.load_mesh_flag:
+            self.meshes, self.simple_shapes = self.load_meshes()
+            self.robot_faces = [val[1] for val in self.meshes.values()]
+            self.num_vertices_per_part = [val[0].shape[0] for val in self.meshes.values()]
+            self.meshname_mesh = {key: val[0] for key, val in self.meshes.items()}
+            self.meshname_mesh_normal = {key: val[-1] for key, val in self.meshes.items()}
+
+    def _load_link_info(self):
+        """Loads link information including virtual and real links."""
+        self.link_virtual_map, self.inverse_link_virtual_map = self.parsed_model.get_link_virtual_map()
+        self.real_link = self.parsed_model.get_real_link_names()
+        self.all_link = self.parsed_model.get_link_names()
+
+    def load_meshes(self):
+        """
+        Load all meshes and store them in a dictionary. Handles both complex meshes and simple shapes.
+
+        :return: A dictionary where keys are mesh names and values are mesh data, and a dictionary for simple shapes.
+        """
+        meshes = {}
+        simple_shapes = {}  # 用于保存简单形状信息
+        for link_name, mesh_dict in self.link_mesh_map.items():
+            for geom_name, mesh_info in mesh_dict.items():
+                if mesh_info['type'] == 'mesh':
+                    # 处理复杂的网格
+                    mesh_file = mesh_info['params']['mesh_path']
+                    name = mesh_info['params']['name']
+                    mesh = trimesh.load(mesh_file)
+                    if isinstance(mesh, trimesh.Scene):
+                        combined_mesh = mesh.geometry.values()
+                        mesh = trimesh.util.concatenate(combined_mesh)
+                    temp = torch.ones(mesh.vertices.shape[0], 1).float()
+
+                    vertices = torch.cat((torch.FloatTensor(np.array(mesh.vertices)), temp), dim=-1)
+                    normals = torch.cat((torch.FloatTensor(np.array(mesh.vertex_normals)), temp),
+                                        dim=-1)
+
+                    meshes[name] = [vertices, mesh.faces, normals]
+                else:
+                    # 处理简单几何形状，直接保存形状信息
+                    simple_shapes[geom_name] = mesh_info
+
+        return meshes, simple_shapes
+
+    def _build_graph(self):
+        self._graph = {}
+        for j in self.parsed_model.joints:
+            self._graph.setdefault(j.parent, []).append(j)
+
+    def _build_chain(self):
+        # Linearize active chain and collect actuated joints
+        self._chain_joints = self._linearize_chain(self.base_link, self.end_link)
+        self._chain_actuated = []
+        idx = 0
+        for j in self._chain_joints:
+            if j.joint_type in ("revolute", "prismatic"):
+                self._chain_actuated.append(
+                    JointSpec(
+                        name=j.name,
+                        index=idx,
+                        joint_type=j.joint_type,
+                        axis=j.axis,
+                        parent=j.parent,
+                        child=j.child,
+                        origin_xyz=j.origin_xyz,
+                        origin_rpy=j.origin_rpy,
+                        limit_lower=j.limit_lower,
+                        limit_upper=j.limit_upper,
+                    )
+                )
+                idx += 1
+
+        # Expose joint_list and counts expected by solvers
+        self.chain_joint_list = self._chain_actuated
+        self.num_chain_dof = len(self.chain_joint_list)
+        # Build joint_limit array shape (n,2)
+        import numpy as _np
+        if self.num_chain_dof > 0:
+            limits = [(j.limit_lower, j.limit_upper) for j in self._chain_actuated]
+            self.chain_joint_limit = _np.array(limits, dtype=float)
+            self.chain_joint_limit_max = self.chain_joint_limit[:, 1]
+            self.chain_joint_limit_min = self.chain_joint_limit[:, 0]
         else:
-            beauty_print(f"📦 Loading robot model from: {self.file_path}")
-            beauty_print(f"✓ Robot loaded: {self.num_dof()} DOF, end_link={self.end_link}", type="success")
-            
+            self.chain_joint_limit = _np.zeros((0, 2))
+            self.chain_joint_limit_max = _np.array([])
+            self.chain_joint_limit_min = _np.array([])
 
-    @staticmethod
-    def _build_graph(joints: List[URDFJoint]):
-        g: Dict[str, List[URDFJoint]] = {}
-        for j in joints:
-            g.setdefault(j.parent, []).append(j)
-        return g
-
-    def _linearize_chain(self, base: str, end_link: Optional[str]) -> List[URDFJoint]:
+    def _linearize_chain(self, base: str, end_link: Optional[str]) -> List[JointSpec]:
         if end_link is None:
             # choose longest path by simple DFS
-            best: List[URDFJoint] = []
+            best: List[JointSpec] = []
 
-            def dfs(link: str, path: List[URDFJoint]):
+            def dfs(link: str, path: List[JointSpec]):
                 nonlocal best
                 if len(path) > len(best):
                     best = path.copy()
@@ -177,10 +222,10 @@ class RobotModel:
             dfs(base, [])
             return best
         # else find path to end_link
-        res: List[URDFJoint] = []
+        res: List[JointSpec] = []
         found = False
 
-        def dfs2(link: str, path: List[URDFJoint]):
+        def dfs2(link: str, path: List[JointSpec]):
             nonlocal found, res
             if found:
                 return
@@ -195,28 +240,47 @@ class RobotModel:
 
         dfs2(base, [])
         return res
-
-    # ---------------- Public API -----------------
-    def num_dof(self) -> int:
-        """Return number of actuated joints.
-
-        :return: dof.
+    
+    def get_trans_dict(self, joint_value: List, base_trans: Union[None, torch.Tensor] = None) -> dict:
         """
-        return len(self._actuated)
+        Get the transformation matrices of all links
 
-    def joint_names(self) -> List[str]:
-        """Actuated joint names.
-
-        :return: names.
+        :param joint_value: the joint values, [batch_size, num_joint]
+        :param base_trans: transformation matrix of the base pose, [batch_size, 4, 4]
+        :return: A dictionary where the keys are link names and the values are transformation matrices.
         """
-        return [j.name for j in self._actuated]
+        if base_trans is None:
+            base_trans = (np.identity(4).
+                          reshape(-1, 4, 4).expand(len(joint_value), 4, 4).float())
 
-    def name_to_index(self) -> Dict[str, int]:
-        """Map joint name to index.
+        ret = self.fk(joint_value)
+        trans_dict = {}
 
-        :return: mapping.
-        """
-        return {j.name: j.index for j in self._actuated}
+        # Get the original base_link transformation matrix
+        original_base_trans = ret[self.base_link].get_matrix().to(base_trans.device)
+        original_base_trans_inv = torch.linalg.inv(original_base_trans)
+        # Compute the relative transformation matrix that brings the original base_link to the new base_trans
+        relative_trans = torch.matmul(base_trans, original_base_trans_inv)
+
+        # Iterate over all links and apply the relative transformation if needed
+        for link in self.all_link:
+            if "world" in link:
+                continue
+
+            val = ret[link]
+            homo_matrix = val.get_matrix().to(base_trans.device)
+
+            real_link = self.inverse_link_virtual_map[link]
+
+            # If base_trans is provided, apply the relative transformation to all links
+            if base_trans is not None:
+                # Update the link's transformation by applying the relative transformation
+                homo_matrix = torch.matmul(relative_trans, homo_matrix)
+
+            # Store the updated transformation in the dictionary
+            trans_dict[real_link] = homo_matrix
+
+        return trans_dict
 
     # ------------- Kinematics ---------------------
     def fk(self, q: Sequence[float] | Any, *, backend: str = 'auto', return_end: bool = False,
@@ -230,8 +294,8 @@ class RobotModel:
         :param dtype: torch dtype (if backend='torch')
         :return: dict link_name -> 4x4 pose matrix or single 4x4 pose if return_end=True
         """
-        if len(q) != self.num_dof():
-            raise ValueError("Expected q of length %d" % self.num_dof())
+        if len(q) != self.num_chain_dof:
+            raise ValueError("Expected q of length %d" % self.num_chain_dof)
         return forward_kinematics(
             self,
             q,
@@ -264,9 +328,9 @@ class RobotModel:
         :return: dict with keys 'q', 'success', 'pos_err', 'ori_err', 'iters'
         """
         if q_initial is None:
-            q_initial = [0.0] * self.num_dof()
-        if len(q_initial) != self.num_dof():
-            raise ValueError("Expected initial q of length %d" % self.num_dof())
+            q_initial = [0.0] * self.num_chain_dof
+        if len(q_initial) != self.num_chain_dof:
+            raise ValueError("Expected initial q of length %d" % self.num_chain_dof)
         return inverse_kinematics(
             self,
             target_pose,
@@ -302,8 +366,8 @@ class RobotModel:
         :param dtype: torch dtype for torch backend. Defaults to float64 if omitted.
         :return: 6×n Jacobian matrix (numpy.ndarray or torch.Tensor).
         """
-        if len(q) != self.num_dof():
-            raise ValueError("Expected q of length %d" % self.num_dof())
+        if len(q) != self.num_chain_dof:
+            raise ValueError("Expected q of length %d" % self.num_chain_dof)
         return jacobian(
             self,
             q,
@@ -337,14 +401,14 @@ class RobotModel:
         """
         if rng is None:
             rng = np.random.default_rng()
-        q = [0.0] * self.num_dof()
-        for js in self._actuated:
+        q = [0.0] * self.num_chain_dof
+        for js in self._chain_actuated:
             lo, hi = -1.0, 1.0
-            if js.limit:
-                if js.limit[0] is not None:
-                    lo = js.limit[0]
-                if js.limit[1] is not None:
-                    hi = js.limit[1]
+            if js.limit_lower:
+                if js.limit_lower is not None:
+                    lo = js.limit_lower
+                if js.limit_upper is not None:
+                    hi = js.limit_upper
             mid = 0.5 * (lo + hi)
             span = 0.5 * (hi - lo) * scale
             q[js.index] = float(rng.uniform(mid - span, mid + span))
@@ -357,7 +421,7 @@ class RobotModel:
         :param end_link: target end link in the original kinematic tree.
         :return: new RobotModel instance whose DOF/order corresponds to the chain from base_link to end_link.
         """
-        return RobotModel(self.file_path, end_link=end_link, _parsed=self._parsed_source)
+        return RobotModel(self.model_path, end_link=end_link, _parsed=self._parsed_source)
 
     def available_leaf_links(self) -> List[str]:
         """Return leaf links (no outgoing joints) in the full parsed tree.
@@ -647,11 +711,11 @@ class RobotModel:
             >>> q_batch = model.random_q_batch(100, scale=0.8)  # Use 80% of range
         """
         rng = np.random.default_rng(seed)
-        n_joints = self.num_dof()
+        n_joints = self.num_dof
         q_batch = np.zeros((batch_size, n_joints))
 
         for i in range(batch_size):
-            for js in self._actuated:
+            for js in self._chain_actuated:
                 lo, hi = -1.0, 1.0
                 if js.limit:
                     if js.limit[0] is not None:
@@ -764,16 +828,16 @@ class RobotModel:
         :param title: Custom title for the summary
         """
         beauty_print(title, type="module", centered=True)
-        beauty_print(f"Name: {self.name}")
-        beauty_print(f"File: {self.file_path}")
-        beauty_print(f"DOF: {self.num_dof()}  |  End Link: {self.end_link}")
+        # beauty_print(f"Name: {self.parsed_model.name}")
+        beauty_print(f"File: {self.model_path}")
+        beauty_print(f"DOF: {self.num_dof}  |  End Link: {self.end_link}")
         beauty_print(f"Base Link: {self.base_link}")
-        beauty_print(f"Actuated Joints: {self.joint_names()}")
+        beauty_print(f"Actuated Joints: {self.joint_list}")
 
         if show_chain:
             beauty_print("Actuated Chain Details:")
-            for j in self._actuated:
-                limit_str = f"[{j.limit[0]:.3f}, {j.limit[1]:.3f}]" if j.limit and j.limit[0] is not None else "unlimited"
+            for j in self._chain_actuated:
+                limit_str = f"[{j.limit_lower:.3f}, {j.limit_upper:.3f}]" if j.limit_lower and j.limit_lower is not None else "unlimited"
                 beauty_print(
                     f"  [{j.index}] {j.name} ({j.joint_type})\n"
                     f"      parent: {j.parent} -> child: {j.child}\n"
@@ -843,7 +907,7 @@ class RobotModel:
                     joint_symbol = "⚙" if joint.joint_type in ("revolute", "prismatic") else "⊗"
                     joint_prefix = prefix + extension
                     joint_connector = "└── " if is_last_child else "├── "
-                    in_chain = any(j.name == joint.name for j in self._chain_joints)
+                    in_chain = any(j.name == joint.name for j in self._chain_actuated)
                     joint_line = f"{joint_prefix}{joint_connector}{joint_symbol} {joint.name} ({joint.joint_type})"
                     if in_chain:
                         joint_line = f"{GREEN}{joint_line}{RESET}"
@@ -882,20 +946,20 @@ class BimanualRobotModel(RobotModel):
     Extends RobotModel to provide dual-arm kinematics with automatic group management.
     The fk/ik/jacobian methods operate on both arms simultaneously.
     
-    :param file_path: URDF or MJCF file path
+    :param model_path: URDF or MJCF file path
     :param left_end_link: Left arm end-effector link name
     :param right_end_link: Right arm end-effector link name
     """
 
-    def __init__(self, file_path: str | Path, left_end_link: str, right_end_link: str):
+    def __init__(self, model_path: str | Path, left_end_link: str, right_end_link: str):
         """Initialize bimanual robot model.
         
-        :param file_path: Path to URDF or MJCF file
+        :param model_path: Path to URDF or MJCF file
         :param left_end_link: Left arm end-effector link name
         :param right_end_link: Right arm end-effector link name
         """
         # Initialize base RobotModel (full kinematic tree)
-        super().__init__(file_path, end_link=None)
+        super().__init__(model_path, end_link=None)
 
         # Create left and right arm groups
         self.add_groups({
@@ -909,8 +973,8 @@ class BimanualRobotModel(RobotModel):
         self.right_end_link = right_end_link
 
         beauty_print(f"✓ Bimanual robot initialized:", type="success")
-        beauty_print(f"  Left arm: {self.left_model.num_dof()} DOF, end: {left_end_link}")
-        beauty_print(f"  Right arm: {self.right_model.num_dof()} DOF, end: {right_end_link}")
+        beauty_print(f"  Left arm: {self.left_model.num_dof} DOF, end: {left_end_link}")
+        beauty_print(f"  Right arm: {self.right_model.num_dof} DOF, end: {right_end_link}")
 
     def fk(self, q_left: Sequence[float], q_right: Sequence[float],
            *, backend: str = 'auto', mode: str = 'indep', **kwargs) -> Dict[str, Any]:
@@ -953,9 +1017,9 @@ class BimanualRobotModel(RobotModel):
         from robocore.kinematics.bimanual import bimanual_inverse_kinematics
 
         if q0_left is None:
-            q0_left = [0.0] * self.left_model.num_dof()
+            q0_left = [0.0] * self.left_model.num_dof
         if q0_right is None:
-            q0_right = [0.0] * self.right_model.num_dof()
+            q0_right = [0.0] * self.right_model.num_dof
 
         return bimanual_inverse_kinematics(
             self.left_model, self.right_model,

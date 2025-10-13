@@ -132,7 +132,7 @@ def compute_fk_ik_jacobian(
         print(f"  Quaternion xyzw: {beauty_print_array(quat_fk, precision=6)}")
     
     # Use zero initial guess for better convergence
-    q_init = np.zeros(robot_model.num_dof())
+    q_init = np.zeros(robot_model.num_dof)
     
     if verbose:
         print(f"Initial Guess (radians):")
@@ -213,7 +213,7 @@ def compute_fk_ik_jacobian(
     }
     
     if verbose:
-        print(f"Jacobian Matrix (6 × {robot_model.num_dof()}):")
+        print(f"Jacobian Matrix (6 × {robot_model.num_dof}):")
         print(beauty_print_array(J, precision=6))
         print(f"Jacobian Properties:")
         print(f"  Shape: {J.shape}")
@@ -276,8 +276,8 @@ def orientation_angle_deg(R1, R2):
 
 def sample_q(model: RobotModel, scale: float = 0.6):
     """Sample random joint configuration within limits."""
-    qs = [0.0] * model.num_dof()
-    for js in model._actuated:  # type: ignore[attr-defined]
+    qs = [0.0] * model.num_dof
+    for js in model._chain_actuated:  # type: ignore[attr-defined]
         lo, hi = -1.0, 1.0
         if js.limit:
             if js.limit[0] is not None:
@@ -314,7 +314,7 @@ def run_closure_validation(robot_model: RobotModel, args):
         print(f"  {beauty_print_array(row, 6)}")
     
     # Initial configuration (zero or random)
-    q0 = [0.0] * robot_model.num_dof()
+    q0 = [0.0] * robot_model.num_dof
     
     # Test all combinations
     methods = ["dls", "pinv", "transpose"]
@@ -404,20 +404,20 @@ def main(args):
     
     if args.joints is not None:
         joint_angles = np.array(args.joints)
-        if len(joint_angles) != robot_model.num_dof():
-            print(f"❌ Error: Expected {robot_model.num_dof()} joint angles, got {len(joint_angles)}")
+        if len(joint_angles) != robot_model.num_dof:
+            print(f"❌ Error: Expected {robot_model.num_dof} joint angles, got {len(joint_angles)}")
             return
     elif args.joints_deg is not None:
         joint_angles = np.deg2rad(args.joints_deg)
-        if len(joint_angles) != robot_model.num_dof():
-            print(f"❌ Error: Expected {robot_model.num_dof()} joint angles, got {len(joint_angles)}")
+        if len(joint_angles) != robot_model.num_dof:
+            print(f"❌ Error: Expected {robot_model.num_dof} joint angles, got {len(joint_angles)}")
             return
     elif args.random:
         joint_angles = np.array(robot_model.random_q(rng))
         print("🎲 Using random joint angles")
     else:
         # Default: zero configuration
-        joint_angles = np.zeros(robot_model.num_dof())
+        joint_angles = np.zeros(robot_model.num_dof)
         print("⚙️  Using zero configuration")
     
     # Compute FK, IK, and Jacobian
@@ -478,7 +478,7 @@ if __name__ == '__main__':
     robot_group.add_argument(
         '--urdf',
         type=str,
-        default='robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf',
+        default='robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf',
         # default='robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf',
         help='Path to URDF file'
     )

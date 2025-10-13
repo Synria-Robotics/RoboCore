@@ -19,10 +19,11 @@ from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 
 def main(args):
-    model = RobotModel(args.urdf, end_link=args.end_link)
+    model = RobotModel(args.model_path, end_link=args.end_link)
+    model.print_tree()
     q = model.random_q()
     beauty_print("Random configuration q (rad):")
-    print(beauty_print_array(q))
+    beauty_print_array(q)
 
     # 1. Full Jacobian
     J_full = model.jacobian(q, method='analytic')
@@ -41,14 +42,14 @@ def main(args):
     print(J_pos)
 
     # 4. Subset of joints (e.g. last 3 joints as wrist)
-    if model.num_dof() >= 3:
-        wrist_idx = list(range(model.num_dof()-3, model.num_dof()))
+    if model.num_chain_dof >= 3:
+        wrist_idx = list(range(model.num_chain_dof-3, model.num_chain_dof))
         J_wrist = model.jacobian(q, method='analytic', joint_indices=wrist_idx)
         beauty_print(f"Wrist subset Jacobian (6 x 3) indices={wrist_idx}:")
         print(J_wrist)
 
     # 5. Combined example: position-only for elbow over wrist joints
-    if args.elbow_link and model.num_dof() >= 3:
+    if args.elbow_link and model.num_chain_dof >= 3:
         J_combo = model.jacobian(q, method='analytic', target_link=args.elbow_link, row_mask=[1,1,1,0,0,0], joint_indices=wrist_idx)
         beauty_print(f"Combined local+mask+subset Jacobian shape={J_combo.shape}:")
         print(J_combo)
@@ -56,8 +57,11 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--urdf', type=str, default=get_robocore_path("assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf"))
-    parser.add_argument('--end-link', type=str, default='tool0')
+    parser.add_argument('--model-path', type=str,
+                        # default=get_robocore_path("assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf")
+                        default=get_robocore_path("assets/robot/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml")
+                        )
+    parser.add_argument('--end-link', type=str, default='Link6')
     parser.add_argument('--elbow-link', type=str, default=None, help='Optional intermediate link name (e.g. elbow link)')
     args = parser.parse_args()
     main(args)

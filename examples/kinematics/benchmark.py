@@ -66,7 +66,7 @@ def cmd_performance(args, model):
     """Run performance benchmark."""
     beauty_print("Performance Benchmark: FK/IK/Jacobian", type="module", centered=True)
     
-    q = [0.1, 0.2, -0.3, 0.0, 0.5, -0.2, 0.0][:model.num_dof()]
+    q = [0.1, 0.2, -0.3, 0.0, 0.5, -0.2, 0.0][:model.num_dof]
     
     beauty_print(f"FK runs: {args.fk_runs}", type="info")
     
@@ -139,7 +139,7 @@ def cmd_ik_compare(args, model):
         stats = {k: [] for k in ['iters', 'pos_err', 'ori_err', 'time', 'success']}
         
         for pose in poses:
-            q0 = np.zeros(model.num_dof())
+            q0 = np.zeros(model.num_dof)
             
             # Prepare torch-specific kwargs
             extra = {}
@@ -355,7 +355,7 @@ if __name__ == '__main__':
 
     # Global options
     parser.add_argument('--urdf', type=str,
-                        default=get_robocore_path('assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf'),
+                        default=get_robocore_path('assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf'),
                         help='Path to URDF file')
     parser.add_argument('--end-link', type=str, default='tool0',
                         help='End-effector link name')

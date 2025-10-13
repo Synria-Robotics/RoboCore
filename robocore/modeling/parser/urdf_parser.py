@@ -26,31 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-
-@dataclass
-class URDFJoint:
-    """Joint info.
-
-    :param name: joint name.
-    :param joint_type: 'revolute', 'prismatic', 'fixed'.
-    :param parent: parent link.
-    :param child: child link.
-    :param axis: axis vector (3,).
-    :param origin_xyz: translation (3,).
-    :param origin_rpy: rpy (3, radians).
-    :param limit_lower: lower limit or None.
-    :param limit_upper: upper limit or None.
-    """
-
-    name: str
-    joint_type: str
-    parent: str
-    child: str
-    axis: List[float]
-    origin_xyz: List[float]
-    origin_rpy: List[float]
-    limit_lower: Optional[float]
-    limit_upper: Optional[float]
+from robocore.modeling.parser.utils import JointSpec
 
 
 def _parse_float_list(s: str) -> List[float]:
@@ -71,7 +47,7 @@ def load_urdf(path: str | Path) -> Dict[str, object]:
     joints: List[URDFJoint] = []
     parents = set()
     children = set()
-    for je in joint_elems:
+    for idx, je in enumerate(joint_elems):
         jname = je.attrib["name"]
         jtype = je.attrib.get("type", "fixed")
         parent = je.find("parent").attrib["link"]
@@ -91,8 +67,9 @@ def load_urdf(path: str | Path) -> Dict[str, object]:
         parents.add(parent)
         children.add(child)
         joints.append(
-            URDFJoint(
+            JointSpec(
                 name=jname,
+                index=idx,
                 joint_type=jtype,
                 parent=parent,
                 child=child,

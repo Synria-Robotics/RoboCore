@@ -1,5 +1,5 @@
 <mujoco model="alicia_D_v5_5">
-  <compiler angle="radian" meshdir="../../meshes/Alicia-D_v5_4/"/>
+  <compiler angle="radian" meshdir="../../meshes/Alicia-D_v5_5/"/>
   <statistic center="-0.012496 0.000424702 0.622672" extent="1.93611" meansize="0.179951" />
   <visual>
     <scale jointwidth="0.02" framelength="0.3" framewidth="0.01" />
@@ -68,7 +68,7 @@
                   <geom type="mesh"  mesh="Link6"/>
                   <geom type="mesh" contype="0" conaffinity="0" group="1" density="0"  mesh="Grasp_base"/>
                   <geom type="mesh"  mesh="Grasp_base"/>
-                  <geom size="0.005" pos="-0.0002 -0.0003 0.13118" contype="0" conaffinity="0" group="1" density="0" rgba="0 1 0 1"/>
+                  <!-- <geom size="0.005" pos="-0.0002 -0.0003 0.13118" contype="0" conaffinity="0" group="1" density="0" rgba="0 1 0 1"/> -->
                   <body name="Link7" pos="-0.0002 0.050502 0.13118" quat="0.707105 -0.707108 0 0">
                     <inertial pos="2.97088e-08 0.0434088 0.0106597" quat="0.402868 0.581114 -0.581113 0.402878" mass="0.0256461" diaginertia="8.50964e-06 6.4683e-06 4.66071e-06"/>
                     <joint name="left_finger" pos="0 0 0" axis="0 0 1" type="slide" range="-0.05 0" actuatorfrcrange="-5 5"/>

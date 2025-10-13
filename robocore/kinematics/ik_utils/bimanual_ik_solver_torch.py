@@ -22,9 +22,9 @@ class BiIndependentIKSolverTorch:
               q0_right: Optional[Sequence[float]] = None,
               backend: str = 'torch', **ik_kwargs) -> Dict[str, Any]:
         if q0_left is None:
-            q0_left = [0.0] * self.left.num_dof()
+            q0_left = [0.0] * self.left.num_dof
         if q0_right is None:
-            q0_right = [0.0] * self.right.num_dof()
+            q0_right = [0.0] * self.right.num_dof
 
         res_left = {'q': q0_left, 'success': True, 'pos_err': 0.0, 'ori_err': 0.0, 'iters': 0}
         res_right = {'q': q0_right, 'success': True, 'pos_err': 0.0, 'ori_err': 0.0, 'iters': 0}
@@ -70,9 +70,9 @@ class BiRelativeIKSolverTorch(BiIndependentIKSolverTorch):
         """
         # Follow numpy implementation: solve left first, then constrain right
         if q0_left is None:
-            q0_left = [0.0] * self.left.num_dof()
+            q0_left = [0.0] * self.left.num_dof
         if q0_right is None:
-            q0_right = [0.0] * self.right.num_dof()
+            q0_right = [0.0] * self.right.num_dof
 
         tgt_left = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
         res_left = None

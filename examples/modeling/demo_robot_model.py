@@ -117,7 +117,7 @@ def validate_kinematics_methods(model: RobotModel, q: np.ndarray):
 	
 	# Get target pose from FK
 	target_pose = fk_model_end
-	q_initial = np.zeros(model.num_dof())
+	q_initial = np.zeros(model.num_dof)
 	
 	# Call via RobotModel.ik()
 	ik_result_model = model.ik(
@@ -215,7 +215,7 @@ def main(args):
         urdf_model.print_tree(show_fixed=args.show_fixed)
         mjcf_model.print_tree(show_fixed=args.show_fixed)
 
-    if urdf_model.num_dof() != mjcf_model.num_dof():
+    if urdf_model.num_dof != mjcf_model.num_dof:
         beauty_print("DOF mismatch: configuration will be truncated to the smaller DOF", type="warning")
 
     if args.random:
@@ -223,10 +223,10 @@ def main(args):
         q = np.array(urdf_model.random_q(rng=rng, scale=args.scale))
         beauty_print("Using random joint angles (middle range)")
     else:
-        q = np.zeros(urdf_model.num_dof())
+        q = np.zeros(urdf_model.num_dof)
         beauty_print("Using zero joint configuration")
 
-    min_dof = min(urdf_model.num_dof(), mjcf_model.num_dof())
+    min_dof = min(urdf_model.num_dof, mjcf_model.num_dof)
     if len(q) != min_dof:
         q = q[:min_dof]
 
@@ -245,13 +245,13 @@ if __name__ == "__main__":
     parser.add_argument(
         '--urdf',
         type=str,
-        default=get_robocore_path('assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf'),
+        default=get_robocore_path('assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf'),
         help='URDF file path'
     )
     parser.add_argument(
         '--mjcf',
         type=str,
-        default=get_robocore_path('assets/robot/mjcf/Alicia-D_v5_4/alicia_duo_with_gripper.xml'),
+        default=get_robocore_path('assets/robot/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml'),
         help='MJCF (MuJoCo XML) file path'
     )
     parser.add_argument(

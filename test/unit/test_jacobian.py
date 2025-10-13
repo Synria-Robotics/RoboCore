@@ -34,9 +34,9 @@ from robocore.kinematics.jacobian_utils.jacobian_solver_numpy import JacobianSol
 def random_q_in_limits(model, seed=42):
     """Generate random joint configuration within joint limits."""
     rng = np.random.default_rng(seed)
-    n = model.num_dof()
+    n = model.num_dof
     q = np.zeros(n)
-    for js in model._actuated:
+    for js in model._chain_actuated:
         lo, hi = -1.0, 1.0
         if js.limit:
             if js.limit[0] is not None:
@@ -52,7 +52,7 @@ def random_q_in_limits(model, seed=42):
 @pytest.fixture(scope="module")
 def robot_model():
     """Load robot model for testing."""
-    urdf_path = Path('robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
+    urdf_path = Path('robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
     if not urdf_path.exists():
         pytest.skip(f"URDF not found: {urdf_path}")
     return RobotModel(str(urdf_path), end_link='tool0')

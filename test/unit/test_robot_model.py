@@ -29,7 +29,7 @@ from robocore.modeling.robot_model import RobotModel
 @pytest.fixture(scope="module")
 def urdf_path():
     """Path to test URDF file."""
-    path = Path('robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
+    path = Path('robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
     if not path.exists():
         pytest.skip(f"URDF not found: {path}")
     return str(path)
@@ -49,7 +49,7 @@ class TestRobotModel:
     def test_dof(self, urdf_path):
         """Test DOF calculation."""
         model = RobotModel(urdf_path, end_link='tool0')
-        dof = model.num_dof()
+        dof = model.num_dof
         
         # Alicia-D should have 6 DOF
         assert dof == 6
@@ -59,8 +59,8 @@ class TestRobotModel:
         """Test actuated joint enumeration."""
         model = RobotModel(urdf_path, end_link='tool0')
         
-        actuated = model._actuated
-        assert len(actuated) == model.num_dof()
+        actuated = model._chain_actuated
+        assert len(actuated) == model.num_dof
         
         # Check joint properties
         for js in actuated:
@@ -73,7 +73,7 @@ class TestRobotModel:
         model = RobotModel(urdf_path, end_link='tool0')
         
         chain = model._chain_joints
-        assert len(chain) >= model.num_dof()  # May include fixed joints
+        assert len(chain) >= model.num_dof  # May include fixed joints
         
         # Check chain continuity
         for joint in chain:
@@ -84,7 +84,7 @@ class TestRobotModel:
         """Test joint limit retrieval."""
         model = RobotModel(urdf_path, end_link='tool0')
         
-        for js in model._actuated:
+        for js in model._chain_actuated:
             if js.limit:
                 lo, hi = js.limit
                 # Limits should be reasonable
@@ -109,7 +109,7 @@ class TestRobotModel:
         model2 = RobotModel(urdf_path, end_link='tool0')
         
         # Should have same properties
-        assert model1.num_dof() == model2.num_dof()
+        assert model1.num_dof == model2.num_dof
         assert model1.base_link == model2.base_link
         assert model1.end_link == model2.end_link
 
@@ -121,7 +121,7 @@ class TestJointSpec:
         """Test that JointSpec has required attributes."""
         model = RobotModel(urdf_path, end_link='tool0')
         
-        for js in model._actuated:
+        for js in model._chain_actuated:
             # Required attributes
             assert hasattr(js, 'name')
             assert hasattr(js, 'index')

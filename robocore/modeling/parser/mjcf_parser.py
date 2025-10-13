@@ -1,4 +1,4 @@
-"""Minimal MJCF parser.
+"""MJCF parser using MuJoCo.
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -21,140 +21,311 @@ Website: https://synriarobotics.ai
 
 from __future__ import annotations
 
-import math
-import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Dict, List, Optional
+import numpy as np
 
-from .urdf_parser import URDFJoint  # Re‑use the same dataclass expected by RobotModel
+import mujoco
+from robocore.modeling.parser.utils import JointSpec
+from robocore.transform.conversions import quaternion_to_rpy, quaternion_reorder
+from robolab.formatter.mjcf_parser.parser import from_path
+from robocore.utils.path import create_dir, list_absl_path
 
 
-def _parse_floats(s: Optional[str], n: int, default: float = 0.0) -> List[float]:
-	if not s:
-		return [default] * n
-	return [float(x) for x in s.strip().split()]  # type: ignore[arg-type]
+class MJCFParser:
+    def __init__(self, mjcf_path: str | Path):
+        """
+        :param mjcf_path: Path to the MJCF file
+        """
+        self.mjcf_path = Path(mjcf_path)
+        if not self.mjcf_path.exists():
+            raise FileNotFoundError(f"MJCF file not found: {mjcf_path}")
 
+        # Load the MuJoCo model
+        self.model = mujoco.MjModel.from_xml_path(str(self.mjcf_path))
+        self.data = mujoco.MjData(self.model)
 
-def _quat_to_rpy(q):
-	"""Convert quaternion (w, x, y, z) to RPY (XYZ intrinsic) radians."""
-	w, x, y, z = q
-	# Reference standard conversion
-	# roll (x)
-	sinr_cosp = 2 * (w * x + y * z)
-	cosr_cosp = 1 - 2 * (x * x + y * y)
-	roll = math.atan2(sinr_cosp, cosr_cosp)
-	# pitch (y)
-	sinp = 2 * (w * y - z * x)
-	if abs(sinp) >= 1:
-		pitch = math.copysign(math.pi / 2, sinp)
-	else:
-		pitch = math.asin(sinp)
-	# yaw (z)
-	siny_cosp = 2 * (w * z + x * y)
-	cosy_cosp = 1 - 2 * (y * y + z * z)
-	yaw = math.atan2(siny_cosp, cosy_cosp)
-	return [roll, pitch, yaw]
+        # Parse joint information
+        self.joints = self._parse_joints()
+        self.link_mesh_map = {}
+
+    def _get_joint_type(self, jnt_type: int) -> str:
+        """
+        :param jnt_type: MuJoCo joint type constant
+        :return: Joint type string
+        """
+        type_map = {
+            mujoco.mjtJoint.mjJNT_FREE: "floating",
+            mujoco.mjtJoint.mjJNT_BALL: "ball",
+            mujoco.mjtJoint.mjJNT_SLIDE: "prismatic",
+            mujoco.mjtJoint.mjJNT_HINGE: "revolute",
+        }
+        return type_map.get(jnt_type, "fixed")
+
+    def _parse_joints(self) -> Dict[str, JointSpec]:
+        """
+        :return: Dictionary mapping joint names to JointSpec objects
+        """
+        joints = []
+        idx = 0
+
+        for i in range(self.model.njnt):
+            # Get joint name
+            joint_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, i)
+            if joint_name is None:
+                joint_name = f"joint_{i}"
+
+            # Get joint type
+            jnt_type = self.model.jnt_type[i]
+            joint_type = self._get_joint_type(jnt_type)
+
+            # Get body IDs
+            body_id = self.model.jnt_bodyid[i]
+            parent_body_id = self.model.body_parentid[body_id]
+
+            # Get body names
+            child = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+            if child is None:
+                child = f"body_{body_id}"
+
+            parent = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, parent_body_id)
+            if parent is None:
+                parent = f"body_{parent_body_id}"
+
+            # Get joint axis (in body frame)
+            axis = self.model.jnt_axis[i].copy()
+            axis = axis.tolist()
+
+            # Get body's position and orientation relative to parent
+            # MuJoCo stores body_pos as position relative to parent body
+            # and body_quat as quaternion relative to parent body
+            pos = self.model.body_pos[body_id].copy()
+            origin_xyz = pos.tolist()
+
+            # Get body's relative quaternion and convert to RPY
+            # MuJoCo uses [w, x, y, z] format
+            quat = self.model.body_quat[body_id].copy()
+            origin_rpy = quaternion_to_rpy(quaternion_reorder(quat))
+
+            # Get joint limits
+            limit_lower = None
+            limit_upper = None
+            if self.model.jnt_limited[i]:
+                limit_lower = float(self.model.jnt_range[i, 0])
+                limit_upper = float(self.model.jnt_range[i, 1])
+
+            joint = JointSpec(
+                name=joint_name,
+                index=idx,
+                joint_type=joint_type,
+                parent=parent,
+                child=child,
+                axis=axis,
+                origin_xyz=origin_xyz,
+                origin_rpy=origin_rpy,
+                limit_lower=limit_lower,
+                limit_upper=limit_upper
+            )
+
+            joints.append(joint)
+        return joints
+
+    def get_joint_names(self) -> Dict[str, JointSpec]:
+        return list(self.joints)
+
+    def get_joint_limits(self) -> List[Optional[float]]:
+        return np.array([(j.limit_lower, j.limit_upper) for j in self.joints])
+
+    def get_link_names(self) -> List[str]:
+        """
+        :return: List of link names (bodies)
+        """
+        link_names = []
+        for i in range(self.model.nbody):
+            body_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, i)
+            if body_name is None:
+                body_name = f"body_{i}"
+            link_names.append(body_name)
+        return link_names
+
+    def get_link_virtual_map(self):
+        """
+        :return: {link_body_name: [virtual_link_0, virtual_link_1, ...]}
+        """
+        all_links = self.get_link_names()
+        self.link_virtual_map = {}
+        for link in all_links:
+            if "world" in link:
+                continue
+            # if "_0" in link or "_1" in link or "_2" in link:
+            #     link_name = link.split("_")[:-1]
+            #     link_name = "_".join(link_name)
+            #     if link_name not in link_virtual_map:
+            #         link_virtual_map[link_name] = []
+            #     link_virtual_map[link_name].append(link)
+            else:
+                self.link_virtual_map[link] = [link]
+
+        self.inverse_link_virtual_map = {v: k for k, vs in self.link_virtual_map.items() for v in vs}
+        return self.link_virtual_map, self.inverse_link_virtual_map
+
+    def get_real_link_names(self):
+        """
+        :return: [real_link_0, real_link_1, ...]
+        """
+        return list(self.link_virtual_map.keys())
+
+    def get_link_mesh_map(self):
+        """
+        Get the map of link and its corresponding geometries from the MJCF file.
+
+        :return: {link_body_name: {geom_name: mesh_path}}
+        """
+        robot = from_path(self.mjcf_path)
+        bodies = robot.find_all("body")
+        robot.compiler.meshdir = robot.compiler.meshdir or "meshes"
+        mesh_dir = os.path.join(robot.namescope.model_dir, robot.compiler.meshdir)
+        create_dir(mesh_dir)
+        all_mesh_file_stl = list_absl_path(mesh_dir, recursive=True, suffix=".stl")
+        all_mesh_file_STL = list_absl_path(mesh_dir, recursive=True, suffix=".STL")
+        all_mesh_files = all_mesh_file_stl + all_mesh_file_STL
+
+        mesh_map = robot.get_assets_map()
+        mesh_name_path_map = {}
+        for mesh_name, mesh_file in mesh_map.items():
+            mesh_path = None
+            for mesh_file_exist in all_mesh_files:
+                if mesh_file in mesh_file_exist:
+                    mesh_path = mesh_file_exist
+            if mesh_path is not None:
+                mesh_name_path_map[mesh_name] = mesh_path
+            else:
+                raise FileNotFoundError(f"Mesh file {mesh_file} not found in the mesh directory.")
+
+        meshes = robot.find_all("mesh")
+
+        # 遍历所有 bodies，处理几何体
+        for body in bodies:
+            geoms_this_body = body.geom
+            self.link_mesh_map[body.name] = {}
+
+            for geom in geoms_this_body:
+                geom_type = geom.type or "capsule"  # 默认类型为胶囊
+                geom_pos = geom.pos if geom.pos is not None else [0, 0, 0]
+
+                # 处理不同的几何体类型
+                if geom_type == "mesh":
+                    geom_mesh_name = geom.mesh.name
+                    geom_mesh_path = mesh_name_path_map[geom_mesh_name]
+                    mesh_scale = [1, 1, 1]
+                    for mesh in meshes:
+                        if mesh.name == "wheelchair_mesh":
+                            mesh_scale = mesh.scale
+                    self.link_mesh_map[body.name][geom_mesh_name] = {
+                        'type': 'mesh',
+                        'params': {'mesh_path': geom_mesh_path, 'name': geom_mesh_name, 'position': geom_pos,
+                                   'scale': mesh_scale}
+                    }
+
+                elif geom_type == "sphere":
+                    geom_mesh_size = geom.size[0]  # 球体的大小是半径
+                    self.link_mesh_map[body.name][geom.name] = {
+                        'type': 'sphere',
+                        'params': {'radius': geom_mesh_size, 'position': geom_pos, 'name': geom.name}
+                    }
+
+                elif geom_type == "cylinder":
+                    geom_mesh_size = geom.size  # 圆柱体的大小是 [半径, 高度]
+                    self.link_mesh_map[body.name][geom.name] = {
+                        'type': 'cylinder',
+                        'params': {'radius': geom_mesh_size[0], 'height': geom_mesh_size[1], 'position': geom_pos,
+                                   'name': geom.name}
+                    }
+
+                elif geom_type == "box":
+                    geom_mesh_size = geom.size  # 盒子的大小是 [x, y, z] 维度
+                    self.link_mesh_map[body.name][geom.name] = {
+                        'type': 'box',
+                        'params': {'extents': geom_mesh_size, 'position': geom_pos, 'name': geom.name}
+                    }
+
+                elif geom_type == "capsule":
+                    geom_mesh_size = geom.size  # 胶囊的半径储存在 size[0]
+                    geom_fromto = geom.fromto  # 从fromto属性获取胶囊两端的坐标
+                    from_point = geom_fromto[:3]  # 胶囊起点
+                    to_point = geom_fromto[3:]  # 胶囊终点
+                    # 计算胶囊的高度（两点之间的距离）
+                    height = ((to_point[0] - from_point[0]) ** 2 +
+
+                              (to_point[1] - from_point[1]) ** 2 +
+
+                              (to_point[2] - from_point[2]) ** 2) ** 0.5
+                    # 胶囊的参数化描述
+                    self.link_mesh_map[body.name][geom.name] = {
+                        'type': 'capsule',
+                        'params': {
+                            'radius': geom_mesh_size[0],  # 胶囊的半径
+                            'height': height,  # 胶囊的高度
+                            'from': from_point,  # 起点坐标
+                            'to': to_point,  # 终点坐标
+                            'name': geom.name,
+                            "position": geom_pos
+                        }
+                    }
+
+                else:
+                    raise ValueError(f"Unsupported geometry type {geom_type}.")
+        return self.link_mesh_map
+
+    def get_link_meshname_map(self):
+        """
+        :return: {link_body_name: [mesh_name]}
+        """
+        link_meshname_map = {}
+        for link, geoms in self.link_mesh_map.items():
+            link_meshname_map[link] = []
+            for geom in geoms:
+                link_meshname_map[link].append(self.link_mesh_map[link][geom]['params']['name'])
+        return link_meshname_map
+
+    def get_robot_mesh(self, vertices_list, faces):
+        assert len(vertices_list) == len(faces), "The number of vertices and faces should be the same."
+        robot_mesh = [trimesh.Trimesh(verts, face) for verts, face in zip(vertices_list, faces)]
+        return robot_mesh
+
+    def num_joints(self) -> int:
+        return len(self.joints)
+
+    def to_dict(self) -> Dict[str, object]:
+        """
+        :return: Dictionary with 'name', 'joints', and 'base_links' keys
+        """
+        # Get robot name from MuJoCo model
+        robot_name = self.model.names.decode('utf-8').split('\x00')[0] if self.model.names else ""
+
+        # Convert joints dict to list for compatibility
+        joints_list = list(self.joints.values())
+
+        # Find base links (parents that are never children)
+        parents = set(j.parent for j in joints_list)
+        children = set(j.child for j in joints_list)
+        base_links = list(parents - children)
+
+        return {
+            "name": robot_name,
+            "joints": joints_list,
+            "base_links": base_links
+        }
 
 
 def load_mjcf(path: str | Path) -> Dict[str, object]:
-	"""Load MJCF (MuJoCo XML) and return a URDF‑like structure.
-
-	:param path: file path to .xml.
-	:return: dict with keys: 'name', 'joints', 'base_links'
-	"""
-	path = str(path)
-	tree = ET.parse(path)
-	root = tree.getroot()
-	if root.tag != "mujoco":
-		raise ValueError("Not a MJCF file: root tag != <mujoco>")
-	model_name = root.attrib.get("model", Path(path).stem)
-	worldbody = root.find("worldbody")
-	if worldbody is None:
-		raise ValueError("MJCF missing <worldbody> element")
-
-	# Collect all bodies and build parent map recursively
-	def body_name(elem: ET.Element) -> str:
-		return elem.attrib.get("name", f"body_{id(elem)}")
-
-	parent_map: Dict[ET.Element, Optional[str]] = {}
-	all_bodies: List[ET.Element] = []
-
-	# Recursive traversal to build parent_map and collect all bodies
-	def build_tree(body_elem, parent_name):
-		all_bodies.append(body_elem)
-		parent_map[body_elem] = parent_name
-		for child_body in body_elem.findall("body"):
-			build_tree(child_body, body_name(body_elem))
-
-	for b in worldbody.findall("body"):
-		build_tree(b, None)  # top-level parent is None (world)
-
-	if not all_bodies:
-		raise ValueError("No bodies found in MJCF worldbody")
-
-	# Extract joints from ALL bodies (not just the longest chain)
-	# This allows us to capture branching structures like dual grippers
-	joints: List[URDFJoint] = []
-	parents = set()
-	children = set()
-
-	for body in all_bodies:
-		bname = body_name(body)
-		parent_name = parent_map[body] or "world"
-
-		# Pose of body frame relative to parent
-		pos = _parse_floats(body.attrib.get("pos"), 3)
-		if "euler" in body.attrib:
-			rpy = _parse_floats(body.attrib.get("euler"), 3)
-		elif "quat" in body.attrib:
-			q = _parse_floats(body.attrib.get("quat"), 4)
-			rpy = _quat_to_rpy(q)
-		else:
-			rpy = [0.0, 0.0, 0.0]
-
-		# Extract ALL supported joints in this body (not just the first one)
-		for joint_elem in body.findall("joint"):
-			jtype = joint_elem.attrib.get("type", "hinge")
-			if jtype not in ("hinge", "slide"):
-				continue  # Skip unsupported joint types
-
-			jname = joint_elem.attrib.get("name", f"joint_{len(joints)}")
-			if jtype == "hinge":
-				joint_type = "revolute"
-			elif jtype == "slide":
-				joint_type = "prismatic"
-			else:
-				joint_type = "fixed"
-
-			axis = _parse_floats(joint_elem.attrib.get("axis"), 3)
-
-			# Extract limits
-			range_attr = joint_elem.attrib.get("range")
-			lower = upper = None
-			if range_attr:
-				vals = _parse_floats(range_attr, 2)
-				if len(vals) == 2:
-					lower, upper = vals
-
-			joints.append(
-				URDFJoint(
-					name=jname,
-					joint_type=joint_type,
-					parent=parent_name,
-					child=bname,
-					axis=axis,
-					origin_xyz=pos,
-					origin_rpy=rpy,
-					limit_lower=lower,
-					limit_upper=upper,
-				)
-			)
-			parents.add(parent_name)
-			children.add(bname)
-
-	base_links = list(parents - children) or ["world"]
-	return {"name": model_name, "joints": joints, "base_links": base_links}
+    """
+    :param path: Path to the MJCF file
+    :return: Dictionary with keys 'name', 'joints', 'base_links'
+    """
+    parser = MJCFParser(path)
+    return parser.to_dict()
 
 
-__all__ = ["load_mjcf"]
+__all__ = ["MJCFParser", "load_mjcf"]

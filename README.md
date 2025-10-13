@@ -86,7 +86,7 @@ robot.summary(show_chain=True)
 robot.print_tree()
 
 # Forward Kinematics
-q = [0.0] * robot.num_dof()
+q = [0.0] * robot.num_dof
 pose = robot.fk(q, backend='numpy', return_end=True)
 
 # Inverse Kinematics

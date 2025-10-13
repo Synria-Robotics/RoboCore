@@ -69,7 +69,7 @@ class IKSolverNumPy:
         self.min_damping = min_damping
         self.max_damping = max_damping
         self.base_step = base_step
-        self.n = model.num_dof()
+        self.n = model.num_chain_dof
         # Initialize Jacobian solver
         self.jacobian_solver = JacobianSolverNumPy(model)
 
@@ -283,7 +283,7 @@ class IKSolverNumPy:
                     N = np.eye(self.n) - J_pinv_eff @ J_eff
                     if joint_centering:
                         centers = []
-                        for js in self.model._actuated:
+                        for js in self.model._chain_actuated:
                             lo, hi = -1.0, 1.0
                             if js.limit:
                                 if js.limit[0] is not None:
@@ -419,10 +419,10 @@ class IKSolverNumPy:
         :return: clamped configuration.
         """
         q_clamped = q.copy()
-        for js in self.model._actuated:
-            if js.limit is not None:
-                if js.limit[0] is not None:
-                    q_clamped[js.index] = max(js.limit[0], q_clamped[js.index])
-                if js.limit[1] is not None:
-                    q_clamped[js.index] = min(js.limit[1], q_clamped[js.index])
+        for js in self.model._chain_actuated:
+            if js.limit_lower is not None and js.limit_upper is not None:
+                if js.limit_lower is not None:
+                    q_clamped[js.index] = max(js.limit_lower, q_clamped[js.index])
+                if js.limit_upper is not None:
+                    q_clamped[js.index] = min(js.limit_upper, q_clamped[js.index])
         return q_clamped

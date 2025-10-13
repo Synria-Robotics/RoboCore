@@ -72,7 +72,7 @@ class IKSolverTorch:
 
         # 统一 dtype 默认 float64（用户可覆盖）
         self.dtype = dtype if dtype is not None else torch.float64
-        # 关节数量（假定 model._actuated 与 numpy 版本一致）
+        # 关节数量（假定 model._chain_actuated 与 numpy 版本一致）
         self.n = len(getattr(model, "_actuated"))
         # Initialize FK solver
         self.fk_solver = FKSolverTorch(model)
@@ -405,7 +405,7 @@ class IKSolverTorch:
                         N = torch.eye(self.n, dtype=self.dtype, device=self.device) - J_pinv_eff @ J_eff
                         if joint_centering:
                             centers = []
-                            for js in self.model._actuated:  # type: ignore[attr-defined]
+                            for js in self.model._chain_actuated:  # type: ignore[attr-defined]
                                 lo, hi = -1.0, 1.0
                                 if js.limit:
                                     if js.limit[0] is not None:
@@ -548,7 +548,7 @@ class IKSolverTorch:
 
     def _apply_joint_limits(self, q: Tensor) -> Tensor:
         out = q.clone()
-        for js in self.model._actuated:  # type: ignore[attr-defined]
+        for js in self.model._chain_actuated:  # type: ignore[attr-defined]
             if js.limit is not None:
                 lo, hi = js.limit
                 if lo is not None:
@@ -566,7 +566,7 @@ class IKSolverTorch:
         """
         if not torch.is_tensor(q):
             q = torch.tensor(q, dtype=self.dtype, device=self.device)
-        q_map = {js.name: q[js.index] for js in self.model._actuated}  # type: ignore[attr-defined]
+        q_map = {js.name: q[js.index] for js in self.model._chain_actuated}  # type: ignore[attr-defined]
         T_parent = torch.eye(4, dtype=self.dtype, device=self.device)
         for urdf_joint in self.model._chain_joints:  # type: ignore[attr-defined]
             R_origin = self.jacobian_solver._rpy_matrix_torch(
@@ -689,7 +689,7 @@ class IKSolverTorch:
             Ba = q_act.shape[0]
             J_geo = torch.zeros(Ba, 6, n, device=self.device, dtype=self.dtype)
             p_end_exp = p_end.unsqueeze(1)  # [Ba,1,3]
-            for js in self.model._actuated:  # type: ignore[attr-defined]
+            for js in self.model._chain_actuated:  # type: ignore[attr-defined]
                 j = js.index
                 z = z_axis[:, j, :]  # [Ba,3]
                 p_j = p_joint[:, j, :]  # [Ba,3]
@@ -829,7 +829,7 @@ class IKSolverTorch:
             # Joint limit enforcement
             q_new = q_sub + dq
             # apply joint limits vectorized
-            for js in self.model._actuated:  # type: ignore[attr-defined]
+            for js in self.model._chain_actuated:  # type: ignore[attr-defined]
                 if js.limit is not None:
                     lo, hi = js.limit
                     j = js.index
@@ -883,7 +883,7 @@ class IKSolverTorch:
         t_parent = torch.zeros(B, 3, device=device, dtype=dtype)  # [B,3]
 
         # Build q_map for joint values (map joint name -> [B] tensor of values)
-        q_map = {js.name: q_batch[:, js.index] for js in self.model._actuated}  # type: ignore[attr-defined]
+        q_map = {js.name: q_batch[:, js.index] for js in self.model._chain_actuated}  # type: ignore[attr-defined]
 
         # CRITICAL: iterate over full chain (including fixed joints) like single-mode does
         for urdf_joint in self.model._chain_joints:  # type: ignore[attr-defined]
@@ -916,7 +916,7 @@ class IKSolverTorch:
             # For actuated joints: cache axis and origin position
             if urdf_joint.joint_type in ("revolute", "prismatic"):
                 # Find corresponding JointSpec to get index
-                js = next((j for j in self.model._actuated if j.name ==
+                js = next((j for j in self.model._chain_actuated if j.name ==
                           urdf_joint.name), None)  # type: ignore[attr-defined]
                 if js is not None:
                     j = js.index

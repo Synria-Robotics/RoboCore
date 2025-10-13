@@ -36,18 +36,18 @@ class MuJoCoBridge(Bridge):
 
     def __init__(self, urdf_path: str | Path):
         self.model = RobotModel(urdf_path)
-        self._q = [0.0] * self.model.num_dof()
+        self._q = [0.0] * self.model.num_dof
 
     def reset(self):
         """Reset state."""
-        self._q = [0.0] * self.model.num_dof()
+        self._q = [0.0] * self.model.num_dof
 
     def step(self, action: Sequence[float]):
         """Apply target joint values (instant set).
 
         :param action: new joint positions length dof.
         """
-        if len(action) != self.model.num_dof():
+        if len(action) != self.model.num_dof:
             raise ValueError("Action length mismatch")
         self._q = list(action)
 

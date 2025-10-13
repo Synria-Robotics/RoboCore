@@ -36,8 +36,8 @@ def skip_if_missing():
 
 def random_q_in_limits(model, seed=0):
     rng = np.random.default_rng(seed)
-    q = np.zeros(model.num_dof())
-    for js in model._actuated:  # type: ignore[attr-defined]
+    q = np.zeros(model.num_dof)
+    for js in model._chain_actuated:  # type: ignore[attr-defined]
         lo, hi = -1.0, 1.0
         if js.limit:
             if js.limit[0] is not None:
@@ -65,8 +65,8 @@ def right_arm():
 
 class TestBessicaSevenDOF:
     def test_dof_counts(self, left_arm, right_arm):
-        assert left_arm.num_dof() == 7, "Left arm should have 7 DOF"
-        assert right_arm.num_dof() == 7, "Right arm should have 7 DOF"
+        assert left_arm.num_dof == 7, "Left arm should have 7 DOF"
+        assert right_arm.num_dof == 7, "Right arm should have 7 DOF"
 
     @pytest.mark.parametrize("method", ["pinv", "dls"])  # transpose 通常也行，可按需加入
     def test_fk_ik_fk_closure(self, left_arm, method):
@@ -80,7 +80,7 @@ class TestBessicaSevenDOF:
             max_iters=180, pos_tol=1e-4, ori_tol=1e-4
         )
         assert 'success' in res
-        assert len(res['q']) == left_arm.num_dof()
+        assert len(res['q']) == left_arm.num_dof
         if res['success']:
             T_res = forward_kinematics(left_arm, res['q'], backend='numpy', return_end=True)
             # 位置误差
@@ -123,14 +123,14 @@ class TestBessicaSevenDOF:
         # 计算与关节中心的平均偏差
         def avg_center_offset(model, q):
             acc = 0.0
-            for js in model._actuated:  # type: ignore[attr-defined]
+            for js in model._chain_actuated:  # type: ignore[attr-defined]
                 lo, hi = -1.0, 1.0
                 if js.limit:
                     if js.limit[0] is not None: lo = js.limit[0]
                     if js.limit[1] is not None: hi = js.limit[1]
                 center = 0.5 * (lo + hi)
                 acc += abs(q[js.index] - center) / max(1e-9, (hi - lo))
-            return acc / model.num_dof()
+            return acc / model.num_dof
         off_base = avg_center_offset(left_arm, np.asarray(base['q']))
         off_ns = avg_center_offset(left_arm, np.asarray(with_ns['q']))
         # nullspace 居中应不劣于基准（允许极小浮动）
@@ -150,7 +150,7 @@ class TestBessicaSevenDOF:
         from robocore.kinematics.jacobian import jacobian  # noqa: F401 (ensure import side effects if any)
         # 复用数值版逻辑（简化：复制 numpy 早停策略）
         def fk_until(model, q, link):
-            q_map = {js.name: q[js.index] for js in model._actuated}  # type: ignore[attr-defined]
+            q_map = {js.name: q[js.index] for js in model._chain_actuated}  # type: ignore[attr-defined]
             import math as _m
             T = np.eye(4)
             for urdf_joint in model._chain_joints:  # type: ignore[attr-defined]

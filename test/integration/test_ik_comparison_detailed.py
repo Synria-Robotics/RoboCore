@@ -33,9 +33,9 @@ from robocore.kinematics.fk import forward_kinematics
 def random_q_in_limits(model, seed=42):
     """生成一个在关节限制内的随机配置"""
     rng = np.random.default_rng(seed)
-    n = model.num_dof()
+    n = model.num_dof
     q = np.zeros(n)
-    for js in model._actuated:
+    for js in model._chain_actuated:
         lo, hi = -1.0, 1.0
         if js.limit:
             if js.limit[0] is not None:
@@ -234,7 +234,7 @@ def batch_comparison(model, n_samples=32, device='cpu', seed=42):
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--urdf', default='robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
+    parser.add_argument('--urdf', default='robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
     parser.add_argument('--end-link', default='tool0')
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--batch-size', type=int, default=32)
@@ -249,7 +249,7 @@ def main():
         return
     
     model = RobotModel(str(urdf_path), end_link=args.end_link)
-    print(f"✓ 模型加载: DOF={model.num_dof()}, end_link={model.end_link}")
+    print(f"✓ 模型加载: DOF={model.num_dof}, end_link={model.end_link}")
     
     if args.single:
         # 单样本详细对比

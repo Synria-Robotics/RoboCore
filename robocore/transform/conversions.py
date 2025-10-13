@@ -449,6 +449,44 @@ def matrix_to_euler(R, seq='xyz'):
 # Quaternion operations and conversions
 # ============================================================================
 
+def quaternion_reorder(q, src_order='wxyz', dst_order='xyzw'):
+    """
+    Reorder quaternion components between common conventions.
+
+    :param q: quaternion(s) to reorder. Input component order is given by ``src_order``.
+    :param src_order: source component order string, e.g. 'wxyz' or 'xyzw'.
+    :param dst_order: destination component order string, e.g. 'xyzw' or 'wxyz'.
+    :return: Reordered quaternion(s) in ``dst_order``.
+    """
+    bm = get_backend_manager()
+    xp = bm.module
+
+    q = bm.ensure_array(q)
+
+    # Accept shape (4,) or (..., 4)
+    squeeze = False
+    if q.ndim == 1:
+        q = q.reshape(1, 4)
+        squeeze = True
+
+    if len(src_order) != 4 or len(dst_order) != 4:
+        raise ValueError("src_order and dst_order must be length 4 strings (e.g. 'wxyz')")
+
+    # Build index map from source order
+    src_map = {c: i for i, c in enumerate(src_order)}
+    try:
+        idx = [src_map[c] for c in dst_order]
+    except KeyError as e:
+        raise ValueError(f"Invalid character in dst_order: {e}")
+
+    # Gather and stack components along last axis
+    if bm.is_torch:
+        out = xp.stack([q[..., j] for j in idx], dim=-1)
+    else:
+        out = xp.stack([q[..., j] for j in idx], axis=-1)
+
+    return out[0] if squeeze else out
+
 def quaternion_normalize(q):
     """
     Normalize quaternion to unit length.

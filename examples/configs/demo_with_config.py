@@ -61,8 +61,8 @@ def format_array(arr: np.ndarray, precision: int = 5) -> str:
 
 def random_q(model, rng, scale=0.5):
     """Generate random joint configuration within limits."""
-    q = [0.0] * model.num_dof()
-    for js in model._actuated:
+    q = [0.0] * model.num_dof
+    for js in model._chain_actuated:
         lo, hi = -1.0, 1.0
         if js.limit:
             if js.limit[0] is not None:
@@ -91,7 +91,7 @@ def compute_kinematics(config: ConfigManager, joint_angles: np.ndarray):
     robot_model = RobotModel(robot_cfg.urdf_path, end_link=robot_cfg.end_link)
     
     print(f"📦 Robot: {Path(robot_cfg.urdf_path).name}")
-    print(f"   DOF: {robot_model.num_dof()}, End Link: {robot_cfg.end_link}")
+    print(f"   DOF: {robot_model.num_dof}, End Link: {robot_cfg.end_link}")
     
     # Get config values
     fk_backend = config.cfg.kinematics.fk_backend
@@ -286,15 +286,15 @@ def main():
     # Determine joint angles
     if args.joints is not None:
         joint_angles = np.array(args.joints)
-        if len(joint_angles) != robot_model.num_dof():
-            print(f"❌ Expected {robot_model.num_dof()} joints, got {len(joint_angles)}")
+        if len(joint_angles) != robot_model.num_dof:
+            print(f"❌ Expected {robot_model.num_dof} joints, got {len(joint_angles)}")
             return
     elif args.random:
         rng = np.random.default_rng(config_manager.cfg.seed or 42)
         joint_angles = random_q(robot_model, rng)
         print("🎲 Using random joint angles")
     else:
-        joint_angles = np.zeros(robot_model.num_dof())
+        joint_angles = np.zeros(robot_model.num_dof)
         print("⚙️  Using zero configuration")
     
     # Compute kinematics

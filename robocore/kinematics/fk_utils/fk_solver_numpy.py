@@ -49,9 +49,9 @@ class FKSolverNumPy:
         :param model: robot model.
         """
         self.model = model
-        self.n = model.num_dof()
+        self.n = model.num_chain_dof
         self.joint_chain = model._chain_joints
-        self.actuated_joints = model._actuated
+        self.actuated_joints = model._chain_actuated
         self.base_link = model.base_link
         self.end_link = model.end_link
     

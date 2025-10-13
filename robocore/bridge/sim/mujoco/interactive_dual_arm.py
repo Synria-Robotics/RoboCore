@@ -56,8 +56,8 @@ class InteractiveDualArmIK:
         self.right_model = self.robot.right_model
         
         # Current joint configuration
-        self.q_left = np.zeros(self.left_model.num_dof())
-        self.q_right = np.zeros(self.right_model.num_dof())
+        self.q_left = np.zeros(self.left_model.num_dof)
+        self.q_right = np.zeros(self.right_model.num_dof)
         
         # Target poses
         self.T_left_target = None
@@ -339,8 +339,8 @@ class InteractiveDualArmIK:
         """Update MuJoCo robot joint positions."""
         # Map RoboCore joint values to MuJoCo qpos
         # MuJoCo model has: right arm (0-6), then left arm (7-13)
-        nq_left = self.left_model.num_dof()
-        nq_right = self.right_model.num_dof()
+        nq_left = self.left_model.num_dof
+        nq_right = self.right_model.num_dof
         
         # Right arm first, left arm second
         self.mj_data.qpos[0:nq_right] = self.q_right
@@ -524,8 +524,8 @@ class InteractiveDualArmIK:
         print("\n🔄 Resetting to initial state...")
 
         # Reset joint angles to zero
-        self.q_left = np.zeros(self.left_model.num_dof())
-        self.q_right = np.zeros(self.right_model.num_dof())
+        self.q_left = np.zeros(self.left_model.num_dof)
+        self.q_right = np.zeros(self.right_model.num_dof)
 
         # Reset target poses to initial values
         self.T_left_target = self.T_left_initial.copy()

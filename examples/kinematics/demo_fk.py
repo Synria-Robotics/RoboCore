@@ -1,4 +1,4 @@
-"""Module
+"""Forward Kinematics Demo
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -21,7 +21,7 @@ Website: https://synriarobotics.ai
 
 import numpy as np
 import argparse
-
+import time
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.fk import forward_kinematics
 from robocore.utils.beauty_logger import beauty_print_array, beauty_print
@@ -30,11 +30,12 @@ from robocore.transform.conversions import *
 
 
 def main(args):
-    urdf_path = args.urdf
+    start_time = time.time()
+    model_path = args.model_path
     end_link = args.end_link
     joint_angles = args.joint_angles
 
-    robot_model = RobotModel(str(urdf_path), end_link=end_link)
+    robot_model = RobotModel(str(model_path), end_link=end_link)
     robot_model.summary(show_chain=True)
     robot_model.print_tree(show_fixed=True)
 
@@ -70,14 +71,17 @@ def main(args):
     print(beauty_print_array(rotation_fk, precision=6))
     beauty_print(f"Homogeneous Transformation Matrix:")
     print(beauty_print_array(T_fk, precision=6))
+    end_time = time.time()
+    beauty_print(f"Computation Time: {end_time - start_time: .6f} seconds")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Forward Kinematics Demo")
-    parser.add_argument('--urdf', type=str, default=get_robocore_path("assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf"),
+    parser.add_argument('--model-path', type=str,
+                        # default=get_robocore_path("assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf"),
+                        default=get_robocore_path("assets/robot/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml"),
                         help='Path to URDF file (default: Alicia-D)')
-    parser.add_argument('--end-link', type=str, default='tool0',
-                        help='End-effector link name')
+    parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
     parser.add_argument('--joint-angles', type=float, nargs='+', default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2],
                         help='Joint angles in radians') 
     args = parser.parse_args()
