@@ -21,7 +21,7 @@ def rdf_from_robot_model(args):
     assert args.modelType in ["NN", "BP"], "Invalid model type. Choose either 'NN' or 'BP'."
     
     asset_path = os.path.join(args.assetRoot, args.assetFile)
-    robot = RobotModel(asset_path, base_link=args.baseLink)
+    robot = RobotModel(asset_path, base_link=args.baseLink, end_link="Link6", load_mesh_flag=True)
     
     # Instantiate RDF_NN
     rdf_instant = RDF(args, robot, model_type=args.modelType)
@@ -54,27 +54,28 @@ def rdf_from_robot_model(args):
     # visualize the Bernstein Polynomial model for the whole body
     # rdf.visualize_reconstructed_whole_body(rdf_model, trans_dict, tag=model_name)
 
-    # Run RDF_NN inference
-    batch_size = 1024
-    num_points = 64
-    x = torch.rand(batch_size, num_points, 3).to(args.device) * 2.0 - 1.0  # [B, N, 3]
-    joint_value = torch.rand(batch_size, rdf_instant.robot.num_joint).to(args.device).float()  # [B, num_joint]
-    base_trans = torch.eye(4, device=args.device).unsqueeze(0).expand(batch_size, 4, 4)  # [B, 4, 4]
+    # # Run RDF_NN inference
+    # batch_size = 1024
+    # num_points = 64
+    # x = torch.rand(batch_size, num_points, 3).to(args.device) * 2.0 - 1.0  # [B, N, 3]
+    # joint_value = torch.rand(batch_size, rdf_instant.robot.num_joint).to(args.device).float()  # [B, num_joint]
+    # base_trans = torch.eye(4, device=args.device).unsqueeze(0).expand(batch_size, 4, 4)  # [B, 4, 4]
 
-    start_time = time.time()
-    sdf, gradient = rdf_instant.get_whole_body_sdf_batch(x, joint_value, rdf_model, base_trans=base_trans,
-                                                         use_derivative=True)
-    print('Time cost:', (time.time() - start_time))
-    print('sdf:', sdf.shape, 'gradient:', gradient.shape)
-
-    joint_value = torch.zeros(num_joint).to(args.device).reshape((-1, num_joint))
+    # start_time = time.time()
+    # sdf, gradient = rdf_instant.get_whole_body_sdf_batch(x, joint_value, rdf_model, base_trans=base_trans,
+    #                                                      use_derivative=True)
+    # print('Time cost:', (time.time() - start_time))
+    # print('sdf:', sdf.shape, 'gradient:', gradient.shape)
+    import numpy as np
+    joint_value = np.zeros(num_joint)
     # joint_value = torch.rand(num_joint).to(args.device).reshape((-1, num_joint))
     robolab.wdf.plot_3D_sdf_with_gradient(joint_value, rdf_instant, model=rdf_model, device=args.device)
 
 
 if __name__ == '__main__':
+    from robocore.utils.path import get_robocore_path
     parser = argparse.ArgumentParser()
-    parser.add_argument('--device', default='cuda:3' if torch.cuda.is_available() else 'cpu', type=str)
+    parser.add_argument('--device', default='cuda:0' if torch.cuda.is_available() else 'cpu', type=str)
 
     # Training args
     parser.add_argument('--trainEpochs', default=300, type=int, help="Epochs for NN training")  # Keep for NN
@@ -94,10 +95,10 @@ if __name__ == '__main__':
 
     # Asset args
     parser.add_argument('--assetName', default="Bruce", type=str, help="Name of the asset (e.g., for finding files)")
-    parser.add_argument('--assetRoot', default="/Users/Jonas/Documents/Github/Robotics/Robolab-old/assets",
+    parser.add_argument('--assetRoot', default=get_robocore_path("assets"),
                         type=str, help="Root directory for assets")
-    parser.add_argument('--assetFile', default="mjcf/bruce/bruce.xml", type=str, help="Path to asset file (URDF/MJCF)")
-    parser.add_argument('--baseLink', default="pelvis", type=str, help="Base link of the robot")
+    parser.add_argument('--assetFile', default="robot/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml", type=str, help="Path to asset file (URDF/MJCF)")
+    parser.add_argument('--baseLink', default="base_link", type=str, help="Base link of the robot")
 
     args = parser.parse_args()
 

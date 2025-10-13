@@ -53,7 +53,7 @@ class RDF:
 
     def get_whole_body_sdf_batch(self, points, joint_value, model, base_trans=None, use_derivative=True,
                                  used_links=None):
-        sdf_value, gradient_value = self.model.get_whole_body_sdf_batch(points, joint_value, model,
+        sdf_value, gradient_value = self.model.get_whole_body_sdf_batch(points, [joint_value], model,
                                                                         base_trans, use_derivative, used_links)
         return sdf_value, gradient_value
 
@@ -866,20 +866,20 @@ class RDFNN:
         if used_links is None:
             used_links = self.robot.real_link
             self.used_links = [link for link in used_links if link in self.link_mesh_map]
-        B = joint_value.shape[0]  # batch size
+        B = 1  # batch size
         N = points.shape[1]  # number of points
         
         if not hasattr(self, 'offset_list'):
             self.get_model_dict(model, used_links=used_links)
             
-        trans_dict = self.robot.get_trans_dict(joint_value, base_trans)
+        trans_dict = self.robot.get_trans_dict(joint_value[0], base_trans)
         trans_list = []
         for used_link in used_links:
             if used_link in self.link_mesh_map:
                 mesh_names = self.link_mesh_map[used_link]
                 for mesh_name in mesh_names:
                     trans = trans_dict[used_link]
-                    trans_list.append(trans)
+                    trans_list.append(torch.tensor(trans))
 
         K = len(self.offset_list)
         offset = torch.cat(self.offset_list, dim=0).to(self.device)

@@ -250,17 +250,16 @@ class RobotModel:
         :return: A dictionary where the keys are link names and the values are transformation matrices.
         """
         if base_trans is None:
-            base_trans = (np.identity(4).
-                          reshape(-1, 4, 4).expand(len(joint_value), 4, 4).float())
+            base_trans = np.identity(4)
 
         ret = self.fk(joint_value)
         trans_dict = {}
 
         # Get the original base_link transformation matrix
-        original_base_trans = ret[self.base_link].get_matrix().to(base_trans.device)
-        original_base_trans_inv = torch.linalg.inv(original_base_trans)
+        original_base_trans = ret[self.base_link]
+        original_base_trans_inv = np.linalg.inv(original_base_trans)
         # Compute the relative transformation matrix that brings the original base_link to the new base_trans
-        relative_trans = torch.matmul(base_trans, original_base_trans_inv)
+        relative_trans = np.matmul(base_trans, original_base_trans_inv)
 
         # Iterate over all links and apply the relative transformation if needed
         for link in self.all_link:
@@ -268,19 +267,156 @@ class RobotModel:
                 continue
 
             val = ret[link]
-            homo_matrix = val.get_matrix().to(base_trans.device)
+            homo_matrix = val
 
             real_link = self.inverse_link_virtual_map[link]
 
             # If base_trans is provided, apply the relative transformation to all links
             if base_trans is not None:
                 # Update the link's transformation by applying the relative transformation
-                homo_matrix = torch.matmul(relative_trans, homo_matrix)
+                homo_matrix = np.matmul(relative_trans, homo_matrix)
 
             # Store the updated transformation in the dictionary
             trans_dict[real_link] = homo_matrix
 
         return trans_dict
+
+    def forward(self, joint_value, base_trans=None):
+        """
+        Transform the robot mesh according to the joint values and the base pose.
+        Handles both complex meshes and simple shapes, including spheres, boxes, cylinders, and capsules.
+
+        :param joint_value: the joint values, [batch_size, num_joint]
+        :param base_trans: transformation matrix of the base pose, [batch_size, 4, 4]
+        :return: transformed vertices and normals for complex meshes, and transformed parameters for simple shapes.
+        """
+        batch_size = 1
+        trans_dict = self.get_trans_dict(joint_value, base_trans)
+        self.meshname_link_map = {}
+        for link, meshnames in self.link_meshname_map.items():
+            for meshname in meshnames:
+                self.meshname_link_map[meshname] = link
+
+        ret_vertices = {}
+        for mesh_name, mesh in self.meshname_mesh.items():
+            link_vertices = self.meshname_mesh[mesh_name]
+            link_normals = self.meshname_mesh_normal[mesh_name]
+
+            if 'base' not in self.meshname_link_map[mesh_name]:
+                link_name = self.meshname_link_map[mesh_name]
+                related_link = [key for key in trans_dict.keys() if link_name in key][-1]
+                link_vertices = np.matmul(trans_dict[related_link], link_vertices.transpose(1, 0)).transpose(0, 1)[
+                                :, :3]
+
+            ret_vertices[mesh_name] = link_vertices
+
+        # 存储简单形状的转换信息
+        transformed_shapes = {}
+
+        # 处理简单形状
+        for mesh_name, shape_info in self.simple_shapes.items():
+            link_name = self.meshname_link_map[mesh_name]
+            if shape_info['type'] == 'sphere':
+                radius = shape_info['params']['radius']
+                center = np.zeros(batch_size, 3)
+                center = trans_dict[link_name][:, :3, 3].clone()
+                center += np.array(shape_info['params']['position'])
+                center += np.array([0, 0, shape_info['params']['radius']])
+                transformed_shapes[mesh_name] = {'type': 'sphere', 'radius': radius, 'center': center}
+            elif shape_info['type'] == 'box':
+                extents = shape_info['params']['extents']
+                center = np.zeros(batch_size, 3)
+                center = trans_dict[link_name][:, :3, 3].clone()
+                center +=  np.array(shape_info['params']['position'])
+                transformed_shapes[mesh_name] = {'type': 'box', 'extents': extents, 'center': center}
+            elif shape_info['type'] == 'cylinder':
+                # 获取圆柱体的半径和高度
+                radius = shape_info['params']['radius']
+                height = shape_info['params']['height']
+                center = np.zeros(batch_size, 3)
+                center = trans_dict[link_name][:, :3, 3].clone()
+                center += np.array(shape_info['params']['position'])
+                transformed_shapes[mesh_name] = {'type': 'cylinder', 'radius': radius, 'height': height,
+                                                 'center': center}
+
+            elif shape_info['type'] == 'capsule':
+                # 获取胶囊体的半径和高度
+                radius = shape_info['params']['radius']
+                height = shape_info['params']['height']
+                center = np.zeros(batch_size, 3)
+                center = trans_dict[link_name][:, :3, 3].clone()
+                center += np.array(shape_info['params']['position'])
+                transformed_shapes[mesh_name] = {'type': 'capsule', 'radius': radius, 'height': height,
+                                                 'center': center}
+
+        return ret_vertices, transformed_shapes, trans_dict
+    
+    def get_forward_robot_mesh(self, joint_value, base_trans=None):
+        """
+        Transform the robot mesh according to the joint values and the base pose.
+        Handles both complex meshes and simple shapes.
+
+        :param joint_value: the joint values, [batch_size, num_joint]
+        :param base_trans: transformation matrix of the base pose, [batch_size, 4, 4]
+        :return: list of trimesh objects, one per batch
+        """
+        batch_size = 1
+        outputs, transformed_shapes, trans_dict = self.forward(joint_value, base_trans)
+
+        # 处理复杂网格和简单形状的 mesh
+        mesh_list = []
+        mesh_batch = []
+
+        # 处理复杂网格
+        for mesh_name, vertices in outputs.items():
+            if mesh_name in self.meshes:
+                faces = self.meshes[mesh_name][1]  # 获取面索引
+                mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
+                mesh_batch.append(mesh)
+
+        # 处理简单形状
+        for mesh_name, shape_info in transformed_shapes.items():
+            # 获取关节的平移变换矩阵
+            link_name = self.meshname_link_map[mesh_name]
+            trans_matrix = trans_dict.get(link_name, None)
+            if shape_info['type'] == 'sphere':
+                # 使用变换后的中心和半径创建球体
+                radius = shape_info['radius']
+                center = shape_info['center']
+                sphere = trimesh.creation.icosphere(subdivisions=3, radius=radius)
+                sphere.apply_translation(center)
+                # sphere.apply_transform(trans_matrix[j].detach().cpu().numpy())
+                mesh_batch.append(sphere)
+            elif shape_info['type'] == 'box':
+                # 使用变换后的中心和边长创建立方体
+                extents = shape_info['extents']
+                center = shape_info['center']
+                box = trimesh.creation.box(extents=extents)
+                # box.apply_transform(trans_matrix[j].detach().cpu().numpy())
+                box.apply_translation(center)
+                mesh_batch.append(box)
+            elif shape_info['type'] == 'cylinder':
+                # 使用变换后的中心、半径和高度创建圆柱体
+                radius = shape_info['radius']
+                height = shape_info['height']
+                center = shape_info['center']
+                cylinder = trimesh.creation.cylinder(radius=radius, height=height)
+                # cylinder.apply_transform(trans_matrix[j].detach().cpu().numpy())
+                cylinder.apply_translation(center)
+                mesh_batch.append(cylinder)
+            elif shape_info['type'] == 'capsule':
+                # 使用变换后的中心、半径和高度创建胶囊体
+                radius = shape_info['radius']
+                height = shape_info['height']
+                center = shape_info['center']
+                capsule = trimesh.creation.capsule(radius=radius, height=height)
+                # capsule.apply_transform(trans_matrix[j].detach().cpu().numpy())
+                capsule.apply_translation(center)
+                mesh_batch.append(capsule)
+        mesh_list.append(mesh_batch)
+
+        return mesh_list
+
 
     # ------------- Kinematics ---------------------
     def fk(self, q: Sequence[float] | Any, *, backend: str = 'auto', return_end: bool = False,
