@@ -19,14 +19,16 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
-import numpy as np
 import argparse
 import time
-from robocore.modeling.robot_model import RobotModel
+
+import numpy as np
+
 from robocore.kinematics.fk import forward_kinematics
-from robocore.utils.beauty_logger import beauty_print_array, beauty_print
-from robocore.utils.path import get_robocore_path
+from robocore.modeling.robot_model import RobotModel
 from robocore.transform.conversions import *
+from robocore.utils.beauty_logger import beauty_print, beauty_print_array
+from robocore.utils.path import get_robocore_path
 
 
 def main(args):
@@ -53,7 +55,7 @@ def main(args):
         'rotation': rotation_fk,
         'euler_xyz': euler_fk,
         'quaternion_xyzw': quat_fk  # Quaternion in xyzw order
-        }
+    }
 
     beauty_print(f"End-Effector Position (m):")
     print(f"  p = {beauty_print_array(position_fk)}")
@@ -82,7 +84,9 @@ if __name__ == "__main__":
                         default=get_robocore_path("assets/robot/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml"),
                         help='Path to URDF file (default: Alicia-D)')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
-    parser.add_argument('--joint-angles', type=float, nargs='+', default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2],
-                        help='Joint angles in radians') 
+    parser.add_argument('--joint-angles', type=float, nargs='+', 
+                        # default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2],
+                        default=[0., 0., 0., 0., 0., 0.],
+                        help='Joint angles in radians')
     args = parser.parse_args()
     main(args)

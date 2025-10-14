@@ -4,26 +4,39 @@ Robot distance field (RDF) with Neural Network
 
 This example demonstrates how to use the RDF_NN class to train a Neural Network model for the robot distance field
 from URDF/MJCF files and visualize the reconstructed whole body.
+
+Updated to use new multi-chain and backend support.
 """
 
 import argparse
 import os
-import time
 
-import robocore
-import robolab
+import numpy as np
 import torch
-from robocore.wdf.rdf import RDF  # Changed from RDF
+
 from robocore.modeling.robot_model import RobotModel
+from robocore.utils.backend import set_backend
+from robocore.wdf.rdf import RDF
 
 
 def rdf_from_robot_model(args):
     assert args.modelType in ["NN", "BP"], "Invalid model type. Choose either 'NN' or 'BP'."
-    
+
+    # Set global backend
+    backend_type = 'torch' if 'cuda' in args.device else 'numpy'
+    set_backend(backend_type, device=args.device)
+
     asset_path = os.path.join(args.assetRoot, args.assetFile)
-    robot = RobotModel(asset_path, base_link=args.baseLink, end_link="Link6", load_mesh_flag=True)
-    
-    # Instantiate RDF_NN
+
+    # Create robot model with load_mesh_flag=True
+    robot = RobotModel(
+        asset_path,
+        base_link=args.baseLink,
+        end_link="Link6",  # Single chain mode
+        load_mesh_flag=True
+    )
+
+    # Create RDF instance (no groups = single chain mode)
     rdf_instant = RDF(args, robot, model_type=args.modelType)
     rdf_dir = os.path.join(os.path.dirname(asset_path), "rdf")
 
@@ -36,39 +49,26 @@ def rdf_from_robot_model(args):
 
     if not os.path.exists(rdf_model_path) or args.forceTrain:  # train the model
         rdf_instant.train()
-        
+
     if args.device == 'cpu':
-        rdf_model = torch.load(rdf_model_path, map_location=torch.device('cpu'))
+        rdf_model = torch.load(rdf_model_path, map_location=torch.device('cpu'), weights_only=False)
     else:
-        rdf_model = torch.load(rdf_model_path)
+        rdf_model = torch.load(rdf_model_path, weights_only=False)
 
     rdf_instant.create_surface_mesh(rdf_model, nbData=128, vis=False, save_mesh_name=model_name)
 
-    num_joint = rdf_instant.robot.num_joint
-    joint_value = torch.zeros(num_joint).to(args.device)
-    base_trans = torch.tensor([[1, 0, 0, 0],
-                               [0, 1, 0, 0],
-                               [0, 0, 1, 0],
-                               [0, 0, 0, 1]]).float().to(args.device)
-    trans_dict = rdf_instant.robot.get_trans_dict(joint_value, base_trans)
-    # visualize the Bernstein Polynomial model for the whole body
-    # rdf.visualize_reconstructed_whole_body(rdf_model, trans_dict, tag=model_name)
-
-    # # Run RDF_NN inference
-    # batch_size = 1024
-    # num_points = 64
-    # x = torch.rand(batch_size, num_points, 3).to(args.device) * 2.0 - 1.0  # [B, N, 3]
-    # joint_value = torch.rand(batch_size, rdf_instant.robot.num_joint).to(args.device).float()  # [B, num_joint]
-    # base_trans = torch.eye(4, device=args.device).unsqueeze(0).expand(batch_size, 4, 4)  # [B, 4, 4]
-
-    # start_time = time.time()
-    # sdf, gradient = rdf_instant.get_whole_body_sdf_batch(x, joint_value, rdf_model, base_trans=base_trans,
-    #                                                      use_derivative=True)
-    # print('Time cost:', (time.time() - start_time))
-    # print('sdf:', sdf.shape, 'gradient:', gradient.shape)
-    import numpy as np
+    # Use num_chain_dof for the chain to end_link
+    num_joint = rdf_instant.robot.num_chain_dof
     joint_value = np.zeros(num_joint)
-    # joint_value = torch.rand(num_joint).to(args.device).reshape((-1, num_joint))
+    base_trans = np.eye(4)
+
+    trans_dict = rdf_instant.robot.get_trans_dict(joint_value, base_trans)
+
+    # Visualize (optional)
+    # rdf_instant.visualize_reconstructed_whole_body(rdf_model, trans_dict, tag=model_name)
+
+    # Run RDF_NN inference example
+    import robolab
     robolab.wdf.plot_3D_sdf_with_gradient(joint_value, rdf_instant, model=rdf_model, device=args.device)
 
 

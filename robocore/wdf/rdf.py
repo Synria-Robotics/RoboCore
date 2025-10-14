@@ -22,6 +22,7 @@ import numpy as np
 
 np.set_printoptions(threshold=np.inf)
 
+import torch
 import torch.nn as nn
 import torch.optim as optim
 
@@ -32,18 +33,28 @@ from tqdm import tqdm
 from robocore.wdf import utils
 from robocore.wdf.simple_shape_sdf import *
 from robocore.utils.path import create_dir
+from robocore.utils.backend import get_backend_manager
 
 
 class RDF:
-    def __init__(self, args, robot, model_type="NN"):
+    def __init__(self, args, robot, model_type="NN", groups=None):
+        """
+        Robot Distance Field.
+        
+        :param args: arguments with device, domain, etc.
+        :param robot: RobotModel instance
+        :param model_type: 'NN' or 'BP'
+        :param groups: Dict mapping group_name -> end_link for multi-chain support
+        """
         if model_type == "NN":
-            self.model = RDFNN(args, robot)
+            self.model = RDFNN(args, robot, groups=groups)
         elif model_type == "BP":
-            self.model = RDFBP(args)
+            self.model = RDFBP(args, robot, groups=groups)
         self.robot = self.model.robot
         self.wdf_dir = self.model.wdf_dir
         self.simple_shape = self.model.simple_shape
         self.device = self.model.device
+        self.groups = self.model.groups
 
     def train(self):
         self.model.train()
@@ -52,9 +63,23 @@ class RDF:
         self.model.create_surface_mesh(model, nbData, vis=vis, save_mesh_name=save_mesh_name)
 
     def get_whole_body_sdf_batch(self, points, joint_value, model, base_trans=None, use_derivative=True,
-                                 used_links=None):
-        sdf_value, gradient_value = self.model.get_whole_body_sdf_batch(points, [joint_value], model,
-                                                                        base_trans, use_derivative, used_links)
+                                 used_links=None, group_name=None):
+        """
+        Get SDF for whole body or specific chain.
+        
+        :param points: query points
+        :param joint_value: joint values (for single chain) or dict {group_name: joint_values} for multi-chain
+        :param model: trained model
+        :param base_trans: base transformation
+        :param use_derivative: compute gradients
+        :param used_links: specific links to include
+        :param group_name: specific group/chain name for multi-chain robots
+        :return: sdf_value, gradient_value
+        """
+        # Wrap joint_value in list for RDFNN/RDFBP interface
+        sdf_value, gradient_value = self.model.get_whole_body_sdf_batch(
+            points, [joint_value], model, base_trans, use_derivative, used_links, group_name
+        )
         return sdf_value, gradient_value
 
     def visualize_reconstructed_whole_body(self, model, trans_list, tag):
@@ -62,26 +87,45 @@ class RDF:
 
 
 class RDFBP:
-    def __init__(self, args, robot_verbose=False):
+    def __init__(self, args, robot=None, groups=None, robot_verbose=False):
         """
-        Use Bernstein Polynomial to represent the SDF of the robot
+        Use Bernstein Polynomial to represent the SDF of the robot.
+        
+        :param args: arguments
+        :param robot: RobotModel instance (if None, will create from args)
+        :param groups: Dict mapping group_name -> end_link for multi-chain support
+        :param robot_verbose: verbosity for robot loading
         """
         self.args = args
         self.n_func = args.numFuncs
         self.domain_min = args.domainMin
         self.domain_max = args.domainMax
         self.device = args.device
-        self.asset_path = os.path.join(args.assetRoot, args.assetFile)
+        self.backend = get_backend_manager()
+        
+        # Build or use provided robot
+        if robot is None:
+            from robocore.modeling.robot_model import RobotModel
+            self.asset_path = os.path.join(args.assetRoot, args.assetFile)
+            self.robot = RobotModel(
+                self.asset_path, 
+                base_link=args.baseLink,
+                load_mesh_flag=True
+            )
+        else:
+            self.robot = robot
+            self.asset_path = robot.model_path
+            
         self.wdf_dir = os.path.join(os.path.dirname(self.asset_path), "rdf")
         self.save_mesh_dict = args.saveMeshDict
         self.simple_shape = False  # Forced to be False
+        
+        # Multi-chain support
+        self.groups = {}
+        if groups:
+            self.groups = self.robot.add_groups(groups)
 
-        # Build the robot from the URDF/MJCF file
-        self.robot = robocore.RobotModel(self.asset_path, solve_engine="pytorch_kinematics", device=self.device,
-                                        verbose=robot_verbose, base_link=args.baseLink)
-        assert os.path.exists(self.robot.mesh_dir), "Please organize the robot meshes in the 'meshes' folder!"
-
-        self.link_list = self.robot.get_link_list()
+        self.link_list = self.robot.all_link
         self.link_mesh_map = self.robot.link_mesh_map
         self.link_meshname_map = self.robot.link_meshname_map
 
@@ -616,20 +660,30 @@ class SDFNet(nn.Module):
 
 
 class RDFNN:
-    def __init__(self, args, robot):
+    def __init__(self, args, robot, groups=None):
         """
-        Use a Neural Network to represent the SDF of the robot
+        Use a Neural Network to represent the SDF of the robot.
+        
+        :param args: arguments
+        :param robot: RobotModel instance
+        :param groups: Dict mapping group_name -> end_link for multi-chain support
         """
         self.args = args
         self.device = args.device
+        self.backend = get_backend_manager()
         self.domain_min = args.domainMin
         self.domain_max = args.domainMax
-        self.asset_path = os.path.join(args.assetRoot, args.assetFile)
-        self.wdf_dir = os.path.join(os.path.dirname(self.asset_path), "rdf")  # Keep same data dir for now
+        
+        self.robot = robot
+        self.asset_path = robot.model_path
+        self.wdf_dir = os.path.join(os.path.dirname(self.asset_path), "rdf")
         self.save_mesh_dict = args.saveMeshDict
         self.simple_shape = False  # Forced to be False
 
-        self.robot = robot
+        # Multi-chain support
+        self.groups = {}
+        if groups:
+            self.groups = self.robot.add_groups(groups)
 
         self.link_list = self.robot.all_link
         self.link_mesh_map = self.robot.link_mesh_map
@@ -713,7 +767,7 @@ class RDFNN:
             model_filename = f"{safe_link_name}_{safe_mesh_name}_sdf_net.pth"
             model_save_path = os.path.join(self.rdf_model_path, model_filename)
             if os.path.exists(model_save_path):
-                trained_model_data = torch.load(model_save_path)
+                trained_model_data = torch.load(model_save_path, weights_only=False)
                 print(f"INFO: Model already exists for {link_name}/{mesh_name}, skipping training.")
                 return trained_model_data
 
@@ -834,7 +888,18 @@ class RDFNN:
 
     def get_model_dict(self, model, used_links=None):
         if used_links is None:
-            used_links = self.robot.real_link
+            # Use links in the chain to end_link, not all real_links
+            if hasattr(self.robot, '_chain_joints'):
+                # Get links from chain joints
+                chain_links = set([self.robot.base_link])
+                for joint in self.robot._chain_joints:
+                    chain_links.add(joint.parent)
+                    chain_links.add(joint.child)
+                chain_links.add(self.robot.end_link)
+                # Filter to only real links that are in the chain
+                used_links = [link for link in self.robot.real_link if link in chain_links]
+            else:
+                used_links = self.robot.real_link
             self.used_links = [link for link in used_links if link in self.link_mesh_map]
             
         self.offset_list = []
@@ -847,6 +912,10 @@ class RDFNN:
             if used_link in self.link_mesh_map:
                 mesh_names = self.link_mesh_map[used_link]
                 for mesh_name in mesh_names:
+                    # Skip if mesh_name not in trained model
+                    if mesh_name not in model:
+                        continue
+                        
                     index = list(self.link_meshname_map.keys()).index(used_link)
                     offset = torch.from_numpy(model[mesh_name]['offset']).unsqueeze(0)
                     scale = model[mesh_name]['scale']
@@ -862,17 +931,44 @@ class RDFNN:
                     self.sdf_net_list.append(sdf_net)
 
     def get_whole_body_sdf_batch(self, points, joint_value, model, base_trans=None, use_derivative=True,
-                                 used_links=None):
+                                 used_links=None, group_name=None):
+        """Get SDF values for the robot with optional group-specific computation.
+        
+        :param group_name: if provided, use the robot model from self.groups[group_name]
+        """
+        # Select the robot model to use
+        robot_model = self.groups.get(group_name, self.robot) if group_name else self.robot
+        
         if used_links is None:
-            used_links = self.robot.real_link
+            # Use links in the chain to end_link, not all real_links
+            if hasattr(robot_model, '_chain_joints'):
+                # Get links from chain joints
+                chain_links = set([robot_model.base_link])
+                for joint in robot_model._chain_joints:
+                    chain_links.add(joint.parent)
+                    chain_links.add(joint.child)
+                chain_links.add(robot_model.end_link)
+                # Filter to only real links that are in the chain
+                used_links = [link for link in robot_model.real_link if link in chain_links]
+            else:
+                used_links = robot_model.real_link
             self.used_links = [link for link in used_links if link in self.link_mesh_map]
         B = 1  # batch size
         N = points.shape[1]  # number of points
         
+        # Convert inputs to torch tensors (NN inference requires torch)
+        if not isinstance(points, torch.Tensor):
+            points = torch.from_numpy(points).float()
+        if base_trans is not None and not isinstance(base_trans, torch.Tensor):
+            base_trans = torch.from_numpy(base_trans).float()
+        
+        # Ensure points are on the correct device
+        points = points.to(self.device)
+        
         if not hasattr(self, 'offset_list'):
             self.get_model_dict(model, used_links=used_links)
             
-        trans_dict = self.robot.get_trans_dict(joint_value[0], base_trans)
+        trans_dict = robot_model.get_trans_dict(joint_value[0], base_trans)
         trans_list = []
         for used_link in used_links:
             if used_link in self.link_mesh_map:
@@ -890,7 +986,10 @@ class RDFNN:
         trans = trans.reshape(K, B, 4, 4)
 
         fk_trans = torch.cat([t.unsqueeze(1) for t in trans], dim=1).reshape(B, K, 4, 4)  # B*K,4,4
-        x_robot_frame_batch = utils.transform_points(points.float(), torch.linalg.inv(fk_trans).float(),
+        # Convert points to tensor if needed (for RDFBP)
+        if not isinstance(points, torch.Tensor):
+            points = torch.from_numpy(points).float().to(self.device)
+        x_robot_frame_batch = utils.transform_points(points, torch.linalg.inv(fk_trans).float(),
                                                      device=self.device)  # B*K,N,3
         x_robot_frame_batch_scaled = x_robot_frame_batch - offset.unsqueeze(1)
         x_robot_frame_batch_scaled = x_robot_frame_batch_scaled / scale.unsqueeze(-1).unsqueeze(-1)  # B*K,N,3
