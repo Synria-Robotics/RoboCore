@@ -253,6 +253,9 @@ class MJCFParser:
                 elif geom_type == "capsule":
                     geom_mesh_size = geom.size  # 胶囊的半径储存在 size[0]
                     geom_fromto = geom.fromto  # 从fromto属性获取胶囊两端的坐标
+                    if geom_fromto is None:
+                        # Skip capsules without fromto defined
+                        continue
                     from_point = geom_fromto[:3]  # 胶囊起点
                     to_point = geom_fromto[3:]  # 胶囊终点
                     # 计算胶囊的高度（两点之间的距离）

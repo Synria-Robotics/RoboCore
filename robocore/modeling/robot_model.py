@@ -299,16 +299,28 @@ class RobotModel:
 
     def get_trans_dict(self, joint_value: List, base_trans: Union[None, torch.Tensor] = None) -> dict:
         """
-        Get the transformation matrices of all links
+        Get the transformation matrices of all links using multi-chain FK.
 
-        :param joint_value: the joint values, [batch_size, num_joint]
-        :param base_trans: transformation matrix of the base pose, [batch_size, 4, 4]
-        :return: A dictionary where the keys are link names and the values are transformation matrices.
+        :param joint_value: joint values array or dict {joint_name: value}
+        :param base_trans: transformation matrix of the base pose, [4, 4]
+        :return: dict mapping link names to 4x4 transformation matrices
         """
         if base_trans is None:
             base_trans = np.identity(4)
 
-        ret = self.fk(joint_value)
+        # Use multi-chain FK for complete robot tree traversal
+        if hasattr(self, '_link_to_idx'):
+            # Multi-chain FK available
+            ret = forward_kinematics(
+                self,
+                joint_value,
+                backend='numpy',
+                return_all_links=True
+            )
+        else:
+            # Fallback to single-chain FK
+            ret = self.fk(joint_value)
+
         trans_dict = {}
 
         # Get the original base_link transformation matrix
@@ -322,7 +334,13 @@ class RobotModel:
             if "world" in link:
                 continue
 
-            val = ret[link]
+            # Handle both multi-chain and single-chain results
+            if link in ret:
+                val = ret[link]
+            else:
+                # Link not in FK results, skip
+                continue
+
             homo_matrix = val
 
             real_link = self.inverse_link_virtual_map[link]
@@ -486,8 +504,8 @@ class RobotModel:
         :param dtype: torch dtype (if backend='torch')
         :return: dict link_name -> 4x4 pose matrix or single 4x4 pose if return_end=True
         """
-        if len(q) != self.num_chain_dof:
-            raise ValueError("Expected q of length %d" % self.num_chain_dof)
+        if len(q) != self.num_dof:
+            raise ValueError("Expected q of length %d" % self.num_dof)
         return forward_kinematics(
             self,
             q,
