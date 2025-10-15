@@ -38,9 +38,9 @@ def rdf_from_robot_model(args):
         rdf_instant.train()
         
     if args.device == 'cpu':
-        rdf_model = torch.load(rdf_model_path, map_location=torch.device('cpu'))
+        rdf_model = torch.load(rdf_model_path, map_location=torch.device('cpu'), weights_only=False)
     else:
-        rdf_model = torch.load(rdf_model_path)
+        rdf_model = torch.load(rdf_model_path, weights_only=False)
 
     rdf_instant.create_surface_mesh(rdf_model, nbData=128, vis=False, save_mesh_name=model_name)
 

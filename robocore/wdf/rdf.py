@@ -713,7 +713,7 @@ class RDFNN:
             model_filename = f"{safe_link_name}_{safe_mesh_name}_sdf_net.pth"
             model_save_path = os.path.join(self.rdf_model_path, model_filename)
             if os.path.exists(model_save_path):
-                trained_model_data = torch.load(model_save_path)
+                trained_model_data = torch.load(model_save_path, map_location=torch.device('cpu'), weights_only=False)
                 print(f"INFO: Model already exists for {link_name}/{mesh_name}, skipping training.")
                 return trained_model_data
 

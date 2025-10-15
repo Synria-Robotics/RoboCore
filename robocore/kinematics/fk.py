@@ -33,19 +33,45 @@ def forward_kinematics(
     *,
     backend: str = 'auto',
     return_end: bool = False,
+    return_all_links: bool = False,
+    link_names: Sequence[str] | None = None,
     device: Any | None = None,
     dtype: Any | None = None,
 ) -> Union[Dict[str, Any], Any]:
-    """
+    """Compute forward kinematics for single chain or multiple chains.
+    
     :param model: RobotModel instance
-    :param q: Joint configuration
+    :param q: Joint configuration (array-like or dict {joint_name: value})
     :param backend: 'auto'|'numpy'|'torch'
-    :param return_end: Return only end-effector pose
+    :param return_end: Return only end-effector pose (legacy, conflicts with return_all_links)
+    :param return_all_links: Return FK for all links in the kinematic tree (uses multi-chain solver)
+    :param link_names: Specific links to compute FK for (only with return_all_links=True)
     :param device: Torch device when using torch backend
     :param dtype: Torch dtype when using torch backend
     :return: Mapping link->pose or single 4x4 pose if return_end=True
     """
     b = get_backend() if backend == 'auto' else backend
+
+    # Multi-chain FK path
+    if return_all_links:
+        if return_end:
+            raise ValueError("Cannot specify both return_end and return_all_links")
+
+        if b == 'numpy':
+            solver = FKSolverNumPy(model)
+            return solver.solve_multi_chain(q, link_names=link_names)
+        elif b == 'torch':
+            import torch
+            from robocore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
+
+            solver = FKSolverTorch(model)
+            if dtype is None:
+                dtype = torch.float64
+            return solver.solve_multi_chain(q, link_names=link_names, device=device, dtype=dtype)
+        else:
+            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+
+    # Single chain FK path (legacy, backward compatible)
     if b == 'numpy':
         solver = FKSolverNumPy(model)
         poses = solver.solve(q, return_end_only=return_end)

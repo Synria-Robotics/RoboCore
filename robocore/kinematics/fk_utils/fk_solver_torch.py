@@ -57,6 +57,7 @@ class FKSolverTorch:
     - GPU acceleration support
     - Automatic differentiation compatible
     - Support for revolute, prismatic, and fixed joints
+    - Multi-chain FK with transform reuse
     """
     
     def __init__(self, model: "RobotModel"):
@@ -70,7 +71,16 @@ class FKSolverTorch:
         self.actuated_joints = model._chain_actuated
         self.base_link = model.base_link
         self.end_link = model.end_link
-    
+
+        # Multi-chain support
+        self._has_multi_chain = hasattr(model, '_link_to_idx')
+        if self._has_multi_chain:
+            self._link_to_idx = model._link_to_idx
+            self._idx_to_link = model._idx_to_link
+            self._parent_indices = model._parent_indices
+            self._link_joints = model._link_joints
+            self._num_links = model._num_links_in_tree
+
     def solve(
         self,
         q: Sequence[float] | Tensor,
@@ -285,6 +295,138 @@ class FKSolverTorch:
                   (1 - cos_theta).view(batch_size, 1, 1) * K2.unsqueeze(0)
         
         return R_batch
+
+    def solve_multi_chain(
+        self,
+        q: Sequence[float] | Tensor | dict,
+        link_names: Sequence[str] | None = None,
+        device=None,
+        dtype=torch.float64
+    ) -> Dict[str, torch.Tensor]:
+        """Compute forward kinematics for multiple chains with transform reuse.
+        
+        Inspired by pytorch_kinematics, this method computes FK for all links
+        in depth-first order, reusing transforms where possible for efficiency.
+        
+        :param q: joint configuration, dict {joint_name: value} or tensor/array-like with all DOF values.
+        :param link_names: list of link names to compute FK for (None = all links).
+        :param device: torch device.
+        :param dtype: torch dtype.
+        :return: dict mapping link names to 4x4 pose matrices.
+        """
+        if not self._has_multi_chain:
+            raise RuntimeError("Multi-chain FK requires model with multi-chain indexing")
+
+        device = select_device(device)
+
+        # Set backend to torch temporarily
+        original_backend = get_backend()
+        set_backend('torch', device=str(device), dtype=dtype)
+
+        try:
+            # Build joint value mapping
+            if isinstance(q, dict):
+                q_map = {k: torch.tensor(v, dtype=dtype, device=device) if not torch.is_tensor(v) else v.to(dtype=dtype, device=device)
+                         for k, v in q.items()}
+            else:
+                if not torch.is_tensor(q):
+                    q = torch.tensor(q, dtype=dtype, device=device)
+                else:
+                    q = q.to(dtype=dtype, device=device)
+
+                # Map to joint names using actuated joints
+                q_map = {}
+                # Use all joints from parsed model for full DOF coverage
+                for i, joint_spec in enumerate(self.model.joint_list):
+                    if i < len(q):
+                        # joint_list contains JointSpec objects, extract name
+                        joint_name = joint_spec.name if hasattr(joint_spec, 'name') else joint_spec
+                        q_map[joint_name] = q[i]
+
+            # Determine which links to compute
+            if link_names is None:
+                # Compute all links
+                target_indices = list(range(self._num_links))
+            else:
+                target_indices = [self._link_to_idx[name] for name in link_names]
+
+            # Cache for computed transforms (indexed by link index)
+            transform_cache: Dict[int, torch.Tensor] = {}
+
+            # Compute transforms for requested links
+            for link_idx in target_indices:
+                if link_idx in transform_cache:
+                    continue  # Already computed
+
+                # Build transform by traversing parent path
+                T = torch.eye(4, dtype=dtype, device=device)
+
+                for ancestor_idx in self._parent_indices[link_idx]:
+                    if ancestor_idx in transform_cache:
+                        # Reuse cached transform
+                        T = transform_cache[ancestor_idx].clone()
+                    else:
+                        # Compute transform for this ancestor
+                        joint_spec = self._link_joints[ancestor_idx]
+
+                        if joint_spec is None:
+                            # Root node - identity
+                            transform_cache[ancestor_idx] = torch.eye(4, dtype=dtype, device=device)
+                        else:
+                            # Get parent transform
+                            parent_idx = self._parent_indices[ancestor_idx][-2] if len(self._parent_indices[ancestor_idx]) > 1 else -1
+                            if parent_idx == -1:
+                                T_parent = torch.eye(4, dtype=dtype, device=device)
+                            else:
+                                T_parent = transform_cache.get(parent_idx, torch.eye(4, dtype=dtype, device=device))
+
+                            # Compute this joint's transform
+                            R_o = rpy_to_matrix(
+                                torch.tensor(joint_spec.origin_rpy[0], dtype=dtype, device=device),
+                                torch.tensor(joint_spec.origin_rpy[1], dtype=dtype, device=device),
+                                torch.tensor(joint_spec.origin_rpy[2], dtype=dtype, device=device),
+                            )
+                            t_o = torch.tensor(joint_spec.origin_xyz, dtype=dtype, device=device)
+                            T_origin = make_transform(R_o, t_o)
+
+                            # Joint motion
+                            if joint_spec.joint_type == "revolute":
+                                R_m = axis_angle_to_matrix(
+                                    torch.tensor(joint_spec.axis, dtype=dtype, device=device),
+                                    q_map.get(joint_spec.name, torch.tensor(0.0, dtype=dtype, device=device))
+                                )
+                                t_m = torch.zeros(3, dtype=dtype, device=device)
+                            elif joint_spec.joint_type == "prismatic":
+                                R_m = torch.eye(3, dtype=dtype, device=device)
+                                axis_vec = torch.tensor(joint_spec.axis, dtype=dtype, device=device)
+                                t_m = axis_vec * q_map.get(joint_spec.name, torch.tensor(0.0, dtype=dtype, device=device))
+                            else:  # fixed
+                                R_m = torch.eye(3, dtype=dtype, device=device)
+                                t_m = torch.zeros(3, dtype=dtype, device=device)
+
+                            T_motion = make_transform(R_m, t_m)
+
+                            # Compose
+                            T_link = T_parent @ T_origin @ T_motion
+                            transform_cache[ancestor_idx] = T_link
+                            T = T_link
+
+                # Final transform for this link
+                transform_cache[link_idx] = T
+
+            # Build result dictionary
+            result = {}
+            for link_idx in target_indices:
+                link_name = self._idx_to_link[link_idx]
+                result[link_name] = transform_cache[link_idx]
+
+            # Add 'end' key for compatibility
+            if self.end_link in result:
+                result['end'] = result[self.end_link]
+
+            return result
+        finally:
+            set_backend(original_backend)
 
 
 __all__ = ["FKSolverTorch"]

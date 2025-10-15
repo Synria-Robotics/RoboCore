@@ -73,6 +73,7 @@ class RobotModel:
         self.end_link = end_link or self.real_link[-1]
         self._build_graph()
         self._build_chain()
+        self._build_multi_chain_index()  # Build multi-chain indexing system
 
         # Workspace cache (lazy-loaded on first access)
         self._workspace_analyzer = None
@@ -241,6 +242,61 @@ class RobotModel:
         dfs2(base, [])
         return res
     
+    def _build_multi_chain_index(self):
+        """Build multi-chain indexing system inspired by pytorch_kinematics.
+        
+        Uses depth-first traversal to create a flat representation of the kinematic tree.
+        Enables efficient multi-chain forward kinematics with transform reuse.
+        """
+        # Initialize multi-chain data structures
+        self._link_to_idx: Dict[str, int] = {}  # link name -> index
+        self._idx_to_link: Dict[int, str] = {}  # index -> link name
+        self._parent_indices: List[List[int]] = []  # list of ancestor indices for each link
+        self._link_joints: List[JointSpec] = []  # joint connecting to each link (in order)
+        self._link_parent_names: List[Optional[str]] = []  # parent link name for each link
+
+        # Build joint mapping: child_link -> JointSpec
+        child_to_joint: Dict[str, JointSpec] = {}
+        for j in self.parsed_model.joints:
+            child_to_joint[j.child] = j
+
+        # Depth-first traversal starting from base_link
+        queue = [(self.base_link, -1, 0)]  # (link_name, parent_idx, depth)
+        idx = 0
+
+        while queue:
+            link_name, parent_idx, depth = queue.pop(0)
+
+            # Register this link
+            self._link_to_idx[link_name] = idx
+            self._idx_to_link[idx] = link_name
+
+            # Build parent path
+            if parent_idx == -1:
+                # Root node
+                self._parent_indices.append([idx])
+                self._link_parent_names.append(None)
+            else:
+                # Inherit parent's path and append self
+                self._parent_indices.append(self._parent_indices[parent_idx] + [idx])
+                parent_name = self._idx_to_link[parent_idx]
+                self._link_parent_names.append(parent_name)
+
+            # Store the joint connecting to this link (None for root)
+            if link_name in child_to_joint:
+                self._link_joints.append(child_to_joint[link_name])
+            else:
+                # Root has no incoming joint
+                self._link_joints.append(None)
+
+            # Add children to queue
+            for child_joint in self._graph.get(link_name, []):
+                queue.append((child_joint.child, idx, depth + 1))
+
+            idx += 1
+
+        self._num_links_in_tree = idx
+
     def get_trans_dict(self, joint_value: List, base_trans: Union[None, torch.Tensor] = None) -> dict:
         """
         Get the transformation matrices of all links
