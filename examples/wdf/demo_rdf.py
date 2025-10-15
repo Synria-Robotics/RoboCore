@@ -51,7 +51,7 @@ def rdf_from_robot_model(args):
                                [0, 1, 0, 0],
                                [0, 0, 1, 0],
                                [0, 0, 0, 1]]).float().to(args.device)
-    trans_dict = rdf_instant.robot.get_trans_dict(joint_value, base_trans)
+    # trans_dict = rdf_instant.robot.get_trans_dict(joint_value, base_trans)
     # visualize the Bernstein Polynomial model for the whole body
     # rdf.visualize_reconstructed_whole_body(rdf_model, trans_dict, tag=model_name)
 
@@ -70,6 +70,10 @@ def rdf_from_robot_model(args):
     import numpy as np
     joint_value = np.zeros(num_joint)
     # joint_value = torch.rand(num_joint).to(args.device).reshape((-1, num_joint))
+    joint_value = torch.rand(num_joint).reshape((-1, num_joint)).numpy()
+    joint_value = np.array(robot.random_q(scale=1))
+    joint_value[-1] = 0.0  # keep the gripper closed
+    joint_value[-2] = 0.0
 
     # 使用包络式可视化方法（推荐）
     robocore.wdf.plot_3D_sdf_envelope(joint_value, rdf_instant, model=rdf_model, device=args.device,

@@ -19,6 +19,8 @@ Website: https://synriarobotics.ai
 """
 
 
+import robocore
+from scipy.spatial.transform import Rotation
 import sys
 
 sys.setrecursionlimit(100000)
@@ -310,6 +312,35 @@ class RDFBP:
                 trimesh.exchange.export.export_mesh(rec_mesh,
                                                     os.path.join(save_path, f"{save_mesh_name}_{mesh_name}.stl"))
 
+    def _apply_geom_local_transform(self, link_trans, geom_pos, geom_quat):
+        """
+        Apply local geometry transform (pos + quat) to link transform.
+        
+        :param link_trans: link transformation matrix, (4, 4) or (B, 4, 4)
+        :param geom_pos: geometry local position, [x, y, z]
+        :param geom_quat: geometry local quaternion, [w, x, y, z]
+        :return: combined transformation matrix
+        """
+        # Convert quaternion to rotation matrix
+        # MuJoCo uses [w, x, y, z] format
+        quat_xyzw = [geom_quat[1], geom_quat[2], geom_quat[3], geom_quat[0]]
+        rot_matrix = Rotation.from_quat(quat_xyzw).as_matrix()
+
+        # Build local transform matrix
+        local_trans = np.eye(4)
+        local_trans[:3, :3] = rot_matrix
+        local_trans[:3, 3] = geom_pos
+        local_trans_torch = torch.from_numpy(local_trans).float().to(self.device)
+
+        # Apply: combined_trans = link_trans @ local_trans
+        if link_trans.dim() == 2:  # (4, 4)
+            combined_trans = torch.matmul(link_trans, local_trans_torch)
+        else:  # (B, 4, 4)
+            local_trans_batch = local_trans_torch.unsqueeze(0).expand_as(link_trans)
+            combined_trans = torch.matmul(link_trans, local_trans_batch)
+
+        return combined_trans
+
     def get_whole_body_sdf_batch(self, points, joint_value, model, base_trans=None, use_derivative=True,
                                  used_links=None):
         B = joint_value.shape[0]  # batch size
@@ -327,8 +358,8 @@ class RDFBP:
         index_list = []
         for used_link in used_links:
             if used_link in self.link_mesh_map:
-                mesh_names = self.link_mesh_map[used_link]
-                for mesh_name in mesh_names:
+                mesh_dict = self.link_mesh_map[used_link]
+                for mesh_name, mesh_info in mesh_dict.items():
                     index = list(self.link_meshname_map.keys()).index(used_link)
                     offset = model[mesh_name]['offset'].unsqueeze(0)
                     scale = model[mesh_name]['scale']
@@ -338,8 +369,17 @@ class RDFBP:
                     offset_list.append(offset)
                     scale_list.append(scale)
                     weights_list.append(weights)
-                    trans = trans_dict[used_link]
-                    trans_list.append(trans)
+
+                    # Get link transform
+                    link_trans = trans_dict[used_link]
+
+                    # Apply geom's local pos and quat if they exist
+                    geom_pos = mesh_info.get('params', {}).get('position', [0, 0, 0])
+                    geom_quat = mesh_info.get('params', {}).get('quaternion', [1, 0, 0, 0])
+
+                    # Combine link transform with geom's local transform
+                    combined_trans = self._apply_geom_local_transform(link_trans, geom_pos, geom_quat)
+                    trans_list.append(combined_trans)
 
         K = len(offset_list)
         offset = torch.cat(offset_list, dim=0).to(self.device)
@@ -867,6 +907,38 @@ class RDFNN:
                     self.scale_list.append(scale)
                     self.sdf_net_list.append(sdf_net)
 
+    def _apply_geom_local_transform(self, link_trans, geom_pos, geom_quat):
+        """
+        Apply local geometry transform (pos + quat) to link transform.
+        
+        :param link_trans: link transformation matrix, (4, 4) or (B, 4, 4)
+        :param geom_pos: geometry local position, [x, y, z]
+        :param geom_quat: geometry local quaternion, [w, x, y, z]
+        :return: combined transformation matrix
+        """
+        # Convert quaternion to rotation matrix
+        # MuJoCo uses [w, x, y, z] format
+        quat_xyzw = [geom_quat[1], geom_quat[2], geom_quat[3], geom_quat[0]]
+        rot_matrix = Rotation.from_quat(quat_xyzw).as_matrix()
+
+        # Build local transform matrix
+        local_trans = np.eye(4)
+        local_trans[:3, :3] = rot_matrix
+        local_trans[:3, 3] = geom_pos
+        local_trans_torch = torch.from_numpy(local_trans).float().to(self.device)
+
+        # Apply: combined_trans = link_trans @ local_trans
+        if isinstance(link_trans, np.ndarray):
+            link_trans = torch.from_numpy(link_trans).float().to(self.device)
+
+        if link_trans.dim() == 2:  # (4, 4)
+            combined_trans = torch.matmul(link_trans, local_trans_torch)
+        else:  # (B, 4, 4)
+            local_trans_batch = local_trans_torch.unsqueeze(0).expand_as(link_trans)
+            combined_trans = torch.matmul(link_trans, local_trans_batch)
+
+        return combined_trans
+
     def get_whole_body_sdf_batch(self, points, joint_value, model, base_trans=None, use_derivative=True,
                                  used_links=None):
         if used_links is None:
@@ -882,10 +954,18 @@ class RDFNN:
         trans_list = []
         for used_link in used_links:
             if used_link in self.link_mesh_map:
-                mesh_names = self.link_mesh_map[used_link]
-                for mesh_name in mesh_names:
-                    trans = trans_dict[used_link]
-                    trans_list.append(torch.tensor(trans))
+                mesh_dict = self.link_mesh_map[used_link]
+                for mesh_name, mesh_info in mesh_dict.items():
+                    # Get link transform
+                    link_trans = trans_dict[used_link]
+
+                    # Apply geom's local pos and quat if they exist
+                    geom_pos = mesh_info.get('params', {}).get('position', [0, 0, 0])
+                    geom_quat = mesh_info.get('params', {}).get('quaternion', [1, 0, 0, 0])
+
+                    # Combine link transform with geom's local transform
+                    combined_trans = self._apply_geom_local_transform(link_trans, geom_pos, geom_quat)
+                    trans_list.append(combined_trans)
 
         K = len(self.offset_list)
         offset = torch.cat(self.offset_list, dim=0).to(self.device)
