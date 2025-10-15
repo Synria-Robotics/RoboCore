@@ -70,7 +70,13 @@ def rdf_from_robot_model(args):
     import numpy as np
     joint_value = np.zeros(num_joint)
     # joint_value = torch.rand(num_joint).to(args.device).reshape((-1, num_joint))
-    robolab.wdf.plot_3D_sdf_with_gradient(joint_value, rdf_instant, model=rdf_model, device=args.device)
+
+    # 使用包络式可视化方法（推荐）
+    robocore.wdf.plot_3D_sdf_envelope(joint_value, rdf_instant, model=rdf_model, device=args.device,
+                                      nbData=64, distance_levels=[0.02, 0.05, 0.1, 0.15], show_robot=True)
+
+    # 或者使用梯度可视化方法
+    # robocore.wdf.plot_3D_sdf_with_gradient(joint_value, rdf_instant, model=rdf_model, device=args.device)
 
 
 if __name__ == '__main__':
@@ -98,7 +104,9 @@ if __name__ == '__main__':
     parser.add_argument('--assetName', default="Bruce", type=str, help="Name of the asset (e.g., for finding files)")
     parser.add_argument('--assetRoot', default=get_robocore_path("assets"),
                         type=str, help="Root directory for assets")
-    parser.add_argument('--assetFile', default="robot/mjcf/Bessica-D_v1_0/Bessica-D_Covered.xml",
+    parser.add_argument('--assetFile',
+                        # default="robot/mjcf/Bessica-D_v1_0/Bessica-D_Covered.xml",
+                        default="robot/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml",
                         type=str, help="Path to asset file (URDF/MJCF)")
     parser.add_argument('--baseLink', default="base_link", type=str, help="Base link of the robot")
 
