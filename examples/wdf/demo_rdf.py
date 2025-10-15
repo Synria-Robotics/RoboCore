@@ -21,7 +21,8 @@ def rdf_from_robot_model(args):
     assert args.modelType in ["NN", "BP"], "Invalid model type. Choose either 'NN' or 'BP'."
     
     asset_path = os.path.join(args.assetRoot, args.assetFile)
-    robot = RobotModel(asset_path, base_link=args.baseLink, end_link="Link6", load_mesh_flag=True)
+    robot = RobotModel(asset_path, base_link=args.baseLink, load_mesh_flag=True)
+    robot.print_tree()
     
     # Instantiate RDF_NN
     rdf_instant = RDF(args, robot, model_type=args.modelType)
@@ -97,7 +98,8 @@ if __name__ == '__main__':
     parser.add_argument('--assetName', default="Bruce", type=str, help="Name of the asset (e.g., for finding files)")
     parser.add_argument('--assetRoot', default=get_robocore_path("assets"),
                         type=str, help="Root directory for assets")
-    parser.add_argument('--assetFile', default="robot/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml", type=str, help="Path to asset file (URDF/MJCF)")
+    parser.add_argument('--assetFile', default="robot/mjcf/Bessica-D_v1_0/Bessica-D_Covered.xml",
+                        type=str, help="Path to asset file (URDF/MJCF)")
     parser.add_argument('--baseLink', default="base_link", type=str, help="Base link of the robot")
 
     args = parser.parse_args()

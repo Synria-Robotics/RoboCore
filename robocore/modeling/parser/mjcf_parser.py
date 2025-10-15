@@ -196,8 +196,11 @@ class MJCFParser:
         for mesh_name, mesh_file in mesh_map.items():
             mesh_path = None
             for mesh_file_exist in all_mesh_files:
-                if mesh_file in mesh_file_exist:
+                # Use basename for exact filename match to avoid substring issues
+                # e.g., "base_link.STL" should not match "right_arm_base_link.STL"
+                if os.path.basename(mesh_file_exist) == mesh_file:
                     mesh_path = mesh_file_exist
+                    break  # Stop at first match
             if mesh_path is not None:
                 mesh_name_path_map[mesh_name] = mesh_path
             else:
@@ -213,6 +216,7 @@ class MJCFParser:
             for geom in geoms_this_body:
                 geom_type = geom.type or "capsule"  # 默认类型为胶囊
                 geom_pos = geom.pos if geom.pos is not None else [0, 0, 0]
+                geom_quat = geom.quat if geom.quat is not None else [1, 0, 0, 0]  # w, x, y, z
 
                 # 处理不同的几何体类型
                 if geom_type == "mesh":
@@ -225,7 +229,7 @@ class MJCFParser:
                     self.link_mesh_map[body.name][geom_mesh_name] = {
                         'type': 'mesh',
                         'params': {'mesh_path': geom_mesh_path, 'name': geom_mesh_name, 'position': geom_pos,
-                                   'scale': mesh_scale}
+                                   'quaternion': geom_quat, 'scale': mesh_scale}
                     }
 
                 elif geom_type == "sphere":

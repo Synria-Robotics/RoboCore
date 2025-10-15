@@ -376,11 +376,54 @@ class RobotModel:
             link_vertices = self.meshname_mesh[mesh_name]
             link_normals = self.meshname_mesh_normal[mesh_name]
 
-            if 'base' not in self.meshname_link_map[mesh_name]:
-                link_name = self.meshname_link_map[mesh_name]
-                related_link = [key for key in trans_dict.keys() if link_name in key][-1]
-                link_vertices = np.matmul(trans_dict[related_link], link_vertices.transpose(1, 0)).transpose(0, 1)[
-                                :, :3]
+            # Get the link this mesh belongs to
+            link_name = self.meshname_link_map[mesh_name]
+
+            # Find the corresponding transform in trans_dict
+            # For multi-chain robots, keys might have prefixes, so we match by link name
+            related_link = None
+            for key in trans_dict.keys():
+                if key == link_name or key.endswith('_' + link_name):
+                    related_link = key
+                    break
+
+            if related_link is None:
+                # Fallback to partial match
+                matching_keys = [key for key in trans_dict.keys() if link_name in key]
+                if matching_keys:
+                    related_link = matching_keys[-1]
+
+            if related_link is not None:
+                # Get mesh local position and orientation offset from link_mesh_map
+                mesh_local_pos = np.zeros(3, dtype=np.float64)
+                mesh_local_quat = np.array([1, 0, 0, 0], dtype=np.float64)  # w, x, y, z
+
+                if link_name in self.link_mesh_map:
+                    for geom_name, geom_info in self.link_mesh_map[link_name].items():
+                        if geom_info['params']['name'] == mesh_name:
+                            if 'position' in geom_info['params']:
+                                mesh_local_pos = np.array(geom_info['params']['position'], dtype=np.float64)
+                            if 'quaternion' in geom_info['params']:
+                                mesh_local_quat = np.array(geom_info['params']['quaternion'], dtype=np.float64)
+                            break
+
+                # Create local offset transformation from position and quaternion
+                T_local_offset = np.eye(4, dtype=np.float64)
+
+                # Convert quaternion to rotation matrix (w, x, y, z format)
+                w, x, y, z = mesh_local_quat
+                R = np.array([
+                    [1 - 2*(y*y + z*z),     2*(x*y - w*z),     2*(x*z + w*y)],
+                    [2*(x*y + w*z), 1 - 2*(x*x + z*z),     2*(y*z - w*x)],
+                    [2*(x*z - w*y),     2*(y*z + w*x), 1 - 2*(x*x + y*y)]
+                ], dtype=np.float64)
+
+                T_local_offset[:3, :3] = R
+                T_local_offset[:3, 3] = mesh_local_pos
+
+                # Apply: T_link @ T_local_offset @ vertices
+                T_combined = trans_dict[related_link] @ T_local_offset
+                link_vertices = np.matmul(T_combined, link_vertices.transpose(1, 0)).transpose(0, 1)[:, :3]
 
             ret_vertices[mesh_name] = link_vertices
 
@@ -1094,7 +1137,7 @@ class RobotModel:
                 base_label = f"{link} (base)"
                 if link_on_chain:
                     base_label = f"{GREEN}{base_label}{RESET}"
-                beauty_print(base_label)
+                beauty_print(f"\n{base_label}")
             else:
                 line = f"{prefix}{connector}{link}"
                 if link_on_chain:
