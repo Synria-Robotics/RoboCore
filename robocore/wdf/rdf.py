@@ -1279,19 +1279,9 @@ def sample_sdf_points(link_name, mesh_name, save_path, geom_info):
         if isinstance(mesh, trimesh.Scene):
             combined_mesh = mesh.geometry.values()
             mesh = trimesh.util.concatenate(combined_mesh)
-
-        # Get original mesh center and scale before normalization
-        original_center = mesh.bounding_box.centroid
-        original_scale = np.max(np.linalg.norm(mesh.vertices - original_center, axis=1))
-
-        # scale_to_unit_sphere will move mesh center to origin and scale to unit sphere
+        center = mesh.bounding_box.centroid
+        scale = np.max(np.linalg.norm(mesh.vertices - center, axis=1))
         mesh = mesh_to_sdf.scale_to_unit_sphere(mesh)
-
-        # After scale_to_unit_sphere, the mesh center is at [0,0,0]
-        # So we should use [0,0,0] as center for consistency
-        # The geom's local position will be handled by the transform matrix
-        center = np.array([0.0, 0.0, 0.0])
-        scale = original_scale
 
         # Sample points near the surface (as in DeepSDF)
         near_points, near_sdf = mesh_to_sdf.sample_sdf_near_surface(mesh,
