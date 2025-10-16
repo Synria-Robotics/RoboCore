@@ -229,7 +229,7 @@ def plot_3D_sdf_with_gradient(joint_value, rdf_bp, model, device, used_links=Non
 
 
 def plot_3D_sdf_envelope(joint_value, rdf_bp, model, device, used_links=None,
-                         nbData=64, distance_levels=None, show_robot=True):
+                         nbData=64, distance_levels=None, show_robot=True, return_scene=False):
     """
     Plot 3D SDF using envelope-style visualization with multiple distance field isosurfaces.
     
@@ -241,6 +241,8 @@ def plot_3D_sdf_envelope(joint_value, rdf_bp, model, device, used_links=None,
     :param nbData: int, grid resolution for sampling
     :param distance_levels: list of float, distance levels to visualize, e.g. [0.02, 0.05, 0.1, 0.15]
     :param show_robot: bool, whether to show the robot mesh
+    :param return_scene: bool, if True return scene instead of showing it
+    :return: trimesh.Scene if return_scene=True, otherwise None
     """
     print("Generating envelope-style distance field visualization...")
 
@@ -349,4 +351,8 @@ def plot_3D_sdf_envelope(joint_value, rdf_bp, model, device, used_links=None,
             continue
 
     print("Visualization complete!")
-    scene.show()
+    
+    if return_scene:
+        return scene
+    else:
+        scene.show()

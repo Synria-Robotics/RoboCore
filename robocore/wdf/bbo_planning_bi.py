@@ -24,7 +24,7 @@ import numpy as np
 import torch
 import trimesh
 
-from robolab.wdf import rdf
+from robocore.wdf import rdf
 
 
 class BBOPlannerBi:

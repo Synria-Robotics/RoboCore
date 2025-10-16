@@ -27,9 +27,9 @@ import skimage
 import mesh_to_sdf
 import torch.nn as nn
 import torch.optim as optim
-from robolab.formatter.urdf_parser.urdf import URDF
-from robolab.formatter.mjcf_parser.mjcf import MJCF
-from robolab.wdf.simple_shape_sdf import SimpleShapeSDF
+from robolab.formatter.urdf_parser.urdf import URDF  # TODO: need to transfer to robocore
+from robolab.formatter.mjcf_parser.mjcf import MJCF  # TODO: need to transfer to robocore
+from robocore.wdf.simple_shape_sdf import SimpleShapeSDF
 from tqdm import tqdm
 
 

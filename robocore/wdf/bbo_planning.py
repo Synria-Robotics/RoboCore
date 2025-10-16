@@ -35,7 +35,7 @@ class BBOPlanner:
         :param box_pos: the position of the box
         :param box_rotation: the rotation of the box
         """
-        from robolab.wdf import rdf
+        from robocore.wdf import rdf
 
         self.n_func = args.n_func
         self.domain_min = args.domain_min
