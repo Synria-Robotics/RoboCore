@@ -88,7 +88,6 @@ def linear_cartesian_trajectory(
     >>> 
     >>> t, poses, q = linear_cartesian_trajectory(model, T_start, T_end, duration=2.0)
     """
-    from robocore.kinematics.fk import forward_kinematics
     from robocore.kinematics.ik import inverse_kinematics
     
     pose_start = np.asarray(pose_start)
@@ -266,20 +265,20 @@ def circular_cartesian_trajectory(
     
     # Determine orientation handling
     if isinstance(orientation, str) and orientation == 'constant':
-        # Use orientation from first IK solution
-        use_constant_orientation = True
-        R_constant = None
+        # Get current orientation from FK of q_init
+        from robocore.kinematics.fk import forward_kinematics
+        T_init = forward_kinematics(robot_model, q_init, backend='numpy', return_end=True)
+        R_constant = T_init[:3, :3]
     elif isinstance(orientation, str) and orientation == 'tangent':
-        use_tangent_orientation = True
+        R_constant = None
     else:
         # Fixed orientation provided
         R_constant = np.asarray(orientation)
         if R_constant.shape != (3, 3):
             raise ValueError("orientation must be 3x3 rotation matrix or 'constant'/'tangent'")
-        use_constant_orientation = False
     
     # Generate trajectory
-    for i, (ti, angle) in enumerate(zip(t, angles)):
+    for i, (_, angle) in enumerate(zip(t, angles)):
         # Position on circle
         pos = center + radius * (np.cos(angle) * u + np.sin(angle) * v)
         
@@ -297,11 +296,7 @@ def circular_cartesian_trajectory(
                 
                 R = np.column_stack([x_axis, y_axis, z_axis])
             else:  # 'constant'
-                if R_constant is None:
-                    # Will be set from first IK solution
-                    R = np.eye(3)
-                else:
-                    R = R_constant
+                R = R_constant
         else:
             R = orientation
         
@@ -323,12 +318,6 @@ def circular_cartesian_trajectory(
         else:
             q[i] = ik_result['q']
             q_current = ik_result['q']
-            
-            # For 'constant' orientation, save first orientation
-            if use_constant_orientation and R_constant is None:
-                from robocore.kinematics.fk import forward_kinematics
-                T_fk = forward_kinematics(robot_model, q[i], backend='numpy', return_end=True)
-                R_constant = T_fk[:3, :3]
     
     return t, poses, q
 

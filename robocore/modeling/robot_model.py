@@ -211,6 +211,14 @@ class RobotModel:
         """
         return [j.name for j in self._actuated]
 
+    @property
+    def joint_limits(self) -> List[Optional[Sequence[Optional[float]]]]:
+        """Return joint limits for all actuated joints.
+
+        :return: list of (lower, upper) limits.
+        """
+        return [j.limit for j in self._actuated]
+
     def name_to_index(self) -> Dict[str, int]:
         """Map joint name to index.
 
