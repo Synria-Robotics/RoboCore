@@ -64,9 +64,11 @@ cd RoboCore
 
 # Install (development mode)
 pip install -e .
+pip install -r requirement.txt
+git submodule update --init --recursive  # pull the robot descriptions
 
 # Optional: Install with PyTorch for GPU support
-pip install torch torchvision
+pip install torch torchvision  # Should install the version compatible with your computer's device (e.g. CUDA version)
 ```
 
 ---
