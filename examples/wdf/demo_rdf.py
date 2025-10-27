@@ -107,8 +107,8 @@ if __name__ == '__main__':
     parser.add_argument('--assetRoot', default=get_robocore_path("assets"),
                         type=str, help="Root directory for assets")
     parser.add_argument('--assetFile',
-                        # default="robot/mjcf/Bessica-D_v1_0/Bessica-D_Covered.xml",
-                        default="robot/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml",
+                        default="robot_descriptions/mjcf/Bessica_D_v1_0/Bessica_D_Covered.xml",
+                        # default="robot_descriptions/mjcf/Alicia_D_v5_5/alicia_duo_with_gripper.xml",
                         type=str, help="Path to asset file (URDF/MJCF)")
     parser.add_argument('--baseLink', default="base_link", type=str, help="Base link of the robot")
 

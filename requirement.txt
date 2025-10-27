@@ -12,3 +12,4 @@ mujoco>=2.3.0
 mujoco-py>=2.1.0
 trimesh>=4.9.0
 coacd
+pyglet==1.5.27

@@ -189,7 +189,9 @@ class MJCFParser:
         create_dir(mesh_dir)
         all_mesh_file_stl = list_absl_path(mesh_dir, recursive=True, suffix=".stl")
         all_mesh_file_STL = list_absl_path(mesh_dir, recursive=True, suffix=".STL")
-        all_mesh_files = all_mesh_file_stl + all_mesh_file_STL
+        all_mesh_file_obj = list_absl_path(mesh_dir, recursive=True, suffix=".obj")
+        all_mesh_file_OBJ = list_absl_path(mesh_dir, recursive=True, suffix=".OBJ")
+        all_mesh_files = all_mesh_file_stl + all_mesh_file_STL + all_mesh_file_obj + all_mesh_file_OBJ
 
         mesh_map = robot.get_assets_map()
         mesh_name_path_map = {}
@@ -214,6 +216,19 @@ class MJCFParser:
             self.link_mesh_map[body.name] = {}
 
             for geom in geoms_this_body:
+                # Filter out visual geometries (contype="0" conaffinity="0")
+                # Only keep collision geometries for distance field computation
+                geom_contype = getattr(geom, 'contype', None)
+                geom_conaffinity = getattr(geom, 'conaffinity', None)
+
+                # Skip visual geometries (with contype="0" and conaffinity="0")
+                # Note: attributes might be strings "0" or numbers 0
+                is_visual = (str(geom_contype) == "0" and
+                             str(geom_conaffinity) == "0") if (geom_contype is not None and geom_conaffinity is not None) else False
+
+                if is_visual:
+                    continue
+
                 geom_type = geom.type or "capsule"  # 默认类型为胶囊
                 geom_pos = geom.pos if geom.pos is not None else [0, 0, 0]
                 geom_quat = geom.quat if geom.quat is not None else [1, 0, 0, 0]  # w, x, y, z
