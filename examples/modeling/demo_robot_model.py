@@ -245,13 +245,13 @@ if __name__ == "__main__":
     parser.add_argument(
         '--urdf',
         type=str,
-        default=get_robocore_path('assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf'),
+        default=get_robocore_path('assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf'),
         help='URDF file path'
     )
     parser.add_argument(
         '--mjcf',
         type=str,
-        default=get_robocore_path('assets/robot/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml'),
+        default=get_robocore_path('assets/robot_descriptions/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml'),
         help='MJCF (MuJoCo XML) file path'
     )
     parser.add_argument(

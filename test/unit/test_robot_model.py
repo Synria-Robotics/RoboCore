@@ -29,7 +29,7 @@ from robocore.modeling.robot_model import RobotModel
 @pytest.fixture(scope="module")
 def urdf_path():
     """Path to test URDF file."""
-    path = Path('robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
+    path = Path('robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
     if not path.exists():
         pytest.skip(f"URDF not found: {path}")
     return str(path)

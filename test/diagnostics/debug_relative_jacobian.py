@@ -7,7 +7,7 @@ from robocore.kinematics.bimanual import relative_jacobian
 from robocore.transform.conversions import matrix_to_axis_angle
 
 # Load models
-urdf_path = Path("robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
+urdf_path = Path("robocore/assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
 
 left = RobotModel(str(urdf_path), end_link='left_arm_gripper_left_finger')
 right = RobotModel(str(urdf_path), end_link='right_arm_gripper_left_finger')

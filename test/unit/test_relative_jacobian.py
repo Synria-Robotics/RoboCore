@@ -156,7 +156,7 @@ class TestRelativeJacobian:
         
         # Use Bessica-D dual-arm URDF
         base_path = Path(__file__).parent.parent.parent
-        urdf_path = base_path / "robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf"
+        urdf_path = base_path / "robocore/assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf"
         
         if not urdf_path.exists():
             pytest.skip(f"Bessica URDF not found: {urdf_path}")

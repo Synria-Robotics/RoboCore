@@ -28,7 +28,7 @@ from robocore.utils.beauty_logger import beauty_print
 
 def main():
     base = Path(__file__).resolve().parents[1]
-    urdf = os.path.join(base, "../robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf")
+    urdf = os.path.join(base, "../robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf")
     model = RobotModel(str(urdf), end_link="tool0")
 
     analyzer = SingularityAnalyzer(model)

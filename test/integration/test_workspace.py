@@ -31,7 +31,7 @@ from robocore.analysis.workspace_analyzer import WorkspaceAnalyzer
 @pytest.fixture(scope="module")
 def robot_model():
     """Load robot model for workspace testing."""
-    urdf_path = Path('robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
+    urdf_path = Path('robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
     if not urdf_path.exists():
         pytest.skip(f"URDF not found: {urdf_path}")
     return RobotModel(str(urdf_path), end_link='tool0')

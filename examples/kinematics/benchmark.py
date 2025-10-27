@@ -355,7 +355,7 @@ if __name__ == '__main__':
 
     # Global options
     parser.add_argument('--urdf', type=str,
-                        default=get_robocore_path('assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf'),
+                        default=get_robocore_path('assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf'),
                         help='Path to URDF file')
     parser.add_argument('--end-link', type=str, default='tool0',
                         help='End-effector link name')

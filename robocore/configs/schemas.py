@@ -26,7 +26,7 @@ from typing import Optional
 @dataclass
 class RobotConfig:
     """Robot model configuration."""
-    urdf_path: str = "robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf"
+    urdf_path: str = "robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf"
     end_link: str = "tool0"
     base_link: Optional[str] = None
     

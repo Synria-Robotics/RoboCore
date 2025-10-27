@@ -547,8 +547,8 @@ class RobotModel:
         :param dtype: torch dtype (if backend='torch')
         :return: dict link_name -> 4x4 pose matrix or single 4x4 pose if return_end=True
         """
-        if len(q) != self.num_dof:
-            raise ValueError("Expected q of length %d" % self.num_dof)
+        if len(q) != self.num_chain_dof:
+            raise ValueError("Expected q of length %d" % self.num_chain_dof)
         return forward_kinematics(
             self,
             q,
@@ -668,13 +668,14 @@ class RobotModel:
         return q
 
     # -------- Multi-chain support / spawn ---------
-    def spawn_chain(self, end_link: str) -> "RobotModel":
+    def spawn_chain(self, end_link: str, base_link: Optional[str] = None) -> "RobotModel":
         """Create a lightweight chain-specific view sharing the same parsed URDF.
 
         :param end_link: target end link in the original kinematic tree.
+        :param base_link: base link for the chain (default: uses parent's base_link).
         :return: new RobotModel instance whose DOF/order corresponds to the chain from base_link to end_link.
         """
-        return RobotModel(self.model_path, end_link=end_link, _parsed=self._parsed_source)
+        return RobotModel(self.model_path, base_link=base_link or self.base_link, end_link=end_link, _parsed=self.parsed_model)
 
     def available_leaf_links(self) -> List[str]:
         """Return leaf links (no outgoing joints) in the full parsed tree.
@@ -1204,15 +1205,16 @@ class BimanualRobotModel(RobotModel):
     :param right_end_link: Right arm end-effector link name
     """
 
-    def __init__(self, model_path: str | Path, left_end_link: str, right_end_link: str):
+    def __init__(self, model_path: str | Path, left_end_link: str, right_end_link: str, base_link: Optional[str] = None):
         """Initialize bimanual robot model.
         
         :param model_path: Path to URDF or MJCF file
         :param left_end_link: Left arm end-effector link name
         :param right_end_link: Right arm end-effector link name
+        :param base_link: Base link for the robot (default: 'base_link')
         """
         # Initialize base RobotModel (full kinematic tree)
-        super().__init__(model_path, end_link=None)
+        super().__init__(model_path, base_link=base_link or 'base_link', end_link=None)
 
         # Create left and right arm groups
         self.add_groups({
@@ -1226,8 +1228,8 @@ class BimanualRobotModel(RobotModel):
         self.right_end_link = right_end_link
 
         beauty_print(f"✓ Bimanual robot initialized:", type="success")
-        beauty_print(f"  Left arm: {self.left_model.num_dof} DOF, end: {left_end_link}")
-        beauty_print(f"  Right arm: {self.right_model.num_dof} DOF, end: {right_end_link}")
+        beauty_print(f"  Left arm: {self.left_model.num_chain_dof} DOF, end: {left_end_link}")
+        beauty_print(f"  Right arm: {self.right_model.num_chain_dof} DOF, end: {right_end_link}")
 
     def fk(self, q_left: Sequence[float], q_right: Sequence[float],
            *, backend: str = 'auto', mode: str = 'indep', **kwargs) -> Dict[str, Any]:
@@ -1270,9 +1272,9 @@ class BimanualRobotModel(RobotModel):
         from robocore.kinematics.bimanual import bimanual_inverse_kinematics
 
         if q0_left is None:
-            q0_left = [0.0] * self.left_model.num_dof
+            q0_left = [0.0] * self.left_model.num_chain_dof
         if q0_right is None:
-            q0_right = [0.0] * self.right_model.num_dof
+            q0_right = [0.0] * self.right_model.num_chain_dof
 
         return bimanual_inverse_kinematics(
             self.left_model, self.right_model,

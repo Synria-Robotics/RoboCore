@@ -6,7 +6,7 @@ from robocore.modeling.robot_model import BimanualRobotModel
 from robocore.utils.path import get_robocore_path
 
 # 加载机器人
-mjcf_path = get_robocore_path("assets/robot/mjcf/Bessica-D_v1_0/Bessica-D_Interactive.xml")
+mjcf_path = get_robocore_path("assets/robot_descriptions/mjcf/Bessica-D_v1_0/Bessica_D_Covered_Interactive")
 robot = BimanualRobotModel(mjcf_path, "left_arm_link7", "right_arm_link7")
 
 # 测试配置

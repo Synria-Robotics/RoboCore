@@ -135,5 +135,5 @@ These tests are designed to be run in CI pipelines:
 
 ## Known Issues
 
-- Tests require URDF file at `robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf`
+- Tests require URDF file at `robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf`
 - GPU tests require CUDA-capable device (automatically skip if unavailable)

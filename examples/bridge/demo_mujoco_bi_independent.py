@@ -15,7 +15,7 @@ def main():
     """Demo 1: Independent dual-arm IK control."""
     
     # Model paths
-    mjcf_path = get_robocore_path("assets/robot/mjcf/Bessica-D_v1_0/Bessica-D_Interactive.xml")
+    mjcf_path = get_robocore_path("assets/robot_descriptions/mjcf/Bessica_D_v1_0/Bessica_D_Covered_Interactive.xml")
     
     # End-effector links
     left_end = "left_arm_link7"

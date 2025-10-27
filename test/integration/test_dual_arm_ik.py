@@ -8,7 +8,7 @@ from robocore.modeling.robot_model import RobotModel
 from robocore.utils.path import get_robocore_path
 from robocore.kinematics.bimanual import dual_fk, dual_ik
 
-URDF_REL = "assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf"
+URDF_REL = "assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf"
 
 
 def test_dual_arm_absolute_ik():

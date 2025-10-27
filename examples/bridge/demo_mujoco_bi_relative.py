@@ -16,7 +16,7 @@ def main():
     """Demo 2: Cooperative dual-arm control with relative constraint."""
     
     # Model paths
-    mjcf_path = get_robocore_path("assets/robot/mjcf/Bessica-D_v1_0/Bessica-D_Interactive.xml")
+    mjcf_path = get_robocore_path("assets/robot_descriptions/mjcf/Bessica-D_v1_0/Bessica_D_Covered_Interactive")
     
     # End-effector links
     left_end = "left_arm_link7"

@@ -21,7 +21,7 @@ from robocore.utils.path import get_robocore_path
 @pytest.fixture
 def bimanual_robot():
     """Load Bessica-D dual-arm robot."""
-    mjcf_path = get_robocore_path("assets/robot/mjcf/Bessica-D_v1_0/Bessica-D_Interactive.xml")
+    mjcf_path = get_robocore_path("assets/robot_descriptions/mjcf/Bessica-D_v1_0/Bessica_D_Covered_Interactive")
     robot = BimanualRobotModel(
         mjcf_path,
         left_end_link="left_arm_link7",

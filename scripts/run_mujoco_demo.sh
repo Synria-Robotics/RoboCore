@@ -6,9 +6,10 @@ DEMO=$1
 if [ -z "$DEMO" ]; then
     echo "Usage: $0 <demo_name>"
     echo "Available demos:"
-    echo "  bi_independent - Independent dual-arm control"
-    echo "  bi_relative - relative control with relative constraint"
-    echo "  bi_mirror      - Mirror symmetric control"
+    echo "  bi_independent     - Independent dual-arm control"
+    echo "  bi_independent_pure - Independent control (pure RobotModel)"
+    echo "  bi_relative        - Relative control with relative constraint"
+    echo "  bi_mirror          - Mirror symmetric control"
     exit 1
 fi
 
@@ -16,10 +17,10 @@ fi
 MJPYTHON_PATH=""
 
 # Check conda bin directory
-if [ -f "$HOME/anaconda3/bin/mjpython" ]; then
-    MJPYTHON_PATH="$HOME/anaconda3/bin/mjpython"
-elif [ -f "$HOME/miniconda3/bin/mjpython" ]; then
-    MJPYTHON_PATH="$HOME/miniconda3/bin/mjpython"
+if [ -f "$HOME/anaconda3/envs/synria/bin/mjpython" ]; then
+    MJPYTHON_PATH="$HOME/anaconda3/envs/synria/bin/mjpython"
+elif [ -f "$HOME/miniconda3/envs/synria/bin/mjpython" ]; then
+    MJPYTHON_PATH="$HOME/miniconda3/envs/synria/bin/mjpython"
 elif command -v mjpython &> /dev/null; then
     MJPYTHON_PATH="mjpython"
 fi

@@ -75,7 +75,7 @@ class TestHierarchicalIK:
     @pytest.fixture
     def dual_arms(self):
         """Load dual-arm models."""
-        urdf_path = Path("robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
+        urdf_path = Path("robocore/assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
         
         if not urdf_path.exists():
             pytest.skip(f"Bessica URDF not found: {urdf_path}")

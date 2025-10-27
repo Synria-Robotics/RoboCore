@@ -1,0 +1,3 @@
+[submodule "robocore/assets"]
+	path = robocore/assets
+	url = https://github.com/Synria-Robotics/Synria-Robot-Descriptions.git

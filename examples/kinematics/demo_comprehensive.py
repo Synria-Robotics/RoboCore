@@ -478,8 +478,8 @@ if __name__ == '__main__':
     robot_group.add_argument(
         '--urdf',
         type=str,
-        default='robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf',
-        # default='robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf',
+        default='robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf',
+        # default='robocore/assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf',
         help='Path to URDF file'
     )
     robot_group.add_argument(

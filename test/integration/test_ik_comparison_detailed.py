@@ -234,7 +234,7 @@ def batch_comparison(model, n_samples=32, device='cpu', seed=42):
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--urdf', default='robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
+    parser.add_argument('--urdf', default='robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
     parser.add_argument('--end-link', default='tool0')
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--batch-size', type=int, default=32)

@@ -18,7 +18,7 @@ def demo_weighted_tasks():
     beauty_print("=== Weighted Multi-Task IK ===", color='cyan')
     
     # Load robot
-    urdf_path = get_robocore_path("assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
+    urdf_path = get_robocore_path("assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
     robot = RobotModel(urdf_path)
     
     # Setup dual-arm groups
@@ -97,7 +97,7 @@ def demo_hierarchical_tasks():
     """Hierarchical task solving with strict priorities."""
     beauty_print("=== Hierarchical Multi-Task IK ===", color='cyan')
     
-    urdf_path = get_robocore_path("assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
+    urdf_path = get_robocore_path("assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
     robot = RobotModel(urdf_path)
     
     leaves = robot.available_leaf_links()
@@ -164,7 +164,7 @@ def demo_cooperative_carrying():
     """Simulate cooperative carrying: both hands track object motion while maintaining grasp."""
     beauty_print("=== Cooperative Carrying Scenario ===", color='cyan')
     
-    urdf_path = get_robocore_path("assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
+    urdf_path = get_robocore_path("assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
     robot = RobotModel(urdf_path)
     
     leaves = robot.available_leaf_links()
@@ -239,7 +239,7 @@ def demo_single_arm_as_multichain():
     """Show that single-arm IK works seamlessly in multi-chain framework."""
     beauty_print("=== Single Arm via Multi-Chain Framework ===", color='cyan')
     
-    urdf_path = get_robocore_path("assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
+    urdf_path = get_robocore_path("assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
     robot = RobotModel(urdf_path)
     
     leaves = robot.available_leaf_links()

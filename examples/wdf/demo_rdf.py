@@ -8,22 +8,22 @@ from URDF/MJCF files and visualize the reconstructed whole body.
 
 import argparse
 import os
-import time
 
-import robocore
-import robolab
+import numpy as np
+import robocore as rc
 import torch
-from robocore.wdf.rdf import RDF  # Changed from RDF
+from robocore.wdf.rdf import RDF
 from robocore.modeling.robot_model import RobotModel
+from robocore.utils.path import get_robocore_path
 
 
 def rdf_from_robot_model(args):
     assert args.modelType in ["NN", "BP"], "Invalid model type. Choose either 'NN' or 'BP'."
-    
+
     asset_path = os.path.join(args.assetRoot, args.assetFile)
     robot = RobotModel(asset_path, base_link=args.baseLink, load_mesh_flag=True)
     robot.print_tree()
-    
+
     # Instantiate RDF_NN
     rdf_instant = RDF(args, robot, model_type=args.modelType)
     rdf_dir = os.path.join(os.path.dirname(asset_path), "rdf")
@@ -37,7 +37,7 @@ def rdf_from_robot_model(args):
 
     if not os.path.exists(rdf_model_path) or args.forceTrain:  # train the model
         rdf_instant.train()
-        
+
     if args.device == 'cpu':
         rdf_model = torch.load(rdf_model_path, map_location=torch.device('cpu'), weights_only=False)
     else:
@@ -67,7 +67,6 @@ def rdf_from_robot_model(args):
     #                                                      use_derivative=True)
     # print('Time cost:', (time.time() - start_time))
     # print('sdf:', sdf.shape, 'gradient:', gradient.shape)
-    import numpy as np
     joint_value = np.zeros(num_joint)
     # joint_value = torch.rand(num_joint).to(args.device).reshape((-1, num_joint))
     joint_value = torch.rand(num_joint).reshape((-1, num_joint)).numpy()
@@ -76,15 +75,14 @@ def rdf_from_robot_model(args):
     joint_value[-2] = 0.0
 
     # 使用包络式可视化方法（推荐）
-    robocore.wdf.plot_3D_sdf_envelope(joint_value, rdf_instant, model=rdf_model, device=args.device,
-                                      nbData=64, distance_levels=[0.02, 0.05, 0.1, 0.15], show_robot=True)
+    rc.wdf.plot_3D_sdf_envelope(joint_value, rdf_instant, model=rdf_model, device=args.device,
+                                nbData=64, distance_levels=[0.02, 0.05, 0.1, 0.15], show_robot=True)
 
     # 或者使用梯度可视化方法
     # robocore.wdf.plot_3D_sdf_with_gradient(joint_value, rdf_instant, model=rdf_model, device=args.device)
 
 
 if __name__ == '__main__':
-    from robocore.utils.path import get_robocore_path
     parser = argparse.ArgumentParser()
     parser.add_argument('--device', default='cuda:0' if torch.cuda.is_available() else 'cpu', type=str)
 

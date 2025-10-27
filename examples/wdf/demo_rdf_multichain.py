@@ -17,7 +17,7 @@ def main():
     beauty_print("RDF Multi-Chain FK Integration Demo", type="module")
     
     # Load robot model (complete tree structure)
-    model_path = get_robocore_path("assets/robot/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml")
+    model_path = get_robocore_path("assets/robot_descriptions/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml")
     robot_model = RobotModel(str(model_path))  # Don't specify end_link to load full tree
     
     beauty_print(f"Robot: {robot_model.name}")

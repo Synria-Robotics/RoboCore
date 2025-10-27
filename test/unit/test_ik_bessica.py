@@ -24,7 +24,7 @@ from robocore.kinematics.fk import forward_kinematics
 from robocore.kinematics.ik import inverse_kinematics
 
 
-URDF_PATH = Path('robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
+URDF_PATH = Path('robocore/assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
 LEFT_END = 'left_arm_gripper_left_finger'
 RIGHT_END = 'right_arm_gripper_left_finger'
 

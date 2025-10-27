@@ -3,7 +3,7 @@
 # Optimized for large-scale batch processing on GPU
 
 robot:
-  urdf_path: "robocore/assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf"
+  urdf_path: "robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf"
   end_link: "tool0"
   base_link: null
 

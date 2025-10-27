@@ -73,8 +73,8 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Inverse Kinematics Demo")
     parser.add_argument('--model-path', type=str, 
-                        # default=get_robocore_path("assets/robot/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf"),
-                        default=get_robocore_path("assets/robot/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml"),
+                        # default=get_robocore_path("assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf"),
+                        default=get_robocore_path("assets/robot_descriptions/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml"),
                         help='Path to model file (default: Alicia-D)')
     parser.add_argument('--end-link', type=str, default='Link6',
                         help='End-effector link name')
