@@ -27,7 +27,7 @@ import numpy as np
 import trimesh
 import os
 
-from robocore.modeling.parser.urdf_parser import load_urdf
+from robocore.modeling.parser.urdf_parser import URDFParser
 from robocore.modeling.parser.mjcf_parser import MJCFParser
 from robocore.modeling.parser.utils import JointSpec
 from robocore.kinematics.fk import forward_kinematics
@@ -102,7 +102,7 @@ class RobotModel:
                 if self.model_path.endswith('.xml'):
                     self.parsed_model = MJCFParser(self.model_path)
                 elif self.model_path.endswith('.urdf'):
-                    self.parsed_model = load_urdf(self.model_path)
+                    self.parsed_model = URDFParser(self.model_path)
                 else:
                     raise ValueError("Unsupported model file format. Only URDF and MJCF are supported.")
                 _PARSED_ROBOT_CACHE[cache_key] = self.parsed_model

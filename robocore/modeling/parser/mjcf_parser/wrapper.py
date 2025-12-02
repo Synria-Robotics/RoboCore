@@ -27,9 +27,10 @@ from typing import Dict, List, Optional
 import numpy as np
 
 import mujoco
+import trimesh
 from robocore.modeling.parser.utils import JointSpec
 from robocore.transform.conversions import quaternion_to_rpy, quaternion_reorder
-from robolab.formatter.mjcf_parser.parser import from_path
+from robocore.modeling.parser.mjcf_parser.parser import from_path
 from robocore.utils.path import create_dir, list_absl_path
 
 
@@ -37,16 +38,24 @@ class MJCFParser:
     def __init__(self, mjcf_path: str | Path):
         """
         :param mjcf_path: Path to the MJCF file
+        
+        Note: Initialization is slower than URDFParser (~200-250ms vs ~1ms) because
+        MuJoCo needs to load and compile the complete physics model. This is necessary
+        to extract joint information from the MJCF format. The MuJoCo model includes:
+        - Full physics parameters (mass, inertia, collision geometries)
+        - Compiled model for simulation
+        - Complete kinematic and dynamic structure
         """
         self.mjcf_path = Path(mjcf_path)
         if not self.mjcf_path.exists():
             raise FileNotFoundError(f"MJCF file not found: {mjcf_path}")
 
-        # Load the MuJoCo model
+        # Load the MuJoCo model (this is the main performance bottleneck)
+        # MuJoCo needs to parse XML, build physics model, and compile it
         self.model = mujoco.MjModel.from_xml_path(str(self.mjcf_path))
         self.data = mujoco.MjData(self.model)
 
-        # Parse joint information
+        # Parse joint information (requires self.model to be loaded)
         self.joints = self._parse_joints()
         self.link_mesh_map = {}
 
@@ -63,9 +72,9 @@ class MJCFParser:
         }
         return type_map.get(jnt_type, "fixed")
 
-    def _parse_joints(self) -> Dict[str, JointSpec]:
+    def _parse_joints(self) -> List[JointSpec]:
         """
-        :return: Dictionary mapping joint names to JointSpec objects
+        :return: List of JointSpec objects
         """
         joints = []
         idx = 0
@@ -131,10 +140,16 @@ class MJCFParser:
             joints.append(joint)
         return joints
 
-    def get_joint_names(self) -> Dict[str, JointSpec]:
-        return list(self.joints)
+    def get_joint_names(self) -> List[JointSpec]:
+        """
+        :return: List of JointSpec objects
+        """
+        return self.joints
 
-    def get_joint_limits(self) -> List[Optional[float]]:
+    def get_joint_limits(self) -> np.ndarray:
+        """
+        :return: Array of joint limits with shape (n_joints, 2) where each row is [lower, upper]
+        """
         return np.array([(j.limit_lower, j.limit_upper) for j in self.joints])
 
     def get_link_names(self) -> List[str]:

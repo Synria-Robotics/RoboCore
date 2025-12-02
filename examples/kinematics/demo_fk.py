@@ -25,7 +25,6 @@ import time
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.fk import forward_kinematics
 from robocore.utils.beauty_logger import beauty_print_array, beauty_print
-from robocore.utils.path import get_robocore_path
 from robocore.transform.conversions import *
 
 
@@ -76,10 +75,13 @@ def main(args):
 
 
 if __name__ == "__main__":
+    from synriard import get_model_path
+    
+    model_path = get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="urdf")
+
     parser = argparse.ArgumentParser(description="Forward Kinematics Demo")
     parser.add_argument('--model-path', type=str,
-                        # default=get_robocore_path("assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf"),
-                        default=get_robocore_path("assets/robot_descriptions/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml"),
+                        default=model_path,
                         help='Path to URDF file (default: Alicia-D)')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
     parser.add_argument('--joint-angles', type=float, nargs='+', default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2],

@@ -19,6 +19,9 @@ Website: https://synriarobotics.ai
 """
 
 
+import warnings
+import numpy as np
+import platform
 import robocore
 from scipy.spatial.transform import Rotation
 import sys
@@ -26,7 +29,6 @@ import sys
 sys.setrecursionlimit(100000)
 import os
 
-import numpy as np
 
 np.set_printoptions(threshold=np.inf)
 
@@ -1284,12 +1286,44 @@ def sample_sdf_points(link_name, mesh_name, save_path, geom_info):
         mesh = mesh_to_sdf.scale_to_unit_sphere(mesh)
 
         # Sample points near the surface (as in DeepSDF)
+        # On macOS, use 'sample' method directly to avoid OpenGL context leaks
+        # On other platforms, try 'scan' first for better performance
+        # Suppress numpy warnings from mesh_to_sdf
+        is_macos = platform.system() == 'Darwin'
+        surface_method = 'sample' if is_macos else 'scan'
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*divide by zero.*')
+            warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*overflow.*')
+            warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*invalid value.*')
+            try:
+                if surface_method == 'scan':
         near_points, near_sdf = mesh_to_sdf.sample_sdf_near_surface(mesh,
                                                                     number_of_points=500000,
                                                                     surface_point_method='scan',
                                                                     sign_method='normal',
                                                                     scan_count=100,
                                                                     scan_resolution=400,
+                                                                                sample_point_count=10000000,
+                                                                                normal_sample_count=100,
+                                                                                min_size=0.0,
+                                                                                return_gradients=False)
+                else:
+                    near_points, near_sdf = mesh_to_sdf.sample_sdf_near_surface(mesh,
+                                                                                number_of_points=500000,
+                                                                                surface_point_method='sample',
+                                                                                sign_method='normal',
+                                                                                sample_point_count=10000000,
+                                                                                normal_sample_count=100,
+                                                                                min_size=0.0,
+                                                                                return_gradients=False)
+            except (AttributeError, RuntimeError, OSError) as e:
+                # Fallback to 'sample' method if 'scan' fails
+                print(f"Warning: 'scan' method failed ({e}), falling back to 'sample' method")
+                near_points, near_sdf = mesh_to_sdf.sample_sdf_near_surface(mesh,
+                                                                            number_of_points=500000,
+                                                                            surface_point_method='sample',
+                                                                            sign_method='normal',
                                                                     sample_point_count=10000000,
                                                                     normal_sample_count=100,
                                                                     min_size=0.0,
@@ -1297,6 +1331,12 @@ def sample_sdf_points(link_name, mesh_name, save_path, geom_info):
 
         # Sample points randomly within the bounding box [-1,1]
         random_points = np.random.rand(500000, 3) * 2.0 - 1.0
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*divide by zero.*')
+            warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*overflow.*')
+            warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*invalid value.*')
+            try:
+                if surface_method == 'scan':
         random_sdf = mesh_to_sdf.mesh_to_sdf(mesh,
                                              random_points,
                                              surface_point_method='scan',
@@ -1304,6 +1344,24 @@ def sample_sdf_points(link_name, mesh_name, save_path, geom_info):
                                              bounding_radius=None,
                                              scan_count=100,
                                              scan_resolution=400,
+                                                         sample_point_count=10000000,
+                                                         normal_sample_count=100)
+                else:
+                    random_sdf = mesh_to_sdf.mesh_to_sdf(mesh,
+                                                         random_points,
+                                                         surface_point_method='sample',
+                                                         sign_method='normal',
+                                                         bounding_radius=None,
+                                                         sample_point_count=10000000,
+                                                         normal_sample_count=100)
+            except (AttributeError, RuntimeError, OSError) as e:
+                # Fallback to 'sample' method if 'scan' fails
+                print(f"Warning: 'scan' method failed ({e}), falling back to 'sample' method")
+                random_sdf = mesh_to_sdf.mesh_to_sdf(mesh,
+                                                     random_points,
+                                                     surface_point_method='sample',
+                                                     sign_method='normal',
+                                                     bounding_radius=None,
                                              sample_point_count=10000000,
                                              normal_sample_count=100)
     else:
