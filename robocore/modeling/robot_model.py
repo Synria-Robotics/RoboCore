@@ -673,11 +673,10 @@ class RobotModel:
         q = [0.0] * self.num_chain_dof
         for js in self._chain_actuated:
             lo, hi = -1.0, 1.0
-            if js.limit_lower:
-                if js.limit_lower is not None:
-                    lo = js.limit_lower
-                if js.limit_upper is not None:
-                    hi = js.limit_upper
+            if js.limit_lower is not None:
+                lo = js.limit_lower
+            if js.limit_upper is not None:
+                hi = js.limit_upper
             mid = 0.5 * (lo + hi)
             span = 0.5 * (hi - lo) * scale
             q[js.index] = float(rng.uniform(mid - span, mid + span))
@@ -981,17 +980,16 @@ class RobotModel:
             >>> q_batch = model.random_q_batch(100, scale=0.8)  # Use 80% of range
         """
         rng = np.random.default_rng(seed)
-        n_joints = self.num_dof
+        n_joints = self.num_chain_dof
         q_batch = np.zeros((batch_size, n_joints))
 
         for i in range(batch_size):
             for js in self._chain_actuated:
                 lo, hi = -1.0, 1.0
-                if js.limit:
-                    if js.limit[0] is not None:
-                        lo = js.limit[0]
-                    if js.limit[1] is not None:
-                        hi = js.limit[1]
+                if js.limit_lower is not None:
+                    lo = js.limit_lower
+                if js.limit_upper is not None:
+                    hi = js.limit_upper
                 mid = 0.5 * (lo + hi)
                 span = 0.5 * (hi - lo) * scale
                 q_batch[i, js.index] = rng.uniform(mid - span, mid + span)

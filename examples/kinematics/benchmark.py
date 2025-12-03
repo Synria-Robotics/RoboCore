@@ -66,7 +66,7 @@ def cmd_performance(args, model):
     """Run performance benchmark."""
     beauty_print("Performance Benchmark: FK/IK/Jacobian", type="module", centered=True)
     
-    q = [0.1, 0.2, -0.3, 0.0, 0.5, -0.2, 0.0][:model.num_dof]
+    q = [0.1, 0.2, -0.3, 0.0, 0.5, -0.2, 0.0][:model.num_chain_dof]
     
     beauty_print(f"FK runs: {args.fk_runs}", type="info")
     
@@ -139,7 +139,7 @@ def cmd_ik_compare(args, model):
         stats = {k: [] for k in ['iters', 'pos_err', 'ori_err', 'time', 'success']}
         
         for pose in poses:
-            q0 = np.zeros(model.num_dof)
+            q0 = np.zeros(model.num_chain_dof)
             
             # Prepare torch-specific kwargs
             extra = {}
@@ -348,15 +348,16 @@ def main(args):
 
 
 if __name__ == '__main__':
+    import synriard
+    model_path = synriard.get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="urdf")
+
     parser = argparse.ArgumentParser(
         description="Unified Benchmark Suite for RoboCore Kinematics",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     # Global options
-    parser.add_argument('--urdf', type=str,
-                        default=get_robocore_path('assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf'),
-                        help='Path to URDF file')
+    parser.add_argument('--urdf', type=str, default=model_path, help='Path to URDF file')
     parser.add_argument('--end-link', type=str, default='tool0',
                         help='End-effector link name')
     parser.add_argument('--seed', type=int, default=77,
