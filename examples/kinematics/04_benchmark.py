@@ -55,6 +55,8 @@ def benchmark_fk(model, q, backend, n_runs=1000, device=None):
     # Set global backend
     if backend == 'torch' and device:
         robocore.set_backend('torch', device=device)
+    elif backend == 'numpy':
+        robocore.set_backend('numpy')
     else:
         robocore.set_backend(backend)
 
@@ -144,30 +146,30 @@ def cmd_ik_compare(args, model):
     results = {}
     for name, backend, method in tests:
         stats = {k: [] for k in ['iters', 'pos_err', 'ori_err', 'time', 'success']}
-        
+
+        # Prepare torch-specific kwargs
+        extra = {}
+        if backend == 'torch':
+            extra['torch_device'] = args.torch_device
+            if args.torch_dtype:
+                try:
+                    dtype_map = {
+                        'float32': torch.float32, 'fp32': torch.float32,
+                        'float': torch.float32,
+                        'float64': torch.float64, 'double': torch.float64,
+                    }
+                    extra['torch_dtype'] = dtype_map.get(args.torch_dtype.lower(), torch.float32)
+                except ImportError:
+                    pass
+
+        # Set global backend once per backend/method combination
+        if backend == 'torch':
+            robocore.set_backend('torch', device=extra.get('torch_device', 'cpu'))
+        else:
+            robocore.set_backend(backend)
+
         for pose in poses:
             q0 = np.zeros(model.num_chain_dof)
-            
-            # Prepare torch-specific kwargs
-            extra = {}
-            if backend == 'torch':
-                extra['torch_device'] = args.torch_device
-                if args.torch_dtype:
-                    try:
-                        dtype_map = {
-                            'float32': torch.float32, 'fp32': torch.float32,
-                            'float': torch.float32,
-                            'float64': torch.float64, 'double': torch.float64,
-                        }
-                        extra['torch_dtype'] = dtype_map.get(args.torch_dtype.lower(), torch.float32)
-                    except ImportError:
-                        pass
-            
-            # Set global backend
-            if backend == 'torch' and 'torch_device' in extra:
-                robocore.set_backend('torch', device=extra['torch_device'])
-            else:
-                robocore.set_backend(backend)
 
             t0 = time.perf_counter()
             try:
@@ -210,9 +212,6 @@ def cmd_ik_compare(args, model):
 def benchmark_fk_numpy_batch(model, q_batch: np.ndarray, warmup: int = 5) -> Dict:
     """Benchmark FK computation using NumPy (sequential)."""
     batch_size = q_batch.shape[0]
-    
-    # Set global backend
-    robocore.set_backend('numpy')
 
     # Warmup
     for i in range(min(warmup, batch_size)):
@@ -294,6 +293,7 @@ def cmd_parallel(args, model):
     
     # NumPy benchmark
     beauty_print("NumPy (Sequential)")
+    robocore.set_backend('numpy')
     result_np = benchmark_fk_numpy_batch(model, q_batch, warmup=5)
     beauty_print(f"  Total time: {result_np['total_time']:.4f} s")
     beauty_print(f"  Avg time: {result_np['avg_time']*1000:.4f} ms/sample")

@@ -109,11 +109,22 @@ def linear_cartesian_trajectory(
     
     # Initialize arrays
     poses = np.zeros((num_points, 4, 4))
-    q = np.zeros((num_points, robot_model.num_dof))
+    q = np.zeros((num_points, robot_model.num_chain_dof))
     
     # Initial guess for IK
     if q_init is None:
-        q_init = np.zeros(robot_model.num_dof)
+        q_init = np.zeros(robot_model.num_chain_dof)
+    else:
+        # Ensure q_init matches chain DOF
+        if len(q_init) != robot_model.num_chain_dof:
+            if len(q_init) < robot_model.num_chain_dof:
+                # Pad with zeros
+                q_init_padded = np.zeros(robot_model.num_chain_dof)
+                q_init_padded[:len(q_init)] = q_init
+                q_init = q_init_padded
+            else:
+                # Truncate
+                q_init = q_init[:robot_model.num_chain_dof]
     
     q_current = q_init.copy()
     

@@ -342,6 +342,8 @@ def demo_cartesian_trajectory(model, end_link, q_init, plot=False):
 
 
 def main():
+    import synriard
+
     parser = argparse.ArgumentParser(description='Trajectory Planning Demo')
     parser.add_argument('--robot', type=str, default='bessica',
                        choices=['alicia', 'bessica'],
@@ -356,23 +358,20 @@ def main():
     # Load robot model
     print("Loading robot model...")
     if args.robot == 'alicia':
-        urdf_path = os.path.join(Path(__file__).parent.parent,
-                                 '../robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
+        urdf_path = synriard.get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="urdf")
         end_link = 'tool0'
-        dof = 6
     else:  # bessica
-        urdf_path = os.path.join(Path(__file__).parent.parent,
-                                 '../robocore/assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
+        urdf_path = synriard.get_model_path("Bessica_D", version="v1_0", variant="covered", model_format="urdf")
         end_link = f'{args.arm}_arm_gripper_{args.arm}_finger'
-        dof = 7
     
-    model = RobotModel(str(urdf_path))
+    model = RobotModel(str(urdf_path), end_link=end_link)
+    dof = model.num_chain_dof
     print(f"✓ Loaded {args.robot} ({dof}-DOF)")
     print(f"  End link: {end_link}")
     
     # Define test configurations
     q_start = np.zeros(dof)
-    q_end = np.array([0.5, 0.3, -0.2, 0.4, -0.3, 0.2] + ([0.0] if dof == 7 else []))
+    q_end = np.array([0.5, 0.3, -0.2, 0.4, -0.3, 0.2] + ([0.0] if dof == 7 else []))[:dof]
     
     # Demo 1: Joint space trajectories
     demo_joint_space_trajectories(model, q_start, q_end, plot=args.plot)

@@ -9,19 +9,47 @@
 
 ---
 
-## ✨ Features
+## 🔥 Features & Roadmap
 
-| Module | Functionality | Status |
-|--------|---------------|--------|
-| **Modeling** | URDF/MJCF parsing, Robot model abstraction | ✅ Stable |
-| **Forward Kinematics** | NumPy/PyTorch backends, Batch processing | ✅ Stable |
-| **Inverse Kinematics** | DLS/Pinv/Transpose methods, Multi-start | ✅ Stable |
-| **Jacobian** | Analytic/Numeric/Autograd methods | ✅ Stable |
-| **Transform** | SE(3)/SO(3) operations, Conversions | ✅ Stable |
-| **Analysis** | Workspace/Singularity analysis | ✅ Beta |
-| **Planning** | Trajectory generation | 🚧 Alpha |
-| **Visualization** | Kinematic tree display | ✅ Stable |
-| **Configuration** | YAML-based config management | ✅ Stable |
+| Module | Features | Status |
+|--------|----------|--------|
+| **Kinematics** | Forward Kinematics (NumPy/PyTorch Batch) | ✅ |
+| | Inverse Kinematics (NumPy/PyTorch Batch) | ✅ |
+| | Jacobian (NumPy/PyTorch Batch) | ✅ |
+| | Bimanual FK (indep/relative/mirror) | ✅ |
+| | Bimanual IK (indep/relative/mirror) | ✅ |
+| | Bimanual Jacobian (indep/relative) | ✅ |
+| **Modeling** | URDF parsing | ✅ |
+| | MJCF parsing | ✅ |
+| | Robot model abstraction | ✅ |
+| | Bimanual robot model | ✅ |
+| **Transform** | SE(3) operations | ✅ |
+| | SO(3) operations | ✅ |
+| | Rotation conversions | ✅ |
+| | Quaternion operations | ✅ |
+| **Analysis** | Workspace analysis | 🟡 |
+| | Singularity analysis | 🟡 |
+| **Planning** | Joint space trajectory | 🟡 |
+| | Cartesian space trajectory | 🟡 |
+| | Velocity profiles | 🟡 |
+| **WDF** | SDF (Signed Distance Field) | ✅ |
+| | RDF (Relative Distance Field) | ✅ |
+| | Visualization | ✅ |
+| **Config** | YAML configuration | ✅ |
+| | Config schemas | ✅ |
+| **Bridge** | MuJoCo simulation bridge | ✅ |
+| | Real robot bridge (partial) | 🟡 |
+| **Dynamics** | Inverse dynamics | ⚪ |
+| | Forward dynamics | ⚪ |
+| | Mass matrix computation | ⚪ |
+| **Control** | PID controller | ⚪ |
+| | MPC controller | ⚪ |
+| | Impedance controller | ⚪ |
+| **Collision** | Mesh-based collision detection | ⚪ |
+| | Distance computation | ⚪ |
+| **Path Planning** | RRT/RRT* algorithms | ⚪ |
+| | PRM algorithms | ⚪ |
+| | Optimization-based planning | ⚪ |
 
 ### Supported Robot Formats
 - ✅ **URDF** (Unified Robot Description Format)
@@ -137,43 +165,6 @@ python examples/analysis/demo_workspace.py --samples 10000
 python examples/kinematics/benchmark.py
 ```
 
----
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-pytest
-
-# Specific test suites
-pytest test/unit/          # Unit tests
-pytest test/integration/   # Integration tests
-
-# With coverage report
-pytest --cov=robocore --cov-report=html
-```
-
----
-
-## 📋 TODO & Roadmap
-
-### High Priority 🔴
-- [ ] **Collision Detection** - Mesh-based collision checking
-- [ ] **Path Planning** - RRT/RRT*/PRM algorithms
-- [ ] **Dynamics** - Inverse/Forward dynamics computation
-- [ ] **Control** - PID, MPC, impedance controllers
-
-### Medium Priority 🟡
-- [ ] **Optimization** - Further SIMD/vectorization improvements
-- [ ] **Mobile Manipulators** - Support for mobile bases
-- [ ] **Multi-Arm Systems** - Coordinated multi-robot control
-
-### Low Priority 🟢
-- [ ] **Visualization** - 3D interactive visualization (PyBullet/MuJoCo)
-- [ ] **Documentation** - API docs, tutorials, best practices
-
-
----
 
 ## 🏗️ Project Structure
 

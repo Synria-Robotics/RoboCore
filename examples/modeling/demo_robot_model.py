@@ -40,11 +40,18 @@ def compare_fk(model_a: RobotModel, model_b: RobotModel, q):
 
 	:param model_a: First model (URDF)
 	:param model_b: Second model (MJCF)
-	:param q: Joint configuration (min DOF length)
+	:param q: Joint configuration (may be shorter than either model's chain DOF)
 	"""
 	beauty_print("Compute and compare FK", type="module", centered=True)
-	T_a = forward_kinematics(model_a, q, return_end=True)
-	T_b = forward_kinematics(model_b, q, return_end=True)
+	# Prepare q for each model: pad with zeros if needed, truncate if too long
+	q_a = np.zeros(model_a.num_chain_dof)
+	q_a[:min(len(q), model_a.num_chain_dof)] = q[:min(len(q), model_a.num_chain_dof)]
+
+	q_b = np.zeros(model_b.num_chain_dof)
+	q_b[:min(len(q), model_b.num_chain_dof)] = q[:min(len(q), model_b.num_chain_dof)]
+
+	T_a = forward_kinematics(model_a, q_a, return_end=True)
+	T_b = forward_kinematics(model_b, q_b, return_end=True)
 	pa, pb = T_a[:3, 3], T_b[:3, 3]
 	Ra, Rb = T_a[:3, :3], T_b[:3, :3]
 	pos_err = np.linalg.norm(pa - pb)
@@ -213,20 +220,26 @@ def main(args):
         urdf_model.print_tree(show_fixed=args.show_fixed)
         mjcf_model.print_tree(show_fixed=args.show_fixed)
 
-    if urdf_model.num_dof != mjcf_model.num_dof:
-        beauty_print("DOF mismatch: configuration will be truncated to the smaller DOF", type="warning")
+    if urdf_model.num_chain_dof != mjcf_model.num_chain_dof:
+        beauty_print("Chain DOF mismatch: using max chain DOF, shorter model will pad with zeros", type="warning")
 
     if args.random:
         rng = np.random.default_rng(args.seed)
         q = np.array(urdf_model.random_q(rng=rng, scale=args.scale))
         beauty_print("Using random joint angles (middle range)")
+        # Use max chain DOF to accommodate both models
+        max_chain_dof = max(urdf_model.num_chain_dof, mjcf_model.num_chain_dof)
+        if len(q) < max_chain_dof:
+            q_padded = np.zeros(max_chain_dof)
+            q_padded[:len(q)] = q
+            q = q_padded
+        elif len(q) > max_chain_dof:
+            q = q[:max_chain_dof]
     else:
-        q = np.zeros(urdf_model.num_dof)
+        # Use max chain DOF to accommodate both models
+        max_chain_dof = max(urdf_model.num_chain_dof, mjcf_model.num_chain_dof)
+        q = np.zeros(max_chain_dof)
         beauty_print("Using zero joint configuration")
-
-    min_dof = min(urdf_model.num_dof, mjcf_model.num_dof)
-    if len(q) != min_dof:
-        q = q[:min_dof]
 
     beauty_print("Joint angles (rad):")
     print(f"  q = {beauty_print_array(q)}")
@@ -239,17 +252,19 @@ def main(args):
 
 
 if __name__ == "__main__":
+    import synriard
+
     parser = argparse.ArgumentParser(description="RobotModel loading demo (URDF & MJCF)")
     parser.add_argument(
         '--urdf',
         type=str,
-        default=get_robocore_path('assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf'),
+        default=synriard.get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="urdf"),
         help='URDF file path'
     )
     parser.add_argument(
         '--mjcf',
         type=str,
-        default=get_robocore_path('assets/robot_descriptions/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml'),
+        default=synriard.get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="mjcf"),
         help='MJCF (MuJoCo XML) file path'
     )
     parser.add_argument(
