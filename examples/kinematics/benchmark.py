@@ -33,6 +33,7 @@ from robocore.modeling import RobotModel
 from robocore.kinematics import forward_kinematics, inverse_kinematics, jacobian
 from robocore.utils.beauty_logger import beauty_print
 from robocore.utils.path import get_robocore_path
+import robocore
 
 # Check PyTorch availability
 _HAS_TORCH = False
@@ -51,10 +52,16 @@ except ImportError:
 
 def benchmark_fk(model, q, backend, n_runs=1000, device=None):
     """Benchmark FK performance."""
-    forward_kinematics(model, q, backend=backend, device=device)
+    # Set global backend
+    if backend == 'torch' and device:
+        robocore.set_backend('torch', device=device)
+    else:
+        robocore.set_backend(backend)
+
+    forward_kinematics(model, q, device=device)
     start = time.perf_counter()
     for _ in range(n_runs):
-        _ = forward_kinematics(model, q, backend=backend, device=device)
+        _ = forward_kinematics(model, q, device=device)
     return (time.perf_counter() - start) / n_runs * 1000
 
 
@@ -156,11 +163,16 @@ def cmd_ik_compare(args, model):
                     except ImportError:
                         pass
             
+            # Set global backend
+            if backend == 'torch' and 'torch_device' in extra:
+                robocore.set_backend('torch', device=extra['torch_device'])
+            else:
+                robocore.set_backend(backend)
+
             t0 = time.perf_counter()
             try:
                 res = inverse_kinematics(
                     model, pose, q0,
-                    backend=backend,
                     method=method,
                     pos_tol=args.pos_tol,
                     ori_tol=args.ori_tol,
@@ -199,15 +211,18 @@ def benchmark_fk_numpy_batch(model, q_batch: np.ndarray, warmup: int = 5) -> Dic
     """Benchmark FK computation using NumPy (sequential)."""
     batch_size = q_batch.shape[0]
     
+    # Set global backend
+    robocore.set_backend('numpy')
+
     # Warmup
     for i in range(min(warmup, batch_size)):
-        _ = forward_kinematics(model, q_batch[i], backend='numpy', return_end=True)
+        _ = forward_kinematics(model, q_batch[i], return_end=True)
     
     # Benchmark
     start_time = time.perf_counter()
     results = []
     for i in range(batch_size):
-        T = forward_kinematics(model, q_batch[i], backend='numpy', return_end=True)
+        T = forward_kinematics(model, q_batch[i], return_end=True)
         results.append(T)
     end_time = time.perf_counter()
     

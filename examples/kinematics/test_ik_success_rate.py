@@ -92,7 +92,7 @@ def generate_reachable_targets(robot_model, n_targets=20, seed=42):
         # Sample random joint angles
         q = robot_model.random_q(rng)
         # Compute FK to get reachable pose
-        T = forward_kinematics(robot_model, q, backend='numpy', return_end=True)
+        T = forward_kinematics(robot_model, q, return_end=True)
         
         # Extract position and quaternion
         pos = T[:3, 3]

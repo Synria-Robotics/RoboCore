@@ -1,7 +1,6 @@
 """Independent bimanual IK solver (Torch-aware).
 
-Thin wrapper that attempts to use RobotModel.ik with backend='torch' and falls
-back to numpy if torch backend is not available.
+Thin wrapper that uses RobotModel.ik with global backend setting.
 """
 from __future__ import annotations
 from typing import Optional, Sequence, Dict, Any
@@ -20,7 +19,7 @@ class BiIndependentIKSolverTorch:
               target_right: Optional[Sequence[Sequence[float]]],
               q0_left: Optional[Sequence[float]] = None,
               q0_right: Optional[Sequence[float]] = None,
-              backend: str = 'torch', **ik_kwargs) -> Dict[str, Any]:
+              **ik_kwargs) -> Dict[str, Any]:
         if q0_left is None:
             q0_left = [0.0] * self.left.num_dof
         if q0_right is None:
@@ -31,11 +30,11 @@ class BiIndependentIKSolverTorch:
 
         if target_left is not None:
             tgt_left = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
-            res_left = inverse_kinematics(self.left, tgt_left, q0_left, backend=backend, **ik_kwargs)
+            res_left = inverse_kinematics(self.left, tgt_left, q0_left, **ik_kwargs)
 
         if target_right is not None:
             tgt_right = target_right.tolist() if hasattr(target_right, 'tolist') else target_right
-            res_right = inverse_kinematics(self.right, tgt_right, q0_right, backend=backend, **ik_kwargs)
+            res_right = inverse_kinematics(self.right, tgt_right, q0_right, **ik_kwargs)
 
         return {
             'q_left': res_left.get('q', q0_left),
@@ -56,7 +55,6 @@ class BiRelativeIKSolverTorch(BiIndependentIKSolverTorch):
               q0_left: Optional[Sequence[float]] = None,
               q0_right: Optional[Sequence[float]] = None,
               constraint_type: str = 'pose',
-              backend: str = 'torch',
               T_rel_grasp=None,
               **ik_kwargs) -> Dict[str, Any]:
         """
@@ -65,7 +63,6 @@ class BiRelativeIKSolverTorch(BiIndependentIKSolverTorch):
         :param q0_left: Initial left configuration
         :param q0_right: Initial right configuration
         :param constraint_type: 'pose'|'position'|'orientation'
-        :param backend: Backend string
         :return: Result dict
         """
         # Follow numpy implementation: solve left first, then constrain right
@@ -77,7 +74,7 @@ class BiRelativeIKSolverTorch(BiIndependentIKSolverTorch):
         tgt_left = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
         res_left = None
         if tgt_left is not None:
-            res_left = inverse_kinematics(self.left, tgt_left, q0_left, backend=backend, **ik_kwargs)
+            res_left = inverse_kinematics(self.left, tgt_left, q0_left, **ik_kwargs)
         else:
             res_left = {'q': q0_left, 'success': True}
 
@@ -89,7 +86,7 @@ class BiRelativeIKSolverTorch(BiIndependentIKSolverTorch):
 
         res_right = None
         if T_right_constrained is not None:
-            res_right = inverse_kinematics(self.right, T_right_constrained, q0_right, backend=backend, **ik_kwargs)
+            res_right = inverse_kinematics(self.right, T_right_constrained, q0_right, **ik_kwargs)
         else:
             res_right = {'q': q0_right, 'success': True}
 
@@ -112,7 +109,6 @@ class BiMirrorIKSolverTorch(BiIndependentIKSolverTorch):
               q0_left: Optional[Sequence[float]] = None,
               q0_right: Optional[Sequence[float]] = None,
               mirror_axis: str = 'x',
-              backend: str = 'torch',
               T_left_initial=None,
               T_right_initial=None,
               **ik_kwargs) -> Dict[str, Any]:
@@ -122,7 +118,6 @@ class BiMirrorIKSolverTorch(BiIndependentIKSolverTorch):
         :param q0_left: Initial left configuration
         :param q0_right: Initial right configuration
         :param mirror_axis: Mirror axis 'x'|'y'|'z'
-        :param backend: Backend string
         :return: Result dict
         """
         import numpy as np
@@ -148,4 +143,4 @@ class BiMirrorIKSolverTorch(BiIndependentIKSolverTorch):
 
         tgt_left = target_left
 
-        return super().solve(tgt_left, tgt_right, q0_left, q0_right, backend=backend, **ik_kwargs)
+        return super().solve(tgt_left, tgt_right, q0_left, q0_right, **ik_kwargs)

@@ -38,8 +38,8 @@ def numerical_jacobian_block_diagonal(robot, q_left, q_right, epsilon=1e-6):
     Uses the built-in numeric Jacobian method for accuracy.
     """
     # Use built-in numeric method for each arm
-    J_left_num = robot.left_model.jacobian(q_left, backend='numpy', method='numeric', epsilon=epsilon)
-    J_right_num = robot.right_model.jacobian(q_right, backend='numpy', method='numeric', epsilon=epsilon)
+    J_left_num = robot.left_model.jacobian(q_left, method='numeric', epsilon=epsilon)
+    J_right_num = robot.right_model.jacobian(q_right, method='numeric', epsilon=epsilon)
     
     # Build block-diagonal
     n_left = J_left_num.shape[1]
@@ -62,7 +62,7 @@ def numerical_jacobian_relative(robot, q_left, q_right, epsilon=1e-6):
     
     return relative_jacobian(
         robot.left_model, robot.right_model,
-        q_left, q_right, backend='numpy'
+        q_left, q_right
     )
 
 
@@ -77,7 +77,7 @@ class TestBimanualJacobian:
         q_right = np.random.uniform(-0.5, 0.5, 7)
         
         # Analytical Jacobian
-        J_analytical = bimanual_robot.jacobian(q_left, q_right, backend='numpy', mode='indep')
+        J_analytical = bimanual_robot.jacobian(q_left, q_right, mode='indep')
         
         # Numerical Jacobian
         J_numerical = numerical_jacobian_block_diagonal(bimanual_robot, q_left, q_right)
@@ -116,7 +116,7 @@ class TestBimanualJacobian:
         # Analytical Jacobian (torch)
         q_left_torch = torch.tensor(q_left, dtype=torch.float64)
         q_right_torch = torch.tensor(q_right, dtype=torch.float64)
-        J_analytical = bimanual_robot.jacobian(q_left_torch, q_right_torch, backend='torch', mode='indep')
+        J_analytical = bimanual_robot.jacobian(q_left_torch, q_right_torch, mode='indep')
         J_analytical = J_analytical.detach().cpu().numpy()
         
         # Numerical Jacobian
@@ -139,7 +139,7 @@ class TestBimanualJacobian:
         q_right = np.random.uniform(-0.5, 0.5, 7)
         
         # Analytical Jacobian
-        J_analytical = bimanual_robot.jacobian(q_left, q_right, backend='numpy', mode='relative')
+        J_analytical = bimanual_robot.jacobian(q_left, q_right, mode='relative')
         
         # Numerical Jacobian
         J_numerical = numerical_jacobian_relative(bimanual_robot, q_left, q_right)
@@ -170,7 +170,7 @@ class TestBimanualJacobian:
         # Analytical Jacobian (torch)
         q_left_torch = torch.tensor(q_left, dtype=torch.float64)
         q_right_torch = torch.tensor(q_right, dtype=torch.float64)
-        J_analytical = bimanual_robot.jacobian(q_left_torch, q_right_torch, backend='torch', mode='relative')
+        J_analytical = bimanual_robot.jacobian(q_left_torch, q_right_torch, mode='relative')
         J_analytical = J_analytical.detach().cpu().numpy()
         
         # Numerical Jacobian
@@ -196,12 +196,12 @@ class TestBimanualJacobian:
         q_right = np.random.uniform(-0.5, 0.5, 7)
         
         # NumPy Jacobian (independent)
-        J_numpy = bimanual_robot.jacobian(q_left, q_right, backend='numpy', mode='indep')
+        J_numpy = bimanual_robot.jacobian(q_left, q_right, mode='indep')
         
         # Torch Jacobian (independent)
         q_left_torch = torch.tensor(q_left, dtype=torch.float64)
         q_right_torch = torch.tensor(q_right, dtype=torch.float64)
-        J_torch = bimanual_robot.jacobian(q_left_torch, q_right_torch, backend='torch', mode='indep')
+        J_torch = bimanual_robot.jacobian(q_left_torch, q_right_torch, mode='indep')
         J_torch = J_torch.detach().cpu().numpy()
         
         # Check consistency
@@ -214,10 +214,10 @@ class TestBimanualJacobian:
         assert max_error < 1e-7, f"Backend inconsistency: {max_error:.2e}"
         
         # NumPy Jacobian (relative)
-        J_numpy_rel = bimanual_robot.jacobian(q_left, q_right, backend='numpy', mode='relative')
+        J_numpy_rel = bimanual_robot.jacobian(q_left, q_right, mode='relative')
         
         # Torch Jacobian (relative)
-        J_torch_rel = bimanual_robot.jacobian(q_left_torch, q_right_torch, backend='torch', mode='relative')
+        J_torch_rel = bimanual_robot.jacobian(q_left_torch, q_right_torch, mode='relative')
         J_torch_rel = J_torch_rel.detach().cpu().numpy()
         
         # Check consistency
@@ -235,13 +235,13 @@ class TestBimanualJacobian:
         q_right = np.zeros(7)
         
         # Independent mode
-        J_indep = bimanual_robot.jacobian(q_left, q_right, backend='numpy', mode='indep')
+        J_indep = bimanual_robot.jacobian(q_left, q_right, mode='indep')
         assert J_indep.shape == (12, 14)
         assert not np.any(np.isnan(J_indep)), "Jacobian contains NaN values"
         assert not np.any(np.isinf(J_indep)), "Jacobian contains Inf values"
         
         # Relative mode
-        J_rel = bimanual_robot.jacobian(q_left, q_right, backend='numpy', mode='relative')
+        J_rel = bimanual_robot.jacobian(q_left, q_right, mode='relative')
         assert J_rel.shape == (6, 14)
         assert not np.any(np.isnan(J_rel)), "Relative Jacobian contains NaN values"
         assert not np.any(np.isinf(J_rel)), "Relative Jacobian contains Inf values"

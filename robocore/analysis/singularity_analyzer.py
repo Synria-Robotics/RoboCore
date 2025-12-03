@@ -80,7 +80,7 @@ class SingularityAnalyzer:
             q_np = _np.asarray(q.detach().cpu(), dtype=float)
         else:
             q_np = _np.asarray(q, dtype=float)
-        Jn = jacobian(self.model, q_np, backend='numpy', method='numeric', use_central_diff=True)
+        Jn = jacobian(self.model, q_np, method='numeric', use_central_diff=True)
         # jacobian returns 6xN numpy array; convert to list of lists for existing logic
         J = Jn.tolist()
         # Compute singular values

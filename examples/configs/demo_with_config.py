@@ -103,11 +103,14 @@ def compute_kinematics(config: ConfigManager, joint_angles: np.ndarray):
     print(f"Joint Angles: {format_array(joint_angles)} rad")
     print(f"Backend: {fk_backend}")
     
+    # Set global backend for FK
+    import robocore
+    robocore.set_backend(fk_backend)
+    
     # Compute FK
     T_fk = forward_kinematics(
         robot_model, 
         joint_angles, 
-        backend=fk_backend,
         return_end=True
     )
     
@@ -134,11 +137,13 @@ def compute_kinematics(config: ConfigManager, joint_angles: np.ndarray):
     rng = np.random.default_rng(config.cfg.seed or 42)
     q_init = random_q(robot_model, rng)
     
+    # Set global backend for IK
+    robocore.set_backend(ik_cfg.backend)
+    
     ik_result = inverse_kinematics(
         robot_model,
         T_fk,
         q_init,
-        backend=ik_cfg.backend,
         method=ik_cfg.method,
         max_iters=ik_cfg.solver.max_iterations,
         pos_tol=ik_cfg.solver.position_tolerance,
@@ -156,10 +161,12 @@ def compute_kinematics(config: ConfigManager, joint_angles: np.ndarray):
     print_separator("Jacobian Matrix")
     print(f"Method: {jac_method}, Backend: {jac_backend}")
     
+    # Set global backend for Jacobian
+    robocore.set_backend(jac_backend)
+    
     J = jacobian(
         robot_model, 
         joint_angles, 
-        backend=jac_backend,
         method=jac_method
     )
     

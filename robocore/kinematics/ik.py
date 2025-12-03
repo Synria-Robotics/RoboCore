@@ -34,7 +34,6 @@ def inverse_kinematics(
     target_pose: Sequence[Sequence[float]] | np.ndarray,
     q0: Sequence[float],
     *,
-    backend: str = 'auto',
     method: str = 'dls',
     multi_start: int = 0,
     multi_noise: float = 0.3,
@@ -58,18 +57,17 @@ def inverse_kinematics(
     :param model: RobotModel instance
     :param target_pose: 4x4 pose
     :param q0: Initial configuration
-    :param backend: 'auto'|'numpy'|'torch'
     :param method: 'pinv'|'dls'|'transpose'
     :param multi_start: Restart trials
     :param multi_noise: Gaussian noise scale (radians)
     :param random_seed: Seed for reproducibility
-    :param torch_device: Torch device when using torch backend
-    :param torch_dtype: Torch dtype when using torch backend
+    :param torch_device: Torch device when using torch backend (uses global backend setting)
+    :param torch_dtype: Torch dtype when using torch backend (uses global backend setting)
     :param return_all: Return all solutions
     :param solver_kwargs: Extra kwargs passed to solver
     :return: IK result dict
     """
-    b = get_backend() if backend == 'auto' else backend
+    b = get_backend()
 
     rng = np.random.default_rng(random_seed) if random_seed is not None else None
 

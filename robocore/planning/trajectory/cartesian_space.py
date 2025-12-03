@@ -34,7 +34,6 @@ def linear_cartesian_trajectory(
     duration: float,
     num_points: int = 50,
     q_init: Optional[np.ndarray] = None,
-    ik_backend: str = 'numpy',
     ik_method: str = 'dls',
     **ik_kwargs
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -58,8 +57,6 @@ def linear_cartesian_trajectory(
         Number of waypoints
     q_init : np.ndarray, optional
         Initial joint guess for IK (default: zeros)
-    ik_backend : str
-        IK backend ('numpy' or 'torch')
     ik_method : str
         IK method ('dls', 'jacobian', etc.)
     **ik_kwargs
@@ -83,8 +80,8 @@ def linear_cartesian_trajectory(
     >>> q_start = np.zeros(6)
     >>> q_end = np.array([1.0, 0.5, -0.3, 0.0, 0.5, 0.0])
     >>> 
-    >>> T_start = forward_kinematics(model, q_start, backend='numpy', return_end=True)
-    >>> T_end = forward_kinematics(model, q_end, backend='numpy', return_end=True)
+    >>> T_start = forward_kinematics(model, q_start, return_end=True)
+    >>> T_end = forward_kinematics(model, q_end, return_end=True)
     >>> 
     >>> t, poses, q = linear_cartesian_trajectory(model, T_start, T_end, duration=2.0)
     """
@@ -146,7 +143,6 @@ def linear_cartesian_trajectory(
             robot_model,
             T,
             q_current,
-            backend=ik_backend,
             method=ik_method,
             **ik_kwargs
         )
@@ -173,7 +169,6 @@ def circular_cartesian_trajectory(
     num_points: int = 50,
     orientation: Union[str, np.ndarray] = 'constant',
     q_init: Optional[np.ndarray] = None,
-    ik_backend: str = 'numpy',
     ik_method: str = 'dls',
     **ik_kwargs
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -314,7 +309,7 @@ def circular_cartesian_trajectory(
         # Solve IK
         ik_result = inverse_kinematics(
             robot_model, T, q_current,
-            backend=ik_backend, method=ik_method, **ik_kwargs
+ method=ik_method, **ik_kwargs
         )
         
         if not ik_result['success']:
@@ -327,7 +322,7 @@ def circular_cartesian_trajectory(
             # For 'constant' orientation, save first orientation
             if use_constant_orientation and R_constant is None:
                 from robocore.kinematics.fk import forward_kinematics
-                T_fk = forward_kinematics(robot_model, q[i], backend='numpy', return_end=True)
+                T_fk = forward_kinematics(robot_model, q[i], return_end=True)
                 R_constant = T_fk[:3, :3]
     
     return t, poses, q
@@ -339,7 +334,6 @@ def cartesian_waypoint_trajectory(
     durations: Union[np.ndarray, float],
     num_points_per_segment: int = 50,
     q_init: Optional[np.ndarray] = None,
-    ik_backend: str = 'numpy',
     ik_method: str = 'dls',
     **ik_kwargs
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -410,7 +404,6 @@ def cartesian_waypoint_trajectory(
             robot_model, pose_start, pose_end, duration,
             num_points=num_points_per_segment,
             q_init=q_seg_init,
-            ik_backend=ik_backend,
             ik_method=ik_method,
             **ik_kwargs
         )

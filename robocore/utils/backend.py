@@ -23,6 +23,8 @@ import threading
 from typing import Optional, Literal, Any
 import numpy as np
 
+from robocore.utils.beauty_logger import beauty_print
+
 # Thread-safe singleton
 _lock = threading.Lock()
 _backend_manager = None
@@ -105,6 +107,9 @@ class BackendManager:
                 self._dtype = dtype
             else:
                 self._dtype = np.float64
+
+        beauty_print(f"Backend set to {backend} on device {self._device} with dtype {self._dtype}")
+
     
     def get_backend(self) -> str:
         """Get current backend name."""

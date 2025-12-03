@@ -22,6 +22,8 @@ Website: https://synriarobotics.ai
 import numpy as np
 import argparse
 import time
+
+import robocore as rc
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.fk import forward_kinematics
 from robocore.utils.beauty_logger import beauty_print_array, beauty_print
@@ -29,6 +31,9 @@ from robocore.transform.conversions import *
 
 
 def main(args):
+    backend = args.backend
+    rc.set_backend(backend)
+
     start_time = time.time()
     model_path = args.model_path
     end_link = args.end_link
@@ -38,7 +43,7 @@ def main(args):
     robot_model.summary(show_chain=True)
     robot_model.print_tree(show_fixed=True)
 
-    T_fk = forward_kinematics(robot_model, joint_angles, backend='numpy', return_end=True)
+    T_fk = forward_kinematics(robot_model, joint_angles, return_end=True)
     position_fk = T_fk[:3, 3]
     rotation_fk = T_fk[:3, :3]
 
@@ -85,6 +90,8 @@ if __name__ == "__main__":
                         help='Path to URDF file (default: Alicia-D)')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
     parser.add_argument('--joint-angles', type=float, nargs='+', default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2],
-                        help='Joint angles in radians') 
+                        help='Joint angles in radians')
+    parser.add_argument('--backend', type=str, default='numpy',
+                        help='Backend to use for computation (default: numpy)')
     args = parser.parse_args()
     main(args)

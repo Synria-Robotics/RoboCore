@@ -27,6 +27,7 @@ from pathlib import Path
 from robocore.modeling.robot_model import RobotModel
 from robocore.analysis.singularity_analyzer import SingularityAnalyzer
 from robocore.kinematics.jacobian import jacobian
+import robocore
 
 
 def random_q_in_limits(model, seed=42):
@@ -73,7 +74,7 @@ class TestSingularityAnalyzer:
         q = random_q_in_limits(robot_model, seed=42)
         
         try:
-            manip = analyzer.manipulability(q, backend='numpy')
+            manip = analyzer.manipulability(q, )
             
             # Manipulability should be non-negative
             assert manip >= 0
@@ -91,7 +92,7 @@ class TestSingularityAnalyzer:
         q = random_q_in_limits(robot_model, seed=42)
         
         try:
-            cond = analyzer.condition_number(q, backend='numpy')
+            cond = analyzer.condition_number(q, )
             
             # Condition number should be >= 1
             assert cond >= 1.0
@@ -108,7 +109,7 @@ class TestSingularityAnalyzer:
             q = random_q_in_limits(robot_model, seed=seed)
             
             try:
-                is_singular = analyzer.is_singular(q, threshold=1e-3, backend='numpy')
+                is_singular = analyzer.is_singular(q, threshold=1e-3, )
                 assert isinstance(is_singular, (bool, np.bool_))
             except AttributeError:
                 pytest.skip("is_singular method not implemented")
@@ -116,7 +117,7 @@ class TestSingularityAnalyzer:
     def test_jacobian_rank(self, robot_model):
         """Test Jacobian rank computation."""
         q = random_q_in_limits(robot_model, seed=42)
-        J = jacobian(robot_model, q, backend='numpy')
+        J = jacobian(robot_model, q, )
         
         # Compute rank
         rank = np.linalg.matrix_rank(J)
@@ -135,7 +136,7 @@ class TestSingularityAnalyzer:
         q = random_q_in_limits(robot_model, seed=42)
         
         try:
-            index = analyzer.singularity_index(q, backend='numpy')
+            index = analyzer.singularity_index(q, )
             
             # Index should be between 0 and 1 (normalized)
             # Or some other defined range
@@ -157,7 +158,6 @@ class TestSingularityMapping:
         try:
             sing_map = analyzer.map_singularities(
                 num_samples=100,  # Small sample for speed
-                backend='numpy'
             )
             
             assert sing_map is not None
@@ -173,7 +173,6 @@ class TestSingularityMapping:
             critical = analyzer.find_critical_configs(
                 num_samples=50,
                 threshold=0.01,
-                backend='numpy'
             )
             
             # Should return list of configurations
@@ -195,7 +194,7 @@ class TestSingularityTypes:
         q_zero = np.zeros(robot_model.num_dof)
         
         try:
-            sing_type = analyzer.classify_singularity(q_zero, backend='numpy')
+            sing_type = analyzer.classify_singularity(q_zero, )
             
             # Should return some classification
             # e.g., 'boundary', 'internal', 'elbow', etc.
@@ -206,7 +205,7 @@ class TestSingularityTypes:
     def test_null_space_dimension(self, robot_model):
         """Test null space dimension at different configurations."""
         q = random_q_in_limits(robot_model, seed=42)
-        J = jacobian(robot_model, q, backend='numpy')
+        J = jacobian(robot_model, q, )
         
         # Compute null space
         rank = np.linalg.matrix_rank(J)

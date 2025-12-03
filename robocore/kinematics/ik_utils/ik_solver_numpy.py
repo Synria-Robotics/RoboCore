@@ -137,11 +137,11 @@ class IKSolverNumPy:
         for it in range(1, self.max_iters + 1):
             # Compute current pose - use standalone FK to avoid circular dependency
             if target_link is None:
-                fk = forward_kinematics(self.model, q.tolist(), backend='numpy', return_end=True)
+                fk = forward_kinematics(self.model, q.tolist(), return_end=True)
             else:
                 # Partial FK: reuse Jacobian solver's helper (or replicate minimal logic)
                 fk = self.jacobian_solver._fk_until(q, target_link) if hasattr(
-                    self.jacobian_solver, '_fk_until') else forward_kinematics(self.model, q.tolist(), backend='numpy', return_end=True)
+                    self.jacobian_solver, '_fk_until') else forward_kinematics(self.model, q.tolist(), return_end=True)
             if isinstance(fk, np.ndarray):
                 R_current = fk[:3, :3]
                 p_current = fk[:3, 3]
@@ -179,7 +179,7 @@ class IKSolverNumPy:
                     r_ori_tol = refine_ori_tol or (self.ori_tol * 0.2)
                     q_ref = q.copy()
                     for _r in range(refine_iters):
-                        fk_r = forward_kinematics(self.model, q_ref.tolist(), backend='numpy', return_end=True)
+                        fk_r = forward_kinematics(self.model, q_ref.tolist(), return_end=True)
                         if isinstance(fk_r, np.ndarray):
                             R_r = fk_r[:3, :3]; p_r = fk_r[:3, 3]
                         else:
@@ -324,7 +324,7 @@ class IKSolverNumPy:
         # Return best solution found
         # 失败：返回迭代中最优残差对应的 pos/ori 误差（若未更新保持最后一次计算）
         if not np.isfinite(best_pos_err) or not np.isfinite(best_ori_err):
-            fk_best = forward_kinematics(self.model, best_q.tolist(), backend='numpy', return_end=True)
+            fk_best = forward_kinematics(self.model, best_q.tolist(), return_end=True)
             if isinstance(fk_best, np.ndarray):
                 R_best = fk_best[:3, :3]; p_best = fk_best[:3, 3]
             else:

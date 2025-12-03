@@ -4,6 +4,7 @@
 import numpy as np
 from robocore.modeling.robot_model import BimanualRobotModel
 from robocore.utils.path import get_robocore_path
+import robocore
 
 # 加载机器人
 mjcf_path = get_robocore_path("assets/robot_descriptions/mjcf/Bessica-D_v1_0/Bessica_D_Covered_Interactive")
@@ -17,16 +18,19 @@ print("=" * 80)
 print("双臂雅克比快速诊断")
 print("=" * 80)
 
+# Set global backend
+robocore.set_backend('numpy')
+
 # 1. 测试单臂雅克比
 print("\n1. 单臂雅克比检查:")
-J_left = robot.left_model.jacobian(q_left, backend='numpy')
-J_right = robot.right_model.jacobian(q_right, backend='numpy')
+J_left = robot.left_model.jacobian(q_left)
+J_right = robot.right_model.jacobian(q_right)
 print(f"   左臂雅克比形状: {J_left.shape}")
 print(f"   右臂雅克比形状: {J_right.shape}")
 
 # 2. 测试双臂雅克比（independent）
 print("\n2. Block-diagonal 雅克比:")
-J_bi = robot.jacobian(q_left, q_right, backend='numpy', mode='indep')
+J_bi = robot.jacobian(q_left, q_right, mode='indep')
 print(f"   形状: {J_bi.shape}")
 print(f"   左上块 (0:6, 0:7):\n{J_bi[0:6, 0:7]}")
 print(f"   右下块 (6:12, 7:14):\n{J_bi[6:12, 7:14]}")
@@ -47,8 +51,8 @@ epsilon = 1e-6
 q_right_plus = q_right.copy()
 q_right_plus[0] += epsilon
 
-result_0 = robot.fk(q_left, q_right, backend='numpy', mode='indep')
-result_plus = robot.fk(q_left, q_right_plus, backend='numpy', mode='indep')
+result_0 = robot.fk(q_left, q_right, mode='indep')
+result_plus = robot.fk(q_left, q_right_plus, mode='indep')
 
 T_right_0 = np.array(result_0['right'])
 T_right_plus = np.array(result_plus['right'])

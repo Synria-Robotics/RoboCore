@@ -27,6 +27,7 @@ import pytest
 from pathlib import Path
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.jacobian import jacobian
+import robocore
 from robocore.kinematics.jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
 from robocore.kinematics.jacobian_utils.jacobian_solver_numpy import JacobianSolverNumPy
 
@@ -66,10 +67,12 @@ class TestJacobianConsistency:
         q_test = random_q_in_limits(robot_model, seed=42)
         
         # NumPy Jacobian
-        J_np = jacobian(robot_model, q_test, backend='numpy', method='analytic')
+        robocore.set_backend('numpy')
+        J_np = jacobian(robot_model, q_test, method='analytic')
         
         # PyTorch Jacobian
-        J_torch = jacobian(robot_model, q_test, backend='torch', method='analytic', device='cpu', dtype=torch.float64)
+        robocore.set_backend('torch', device='cpu')
+        J_torch = jacobian(robot_model, q_test, method='analytic', device='cpu', dtype=torch.float64)
         J_torch_np = J_torch.cpu().numpy()
         
         # Should match to numerical precision
@@ -104,11 +107,14 @@ class TestJacobianConsistency:
         """Test that numeric Jacobian approximates analytic Jacobian."""
         q_test = random_q_in_limits(robot_model, seed=42)
         
+        # Set global backend
+        robocore.set_backend('numpy')
+        
         # Analytic
-        J_analytic = jacobian(robot_model, q_test, backend='numpy', method='analytic')
+        J_analytic = jacobian(robot_model, q_test, method='analytic')
         
         # Numeric (central difference with smaller epsilon for better accuracy)
-        J_numeric = jacobian(robot_model, q_test, backend='numpy', method='numeric', 
+        J_numeric = jacobian(robot_model, q_test, method='numeric', 
                             epsilon=1e-7, use_central_diff=True)
         
         # Should be close (numeric has discretization error)

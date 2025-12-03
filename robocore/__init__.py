@@ -32,3 +32,11 @@ from . import analysis
 from . import configs
 from . import utils
 
+# Export backend management functions
+from .utils.backend import set_backend, get_backend
+
+__all__ = [
+    'set_backend',
+    'get_backend',
+]
+

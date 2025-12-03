@@ -330,7 +330,6 @@ class RobotModel:
             ret = forward_kinematics(
                 self,
                 joint_value,
-                backend='numpy',
                 return_all_links=True
             )
         else:
@@ -552,15 +551,14 @@ class RobotModel:
 
 
     # ------------- Kinematics ---------------------
-    def fk(self, q: Sequence[float] | Any, *, backend: str = 'auto', return_end: bool = False,
+    def fk(self, q: Sequence[float] | Any, *, return_end: bool = False,
            device: Any | None = None, dtype: Any | None = None) -> Dict[str, Any] | Any:
         """Compute forward kinematics.
 
         :param q: joint configuration length = dof.
-        :param backend: 'auto'|'numpy'|'torch'
         :param return_end: if True, return only end-effector pose.
-        :param device: torch device (if backend='torch')
-        :param dtype: torch dtype (if backend='torch')
+        :param device: torch device (uses global backend setting)
+        :param dtype: torch dtype (uses global backend setting)
         :return: dict link_name -> 4x4 pose matrix or single 4x4 pose if return_end=True
         """
         if len(q) != self.num_chain_dof:
@@ -568,14 +566,13 @@ class RobotModel:
         return forward_kinematics(
             self,
             q,
-            backend=backend,
             return_end=return_end,
             device=device,
             dtype=dtype
         )
 
     def ik(self, target_pose: List[List[float]], q_initial: Optional[Sequence[float]] = None,
-           backend: str = 'auto', method: str = 'pinv', max_iters: int = 120,
+           method: str = 'pinv', max_iters: int = 120,
            pos_tol: float = 1e-4, ori_tol: float = 1e-4, multi_start: int = 0,
            multi_noise: float = 0.3, random_seed: Optional[int] = None,
            torch_device: Optional[str] = None, torch_dtype: Optional[Any] = None,
@@ -583,7 +580,6 @@ class RobotModel:
         """Compute IK for the robot model.
         :param target_pose: 4x4 target pose as nested list.
         :param q_initial: initial guess (if None, uses zero vector).
-        :param backend: 'auto'|'numpy'|'torch'
         :param method: 'pinv'|'dls'|'transpose'
         :param max_iters: maximum iterations.
         :param pos_tol: position tolerance (meters).
@@ -591,8 +587,8 @@ class RobotModel:
         :param multi_start: extra random restarts count (0 disable)
         :param multi_noise: gaussian noise scale (radians) for restarts
         :param random_seed: seed for reproducibility
-        :param torch_device: specify torch device when backend='torch' (e.g. 'cpu' or 'cuda')
-        :param torch_dtype: specify torch dtype (e.g. torch.float32) when backend='torch'
+        :param torch_device: specify torch device (uses global backend setting)
+        :param torch_dtype: specify torch dtype (uses global backend setting)
         :param solver_kwargs: additional solver parameters.
         :return: dict with keys 'q', 'success', 'pos_err', 'ori_err', 'iters'
         """
@@ -604,7 +600,6 @@ class RobotModel:
             self,
             target_pose,
             q_initial,
-            backend=backend,
             method=method,
             max_iters=max_iters,
             pos_tol=pos_tol,
@@ -617,7 +612,7 @@ class RobotModel:
             **solver_kwargs
         )
 
-    def jacobian(self, q: Sequence[float] | Any, *, backend: str = 'auto', method: str = 'analytic',
+    def jacobian(self, q: Sequence[float] | Any, *, method: str = 'analytic',
                  epsilon: float = 5e-5, use_central_diff: bool = True,
                  device: Any | None = None, dtype: Any | None = None,
                  target_link: str | None = None,
@@ -627,12 +622,11 @@ class RobotModel:
         The Jacobian relates joint velocities to end-effector spatial velocity
         (linear + angular). Uses axis-angle representation for orientation.
         :param q: joint configuration of length = dof.
-        :param backend: 'auto'|'numpy'|'torch'
         :param method: 'analytic'|'numeric'|'autograd'
         :param epsilon: finite-difference step size (numeric method only).
         :param use_central_diff: use central differences for numeric method (more accurate than forward).
-        :param device: torch device for torch backend (e.g., 'cpu', 'cuda').
-        :param dtype: torch dtype for torch backend. Defaults to float64 if omitted.
+        :param device: torch device (uses global backend setting).
+        :param dtype: torch dtype (uses global backend setting). Defaults to float64 if omitted.
         :return: 6×n Jacobian matrix (numpy.ndarray or torch.Tensor).
         """
         if len(q) != self.num_chain_dof:
@@ -640,7 +634,6 @@ class RobotModel:
         return jacobian(
             self,
             q,
-            backend=backend,
             method=method,
             epsilon=epsilon,
             use_central_diff=use_central_diff,
@@ -735,7 +728,7 @@ class RobotModel:
 
     def ik_tasks(self, tasks: List[Union[Dict[str, Any], Any]], q0_by_group: Dict[str, Sequence[float]], *,
                  mode: str = 'weighted', max_iters: int = 100, tol: float = 1e-3,
-                 damping: float = 1e-3, step_limit: float = 0.2, backend: str = 'auto',
+                 damping: float = 1e-3, step_limit: float = 0.2,
                  verbose: bool = False) -> Dict[str, Any]:
         """
         :param tasks: List of task dictionaries or Task objects
@@ -745,7 +738,6 @@ class RobotModel:
         :param tol: Convergence tolerance
         :param damping: DLS damping factor
         :param step_limit: Maximum step size
-        :param backend: Backend for computation
         :param verbose: Print progress
         :return: Solution results
         """
@@ -771,7 +763,7 @@ class RobotModel:
             else:  # Dictionary
                 task_dicts.append(task)
 
-        b = get_backend() if backend == 'auto' else backend
+        b = get_backend()
         
         # Use new multi-chain solver
         from robocore.kinematics.solvers.multi_chain_solver import MultiChainIKSolver
@@ -797,7 +789,7 @@ class RobotModel:
         if mode == 'weighted':
             return solver.solve_weighted(
                 task_objs, q0_by_group, max_iters=max_iters, tol=tol,
-                damping=damping, step_limit=step_limit, backend=b, verbose=verbose
+                damping=damping, step_limit=step_limit, verbose=verbose
             )
         elif mode == 'hierarchical':
             # Organize by priority
@@ -806,7 +798,7 @@ class RobotModel:
             
             return solver.solve_hierarchical(
                 task_groups, q0_by_group, max_iters=max_iters, tol=tol,
-                damping=damping, step_limit=step_limit, backend=b, verbose=verbose
+                damping=damping, step_limit=step_limit, verbose=verbose
             )
         else:
             raise ValueError("Unknown mode, expected 'weighted'|'hierarchical'")
@@ -819,7 +811,6 @@ class RobotModel:
                                tol: float = 1e-3,
                                damping: float = 1e-3,
                                step_limit: float = 0.2,
-                               backend: str = 'numpy',
                                verbose: bool = False) -> Dict[str, Any]:
         """
         :param tasks: List of task dicts. Absolute: {'type':'absolute','group':name,'target':T,'weight':w,'row_mask':[...]} Relative: {'type':'relative','group_a':A,'group_b':B,'target':T_rel,'weight':w,'row_mask':[...]}
@@ -828,7 +819,6 @@ class RobotModel:
         :param tol: Convergence tolerance
         :param damping: DLS damping
         :param step_limit: Joint step limit
-        :param backend: Backend for per-chain ops
         :param verbose: Print iteration logs
         :return: {'q_by_group', 'success', 'iters', 'residual'}
         """
@@ -862,10 +852,10 @@ class RobotModel:
                     g = task['group']
                     model = self._groups[g]
                     qg = slice_group(q, g)
-                    T_cur = model.fk(qg, backend=backend, return_end=True)
+                    T_cur = model.fk(qg, return_end=True)
                     T_cur = T_cur.detach().cpu().numpy() if hasattr(T_cur, 'detach') else np.array(T_cur)
                     e = self._pose_error_np(T_cur, np.array(task['target']))
-                    Jg = jacobian(model, qg, backend=backend)
+                    Jg = jacobian(model, qg)
                     Jg = Jg.detach().cpu().numpy() if hasattr(Jg, 'detach') else np.array(Jg)
                     # pad into whole vector
                     Jpad = np.zeros((6, n_total))
@@ -887,15 +877,15 @@ class RobotModel:
                     mb = self._groups[gb]
                     qa = slice_group(q, ga)
                     qb = slice_group(q, gb)
-                    Ta = ma.fk(qa, backend=backend, return_end=True)
-                    Tb = mb.fk(qb, backend=backend, return_end=True)
+                    Ta = ma.fk(qa, return_end=True)
+                    Tb = mb.fk(qb, return_end=True)
                     if hasattr(Ta, 'detach'):
                         Ta = Ta.detach().cpu().numpy()
                         Tb = Tb.detach().cpu().numpy()
                     Ta = np.array(Ta)
                     Tb = np.array(Tb)
                     e = relative_pose_error(Ta, Tb, np.array(task['target']))
-                    Jr = relative_jacobian(ma, mb, qa, qb, backend=backend)
+                    Jr = relative_jacobian(ma, mb, qa, qb)
                     Jr = Jr.detach().cpu().numpy() if hasattr(Jr, 'detach') else np.array(Jr)
                     # place Jr into columns of a+b
                     Jpad = np.zeros((Jr.shape[0], n_total))
@@ -1022,7 +1012,7 @@ class RobotModel:
         # Lazy-load analyzer
         if self._workspace_analyzer is None:
             WorkspaceAnalyzer = _get_workspace_analyzer()
-            self._workspace_analyzer = WorkspaceAnalyzer(self, backend='numpy')
+            self._workspace_analyzer = WorkspaceAnalyzer(self)
 
         # Compute workspace
         points = self._workspace_analyzer.compute_reachable_workspace(
@@ -1246,12 +1236,11 @@ class BimanualRobotModel(RobotModel):
         beauty_print(f"  Right arm: {self.right_model.num_chain_dof} DOF, end: {right_end_link}")
 
     def fk(self, q_left: Sequence[float], q_right: Sequence[float],
-           *, backend: str = 'auto', mode: str = 'indep', **kwargs) -> Dict[str, Any]:
+           *, mode: str = 'indep', **kwargs) -> Dict[str, Any]:
         """Compute forward kinematics for both arms.
         
         :param q_left: Left arm joint configuration
         :param q_right: Right arm joint configuration
-        :param backend: 'auto'|'numpy'|'torch'
         :param mode: 'indep'|'relative'|'mirror'
         :return: Dict with 'left' and 'right' end-effector poses
         """
@@ -1259,13 +1248,13 @@ class BimanualRobotModel(RobotModel):
         return bimanual_forward_kinematics(
             self.left_model, self.right_model,
             q_left, q_right,
-            backend=backend, mode=mode, **kwargs
+            mode=mode, **kwargs
         )
 
     def ik(self, target_left=None, target_right=None,
            q0_left: Optional[Sequence[float]] = None,
            q0_right: Optional[Sequence[float]] = None,
-           *, backend: str = 'auto', method: str = 'dls',
+           *, method: str = 'dls',
            coordination: str = 'indep',
            T_rel_grasp=None, T_left_initial=None, T_right_initial=None,
            **kwargs) -> Dict[str, Any]:
@@ -1275,7 +1264,6 @@ class BimanualRobotModel(RobotModel):
         :param target_right: Right arm target pose (4x4)
         :param q0_left: Initial left configuration
         :param q0_right: Initial right configuration
-        :param backend: 'auto'|'numpy'|'torch'
         :param method: 'dls'|'pinv'|'transpose'
         :param coordination: 'indep'|'relative_pose'|'mirror'
         :param T_rel_grasp: Relative grasp transform (for relative_pose mode)
@@ -1294,7 +1282,7 @@ class BimanualRobotModel(RobotModel):
             self.left_model, self.right_model,
             target_left=target_left, target_right=target_right,
             q0_left=q0_left, q0_right=q0_right,
-            backend=backend, method=method, coordination=coordination,
+            method=method, coordination=coordination,
             T_rel_grasp=T_rel_grasp,
             T_left_initial=T_left_initial,
             T_right_initial=T_right_initial,
@@ -1302,12 +1290,11 @@ class BimanualRobotModel(RobotModel):
         )
 
     def jacobian(self, q_left: Sequence[float], q_right: Sequence[float],
-                 *, backend: str = 'auto', mode: str = 'indep', **kwargs) -> Any:
+                 *, mode: str = 'indep', **kwargs) -> Any:
         """Compute Jacobian for both arms.
         
         :param q_left: Left arm joint configuration
         :param q_right: Right arm joint configuration
-        :param backend: 'auto'|'numpy'|'torch'
         :param mode: 'indep'|'relative'
         :return: Block-diagonal or relative Jacobian matrix
         """
@@ -1315,55 +1302,52 @@ class BimanualRobotModel(RobotModel):
         return bimanual_jacobian(
             self.left_model, self.right_model,
             q_left, q_right,
-            backend=backend, mode=mode, **kwargs
+            mode=mode, **kwargs
         )
 
-    def block_jacobian(self, q_by_group: Dict[str, Sequence[float]], *, backend: str = 'auto') -> np.ndarray:
+    def block_jacobian(self, q_by_group: Dict[str, Sequence[float]]) -> np.ndarray:
         """
         :param q_by_group: Mapping name -> joint vector
-        :param backend: 'auto'|'numpy'|'torch'
         :return: Block-diagonal Jacobian for all groups stacked as 6*k rows
         """
         if not self._groups:
             raise ValueError("No groups defined. Call add_groups first.")
 
-        b = get_backend() if backend == 'auto' else backend
+        b = get_backend()
         if b == 'numpy':
             from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_numpy import BiMultiLinkJacobianSolverNumpy
             solver = BiMultiLinkJacobianSolverNumpy(self._groups)
-            return solver.block_jacobian(q_by_group, backend='numpy')
+            return solver.block_jacobian(q_by_group)
         elif b == 'torch':
             from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_torch import BiMultiLinkJacobianSolverTorch
             solver = BiMultiLinkJacobianSolverTorch(self._groups)
-            return solver.block_jacobian(q_by_group, backend='torch')
+            return solver.block_jacobian(q_by_group)
         else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+            raise ValueError("Unsupported backend, expected 'numpy'|'torch'")
     
     def relative_jacobian_between(self, group_a: str, group_b: str,
-                                      q_a: Sequence[float], q_b: Sequence[float], *,
-                                      backend: str = 'auto') -> np.ndarray:
+                                      q_a: Sequence[float], q_b: Sequence[float]) -> np.ndarray:
         """
         :param group_a: First group name
         :param group_b: Second group name
         :param q_a: Joint vector of group_a
         :param q_b: Joint vector of group_b
-        :param backend: 'auto'|'numpy'|'torch'
         :return: 6 x (n_a + n_b) relative Jacobian (pose)
         """
         if not self._groups:
             raise ValueError("No groups defined. Call add_groups first.")
 
-        b = get_backend() if backend == 'auto' else backend
+        b = get_backend()
         if b == 'numpy':
             from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_numpy import BiMultiLinkJacobianSolverNumpy
             solver = BiMultiLinkJacobianSolverNumpy(self._groups)
-            return solver.relative_jacobian_between(group_a, group_b, q_a, q_b, backend='numpy')
+            return solver.relative_jacobian_between(group_a, group_b, q_a, q_b)
         elif b == 'torch':
             from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_torch import BiMultiLinkJacobianSolverTorch
             solver = BiMultiLinkJacobianSolverTorch(self._groups)
-            return solver.relative_jacobian_between(group_a, group_b, q_a, q_b, backend='torch')
+            return solver.relative_jacobian_between(group_a, group_b, q_a, q_b)
         else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+            raise ValueError("Unsupported backend, expected 'numpy'|'torch'")
 
 
 __all__ = ["RobotModel", "BimanualRobotModel", "JointSpec"]

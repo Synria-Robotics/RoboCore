@@ -31,7 +31,6 @@ except ImportError as e:  # pragma: no cover
 
 from ..jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
 from ..fk_utils.fk_solver_torch import FKSolverTorch
-from robocore.utils.backend import set_backend, get_backend
 from robocore.transform import rotation_error, rpy_to_matrix, axis_angle_to_matrix
 try:  # 可能存在设备选择工具
     from ...utils.torch_utils import select_device  # type: ignore
@@ -257,9 +256,6 @@ class IKSolverTorch:
             final_ori_err = float('inf')
 
             for it in range(1, self.max_iters + 1):
-                # Set backend to torch for transform operations
-                set_backend("torch", device=str(self.device), dtype=self.dtype)
-                
                 if target_link is None:
                     T_cur = self.fk_solver.solve(q, return_end_only=True, device=self.device, dtype=self.dtype)["end"]
                 else:
@@ -307,7 +303,6 @@ class IKSolverTorch:
                         r_ori_tol = refine_ori_tol or (self.ori_tol * 0.2)
                         q_ref = q.clone()
                         for _ in range(refine_iters):
-                            set_backend("torch", device=str(self.device), dtype=self.dtype)
                             T_r = self.fk_solver.solve(q_ref, return_end_only=True, device=self.device, dtype=self.dtype)["end"]
                             p_r = T_r[:3, 3]; R_r = T_r[:3, :3]
                             p_e = p_target - p_r
@@ -460,7 +455,6 @@ class IKSolverTorch:
                 if backtrack:
                     prev_total = err_norm
                     for _bt in range(3):
-                        set_backend("torch", device=str(self.device), dtype=self.dtype)
                         T_bt = self.fk_solver.solve(new_q, return_end_only=True, device=self.device, dtype=self.dtype)["end"]
                         p_bt = T_bt[:3, 3]; R_bt = T_bt[:3, :3]
                         pos_bt = torch.linalg.norm(p_target - p_bt).item()

@@ -36,9 +36,9 @@ class BiIndependentIKSolverNumpy:
         tgt_left = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
         tgt_right = target_right.tolist() if hasattr(target_right, 'tolist') else target_right
 
-        res_left = (inverse_kinematics(self.left, tgt_left, q0_left, backend='numpy', **ik_kwargs)
+        res_left = (inverse_kinematics(self.left, tgt_left, q0_left, **ik_kwargs)
                     if tgt_left is not None else {'q': q0_left, 'success': True})
-        res_right = (inverse_kinematics(self.right, tgt_right, q0_right, backend='numpy', **ik_kwargs)
+        res_right = (inverse_kinematics(self.right, tgt_right, q0_right, **ik_kwargs)
                      if tgt_right is not None else {'q': q0_right, 'success': True})
 
         return {
@@ -77,7 +77,7 @@ class BiRelativeIKSolverNumpy(BiIndependentIKSolverNumpy):
         """
         # 1. 先解左臂
         tgt_left = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
-        res_left = (inverse_kinematics(self.left, tgt_left, q0_left, backend='numpy', **ik_kwargs)
+        res_left = (inverse_kinematics(self.left, tgt_left, q0_left, **ik_kwargs)
                     if tgt_left is not None else {'q': q0_left, 'success': True})
         q_left = res_left.get('q', q0_left)
 
@@ -85,7 +85,7 @@ class BiRelativeIKSolverNumpy(BiIndependentIKSolverNumpy):
         T_left_current = self.left.fk(q_left)['end']
         T_right_constrained = T_left_current @ T_rel_grasp if T_rel_grasp is not None else None
 
-        res_right = (inverse_kinematics(self.right, T_right_constrained, q0_right, backend='numpy', **ik_kwargs)
+        res_right = (inverse_kinematics(self.right, T_right_constrained, q0_right, **ik_kwargs)
                      if T_right_constrained is not None else {'q': q0_right, 'success': True})
 
         return {

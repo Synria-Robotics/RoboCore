@@ -28,6 +28,7 @@ from pathlib import Path
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.ik import inverse_kinematics
 from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
+import robocore
 from robocore.kinematics.fk import forward_kinematics
 
 
@@ -65,20 +66,22 @@ class TestIKAccuracy:
         """Test that single-sample IK is consistent across backends."""
         seed = 42
         q_target = random_q_in_limits(robot_model, seed=seed)
-        target_pose = forward_kinematics(robot_model, q_target, backend='numpy', return_end=True)
+        target_pose = forward_kinematics(robot_model, q_target, return_end=True)
         q_init = random_q_in_limits(robot_model, seed=seed + 1)
         
         # NumPy solution
+        robocore.set_backend('numpy')
         result_np = inverse_kinematics(
             robot_model, target_pose, q_init,
-            backend='numpy', method='dls',
+            method='dls',
             max_iters=100, pos_tol=1e-4, ori_tol=1e-4,
         )
         
         # PyTorch single-sample solution
+        robocore.set_backend('torch', device='cpu')
         result_torch = inverse_kinematics(
             robot_model, target_pose, q_init,
-            backend='torch', method='dls',
+            method='dls',
             max_iters=100, pos_tol=1e-4, ori_tol=1e-4,
             torch_device='cpu',
         )
@@ -102,7 +105,7 @@ class TestIKAccuracy:
         target_poses = []
         for i in range(n_samples):
             q = random_q_in_limits(robot_model, seed=seed+i)
-            T = forward_kinematics(robot_model, q, backend='numpy', return_end=True)
+            T = forward_kinematics(robot_model, q, return_end=True)
             q_init = random_q_in_limits(robot_model, seed=seed+n_samples+i)
             
             q_batch.append(q_init)
@@ -115,7 +118,7 @@ class TestIKAccuracy:
         for i in range(n_samples):
             res = inverse_kinematics(
                 robot_model, target_poses[i], q_batch[i],
-                backend='numpy', method='dls',
+                , method='dls',
                 max_iters=100, pos_tol=1e-4, ori_tol=1e-4
             )
             if res['success']:

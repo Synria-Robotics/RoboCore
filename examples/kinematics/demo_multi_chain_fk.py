@@ -48,7 +48,7 @@ def main(args):
     # Test 1: Single-chain FK (legacy method)
     beauty_print("[1] Single-Chain FK (Legacy)", type="module", centered=False)
     start_time = time.time()
-    T_single = forward_kinematics(robot_model, joint_angles, backend='numpy', return_end=True)
+    T_single = forward_kinematics(robot_model, joint_angles, return_end=True)
     time_single = time.time() - start_time
     
     position_single = T_single[:3, 3]
@@ -58,7 +58,7 @@ def main(args):
     # Test 2: Multi-chain FK (new method - all links)
     beauty_print("[2] Multi-Chain FK (All Links)", type="module", centered=False)
     start_time = time.time()
-    poses_all = forward_kinematics(robot_model, joint_angles, backend='numpy', return_all_links=True)
+    poses_all = forward_kinematics(robot_model, joint_angles, return_all_links=True)
     time_multi = time.time() - start_time
     
     beauty_print(f"Computed FK for {len(poses_all)} links:")
@@ -87,8 +87,7 @@ def main(args):
         start_time = time.time()
         poses_subset = forward_kinematics(
             robot_model, 
-            joint_angles, 
-            backend='numpy', 
+            joint_angles,
             return_all_links=True,
             link_names=target_links
         )
@@ -108,14 +107,14 @@ def main(args):
     times_single = []
     for _ in range(n_runs):
         start = time.perf_counter()
-        _ = forward_kinematics(robot_model, joint_angles, backend='numpy', return_end=True)
+        _ = forward_kinematics(robot_model, joint_angles, return_end=True)
         times_single.append(time.perf_counter() - start)
     
     # Benchmark multi-chain FK
     times_multi = []
     for _ in range(n_runs):
         start = time.perf_counter()
-        _ = forward_kinematics(robot_model, joint_angles, backend='numpy', return_all_links=True)
+        _ = forward_kinematics(robot_model, joint_angles, return_all_links=True)
         times_multi.append(time.perf_counter() - start)
     
     avg_single = np.mean(times_single) * 1000
@@ -136,8 +135,7 @@ def main(args):
         
         poses_torch = forward_kinematics(
             robot_model, 
-            q_torch, 
-            backend='torch', 
+            q_torch,
             return_all_links=True,
             device='cpu'
         )
@@ -163,9 +161,12 @@ def main(args):
 
 
 if __name__ == "__main__":
+    import synriard
+    model_path = synriard.get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="urdf")
+    
     parser = argparse.ArgumentParser(description="Multi-Chain Forward Kinematics Demo")
     parser.add_argument('--model-path', type=str,
-                        default=get_robocore_path("assets/robot_descriptions/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml"),
+                        default=model_path,
                         help='Path to model file (default: Alicia-D)')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
     parser.add_argument('--joint-angles', type=float, nargs='+', default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2],

@@ -36,7 +36,6 @@ except Exception:  # pragma: no cover
             return torch.device('cuda')
         return torch.device('cpu')
 
-from robocore.utils.backend import set_backend, get_backend
 from robocore.transform import (
     rpy_to_matrix,
     axis_angle_to_matrix,
@@ -147,12 +146,8 @@ class FKSolverTorch:
             root_link: torch.eye(4, dtype=dtype, device=q.device)
         }
         
-        # Set backend to torch temporarily
-        original_backend = get_backend()
-        set_backend('torch', device=str(q.device), dtype=dtype)
-        
-        try:
-            for joint in self.joint_chain:
+        # Backend should already be set correctly by caller
+        for joint in self.joint_chain:
                 # Ensure parent pose exists (for cases where parent is not base_link)
                 if joint.parent not in poses:
                     poses[joint.parent] = torch.eye(4, dtype=dtype, device=q.device)
@@ -184,9 +179,6 @@ class FKSolverTorch:
                 T_motion = make_transform(R_m, t_m)
                 child_pose = parent_pose @ T_origin @ T_motion
                 poses[joint.child] = child_pose
-        finally:
-            # Restore backend
-            set_backend(original_backend)
         
         poses["end"] = poses.get(self.end_link, list(poses.values())[-1])
         
@@ -218,45 +210,38 @@ class FKSolverTorch:
         # Get robot kinematic chain
         joint_specs = self.actuated_joints
         
-        # Set backend to torch temporarily
-        original_backend = get_backend()
-        set_backend('torch', device=str(device), dtype=dtype)
-        
-        try:
-            # Process each joint in the chain
-            for js in joint_specs:
-                # Get joint angle for this joint across all samples [B]
-                theta = q_batch[:, js.index]
-                
-                # 1. Translation from origin
-                origin_xyz = torch.tensor(js.origin_xyz, device=device, dtype=dtype)  # [3]
-                
-                # 2. Rotation from origin (roll-pitch-yaw) using new transform API
-                origin_rpy = torch.tensor(js.origin_rpy, device=device, dtype=dtype)  # [3]
-                origin_rpy_batch = origin_rpy.unsqueeze(0).repeat(batch_size, 1)  # [B, 3]
-                R_origin = rpy_to_matrix(
-                    origin_rpy_batch[:, 0],
-                    origin_rpy_batch[:, 1],
-                    origin_rpy_batch[:, 2]
-                )  # [B, 3, 3]
-                
-                # 3. Joint rotation (revolute around axis)
-                axis = torch.tensor(js.axis, device=device, dtype=dtype)  # [3]
-                R_joint = self._axis_angle_to_rotation_matrix_batch(axis, theta, device, dtype)  # [B, 3, 3]
-                
-                # Combine rotations: R_total = R_origin @ R_joint
-                R_total = torch.matmul(R_origin, R_joint)  # [B, 3, 3]
-                
-                # Build 4x4 transformation matrix for each sample
-                T_joint = torch.eye(4, device=device, dtype=dtype).unsqueeze(0).repeat(batch_size, 1, 1)
-                T_joint[:, :3, :3] = R_total
-                T_joint[:, :3, 3] = origin_xyz  # Same translation for all samples
-                
-                # Accumulate transformation: T_batch = T_batch @ T_joint (batch matmul)
-                T_batch = torch.matmul(T_batch, T_joint)
-        finally:
-            # Restore original backend
-            set_backend(original_backend)
+        # Backend should already be set correctly by caller
+        # Process each joint in the chain
+        for js in joint_specs:
+            # Get joint angle for this joint across all samples [B]
+            theta = q_batch[:, js.index]
+
+            # 1. Translation from origin
+            origin_xyz = torch.tensor(js.origin_xyz, device=device, dtype=dtype)  # [3]
+
+            # 2. Rotation from origin (roll-pitch-yaw) using new transform API
+            origin_rpy = torch.tensor(js.origin_rpy, device=device, dtype=dtype)  # [3]
+            origin_rpy_batch = origin_rpy.unsqueeze(0).repeat(batch_size, 1)  # [B, 3]
+            R_origin = rpy_to_matrix(
+                origin_rpy_batch[:, 0],
+                origin_rpy_batch[:, 1],
+                origin_rpy_batch[:, 2]
+            )  # [B, 3, 3]
+
+            # 3. Joint rotation (revolute around axis)
+            axis = torch.tensor(js.axis, device=device, dtype=dtype)  # [3]
+            R_joint = self._axis_angle_to_rotation_matrix_batch(axis, theta, device, dtype)  # [B, 3, 3]
+
+            # Combine rotations: R_total = R_origin @ R_joint
+            R_total = torch.matmul(R_origin, R_joint)  # [B, 3, 3]
+
+            # Build 4x4 transformation matrix for each sample
+            T_joint = torch.eye(4, device=device, dtype=dtype).unsqueeze(0).repeat(batch_size, 1, 1)
+            T_joint[:, :3, :3] = R_total
+            T_joint[:, :3, 3] = origin_xyz  # Same translation for all samples
+
+            # Accumulate transformation: T_batch = T_batch @ T_joint (batch matmul)
+            T_batch = torch.matmul(T_batch, T_joint)
         
         return T_batch
     
@@ -326,114 +311,108 @@ class FKSolverTorch:
 
         device = select_device(device)
 
-        # Set backend to torch temporarily
-        original_backend = get_backend()
-        set_backend('torch', device=str(device), dtype=dtype)
-
-        try:
-            # Build joint value mapping
-            if isinstance(q, dict):
-                q_map = {k: torch.tensor(v, dtype=dtype, device=device) if not torch.is_tensor(v) else v.to(dtype=dtype, device=device)
-                         for k, v in q.items()}
+        # Backend should already be set correctly by caller
+        # Build joint value mapping
+        if isinstance(q, dict):
+            q_map = {k: torch.tensor(v, dtype=dtype, device=device) if not torch.is_tensor(v) else v.to(dtype=dtype, device=device)
+                     for k, v in q.items()}
+        else:
+            if not torch.is_tensor(q):
+                q = torch.tensor(q, dtype=dtype, device=device)
             else:
-                if not torch.is_tensor(q):
-                    q = torch.tensor(q, dtype=dtype, device=device)
+                q = q.to(dtype=dtype, device=device)
+
+            # Map to joint names using actuated joints
+            q_map = {}
+            # Use all joints from parsed model for full DOF coverage
+            for i, joint_spec in enumerate(self.model.joint_list):
+                if i < len(q):
+                    # joint_list contains JointSpec objects, extract name
+                    joint_name = joint_spec.name if hasattr(joint_spec, 'name') else joint_spec
+                    q_map[joint_name] = q[i]
+
+        # Determine which links to compute
+        if link_names is None:
+            # Compute all links
+            target_indices = list(range(self._num_links))
+        else:
+            target_indices = [self._link_to_idx[name] for name in link_names]
+
+        # Cache for computed transforms (indexed by link index)
+        transform_cache: Dict[int, torch.Tensor] = {}
+
+        # Compute transforms for requested links
+        for link_idx in target_indices:
+            if link_idx in transform_cache:
+                continue  # Already computed
+
+            # Build transform by traversing parent path
+            T = torch.eye(4, dtype=dtype, device=device)
+
+            for ancestor_idx in self._parent_indices[link_idx]:
+                if ancestor_idx in transform_cache:
+                    # Reuse cached transform
+                    T = transform_cache[ancestor_idx].clone()
                 else:
-                    q = q.to(dtype=dtype, device=device)
+                    # Compute transform for this ancestor
+                    joint_spec = self._link_joints[ancestor_idx]
 
-                # Map to joint names using actuated joints
-                q_map = {}
-                # Use all joints from parsed model for full DOF coverage
-                for i, joint_spec in enumerate(self.model.joint_list):
-                    if i < len(q):
-                        # joint_list contains JointSpec objects, extract name
-                        joint_name = joint_spec.name if hasattr(joint_spec, 'name') else joint_spec
-                        q_map[joint_name] = q[i]
-
-            # Determine which links to compute
-            if link_names is None:
-                # Compute all links
-                target_indices = list(range(self._num_links))
-            else:
-                target_indices = [self._link_to_idx[name] for name in link_names]
-
-            # Cache for computed transforms (indexed by link index)
-            transform_cache: Dict[int, torch.Tensor] = {}
-
-            # Compute transforms for requested links
-            for link_idx in target_indices:
-                if link_idx in transform_cache:
-                    continue  # Already computed
-
-                # Build transform by traversing parent path
-                T = torch.eye(4, dtype=dtype, device=device)
-
-                for ancestor_idx in self._parent_indices[link_idx]:
-                    if ancestor_idx in transform_cache:
-                        # Reuse cached transform
-                        T = transform_cache[ancestor_idx].clone()
+                    if joint_spec is None:
+                        # Root node - identity
+                        transform_cache[ancestor_idx] = torch.eye(4, dtype=dtype, device=device)
                     else:
-                        # Compute transform for this ancestor
-                        joint_spec = self._link_joints[ancestor_idx]
-
-                        if joint_spec is None:
-                            # Root node - identity
-                            transform_cache[ancestor_idx] = torch.eye(4, dtype=dtype, device=device)
+                        # Get parent transform
+                        parent_idx = self._parent_indices[ancestor_idx][-2] if len(self._parent_indices[ancestor_idx]) > 1 else -1
+                        if parent_idx == -1:
+                            T_parent = torch.eye(4, dtype=dtype, device=device)
                         else:
-                            # Get parent transform
-                            parent_idx = self._parent_indices[ancestor_idx][-2] if len(self._parent_indices[ancestor_idx]) > 1 else -1
-                            if parent_idx == -1:
-                                T_parent = torch.eye(4, dtype=dtype, device=device)
-                            else:
-                                T_parent = transform_cache.get(parent_idx, torch.eye(4, dtype=dtype, device=device))
+                            T_parent = transform_cache.get(parent_idx, torch.eye(4, dtype=dtype, device=device))
 
-                            # Compute this joint's transform
-                            R_o = rpy_to_matrix(
-                                torch.tensor(joint_spec.origin_rpy[0], dtype=dtype, device=device),
-                                torch.tensor(joint_spec.origin_rpy[1], dtype=dtype, device=device),
-                                torch.tensor(joint_spec.origin_rpy[2], dtype=dtype, device=device),
+                        # Compute this joint's transform
+                        R_o = rpy_to_matrix(
+                            torch.tensor(joint_spec.origin_rpy[0], dtype=dtype, device=device),
+                            torch.tensor(joint_spec.origin_rpy[1], dtype=dtype, device=device),
+                            torch.tensor(joint_spec.origin_rpy[2], dtype=dtype, device=device),
+                        )
+                        t_o = torch.tensor(joint_spec.origin_xyz, dtype=dtype, device=device)
+                        T_origin = make_transform(R_o, t_o)
+
+                        # Joint motion
+                        if joint_spec.joint_type == "revolute":
+                            R_m = axis_angle_to_matrix(
+                                torch.tensor(joint_spec.axis, dtype=dtype, device=device),
+                                q_map.get(joint_spec.name, torch.tensor(0.0, dtype=dtype, device=device))
                             )
-                            t_o = torch.tensor(joint_spec.origin_xyz, dtype=dtype, device=device)
-                            T_origin = make_transform(R_o, t_o)
+                            t_m = torch.zeros(3, dtype=dtype, device=device)
+                        elif joint_spec.joint_type == "prismatic":
+                            R_m = torch.eye(3, dtype=dtype, device=device)
+                            axis_vec = torch.tensor(joint_spec.axis, dtype=dtype, device=device)
+                            t_m = axis_vec * q_map.get(joint_spec.name, torch.tensor(0.0, dtype=dtype, device=device))
+                        else:  # fixed
+                            R_m = torch.eye(3, dtype=dtype, device=device)
+                            t_m = torch.zeros(3, dtype=dtype, device=device)
 
-                            # Joint motion
-                            if joint_spec.joint_type == "revolute":
-                                R_m = axis_angle_to_matrix(
-                                    torch.tensor(joint_spec.axis, dtype=dtype, device=device),
-                                    q_map.get(joint_spec.name, torch.tensor(0.0, dtype=dtype, device=device))
-                                )
-                                t_m = torch.zeros(3, dtype=dtype, device=device)
-                            elif joint_spec.joint_type == "prismatic":
-                                R_m = torch.eye(3, dtype=dtype, device=device)
-                                axis_vec = torch.tensor(joint_spec.axis, dtype=dtype, device=device)
-                                t_m = axis_vec * q_map.get(joint_spec.name, torch.tensor(0.0, dtype=dtype, device=device))
-                            else:  # fixed
-                                R_m = torch.eye(3, dtype=dtype, device=device)
-                                t_m = torch.zeros(3, dtype=dtype, device=device)
+                        T_motion = make_transform(R_m, t_m)
 
-                            T_motion = make_transform(R_m, t_m)
+                        # Compose
+                        T_link = T_parent @ T_origin @ T_motion
+                        transform_cache[ancestor_idx] = T_link
+                        T = T_link
 
-                            # Compose
-                            T_link = T_parent @ T_origin @ T_motion
-                            transform_cache[ancestor_idx] = T_link
-                            T = T_link
+            # Final transform for this link
+            transform_cache[link_idx] = T
 
-                # Final transform for this link
-                transform_cache[link_idx] = T
+        # Build result dictionary
+        result = {}
+        for link_idx in target_indices:
+            link_name = self._idx_to_link[link_idx]
+            result[link_name] = transform_cache[link_idx]
 
-            # Build result dictionary
-            result = {}
-            for link_idx in target_indices:
-                link_name = self._idx_to_link[link_idx]
-                result[link_name] = transform_cache[link_idx]
+        # Add 'end' key for compatibility
+        if self.end_link in result:
+            result['end'] = result[self.end_link]
 
-            # Add 'end' key for compatibility
-            if self.end_link in result:
-                result['end'] = result[self.end_link]
-
-            return result
-        finally:
-            set_backend(original_backend)
+        return result
 
 
 __all__ = ["FKSolverTorch"]

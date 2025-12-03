@@ -25,7 +25,6 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 import math
 from robocore.transform import rotation_error
-from robocore.utils.backend import set_backend, get_backend
 from robocore.kinematics.fk import forward_kinematics
 
 if TYPE_CHECKING:
@@ -68,23 +67,17 @@ class JacobianSolverNumPy:
         :param use_central_diff: use central difference if True (numeric only).
         :return: 6×n Jacobian matrix (top 3 rows: linear, bottom 3 rows: angular).
         """
-        # Ensure NumPy backend
-        prev_backend = get_backend()
-        set_backend('numpy')
-
-        try:
-            if method == "analytic":
-                return self._solve_analytic(q, target_link=target_link)
-            elif method == "numeric":
-                if target_link is not None:
-                    # For now numeric local Jacobian uses full end Jacobian then slice rows belonging to target link
-                    # Simpler: recompute by truncating chain to target_link
-                    return self._solve_numeric(q, epsilon, use_central_diff, target_link=target_link)
-                return self._solve_numeric(q, epsilon, use_central_diff, target_link=None)
-            else:
-                raise ValueError(f"Unknown method '{method}', expected 'analytic' or 'numeric'")
-        finally:
-            set_backend(prev_backend)
+        # Backend should already be set correctly by caller
+        if method == "analytic":
+            return self._solve_analytic(q, target_link=target_link)
+        elif method == "numeric":
+            if target_link is not None:
+                # For now numeric local Jacobian uses full end Jacobian then slice rows belonging to target link
+                # Simpler: recompute by truncating chain to target_link
+                return self._solve_numeric(q, epsilon, use_central_diff, target_link=target_link)
+            return self._solve_numeric(q, epsilon, use_central_diff, target_link=None)
+        else:
+            raise ValueError(f"Unknown method '{method}', expected 'analytic' or 'numeric'")
     
     def _solve_analytic(self, q: np.ndarray, target_link: str | None = None) -> np.ndarray:
         """Compute analytic (geometric) Jacobian.
@@ -197,7 +190,7 @@ class JacobianSolverNumPy:
         if use_central_diff:
             # Central difference - use standalone FK to avoid circular dependency
             if target_link is None:
-                fk_ref = forward_kinematics(self.model, q.tolist(), backend='numpy', return_end=True)
+                fk_ref = forward_kinematics(self.model, q.tolist(), return_end=True)
             else:
                 fk_ref = self._fk_until(q, target_link)
             R_ref = np.array(
@@ -211,7 +204,7 @@ class JacobianSolverNumPy:
                 q_pos = q.copy()
                 q_pos[i] += epsilon
                 if target_link is None:
-                    fk_pos = forward_kinematics(self.model, q_pos.tolist(), backend='numpy', return_end=True)
+                    fk_pos = forward_kinematics(self.model, q_pos.tolist(), return_end=True)
                 else:
                     fk_pos = self._fk_until(q_pos, target_link)
                 R_pos = np.array(
@@ -229,7 +222,7 @@ class JacobianSolverNumPy:
                 q_neg = q.copy()
                 q_neg[i] -= epsilon
                 if target_link is None:
-                    fk_neg = forward_kinematics(self.model, q_neg.tolist(), backend='numpy', return_end=True)
+                    fk_neg = forward_kinematics(self.model, q_neg.tolist(), return_end=True)
                 else:
                     fk_neg = self._fk_until(q_neg, target_link)
                 R_neg = np.array(
@@ -253,7 +246,7 @@ class JacobianSolverNumPy:
         else:
             # Forward difference - use standalone FK to avoid circular dependency
             if target_link is None:
-                fk_ref = forward_kinematics(self.model, q.tolist(), backend='numpy', return_end=True)
+                fk_ref = forward_kinematics(self.model, q.tolist(), return_end=True)
             else:
                 fk_ref = self._fk_until(q, target_link)
             R_ref = np.array(
@@ -271,7 +264,7 @@ class JacobianSolverNumPy:
                 q_pert = q.copy()
                 q_pert[i] += epsilon
                 if target_link is None:
-                    fk_pert = forward_kinematics(self.model, q_pert.tolist(), backend='numpy', return_end=True)
+                    fk_pert = forward_kinematics(self.model, q_pert.tolist(), return_end=True)
                 else:
                     fk_pert = self._fk_until(q_pert, target_link)
                 R_pert = np.array(

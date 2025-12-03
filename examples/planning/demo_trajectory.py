@@ -263,7 +263,7 @@ def demo_cartesian_trajectory(model, end_link, q_init, plot=False):
     
     # Define start and end poses
     # Start pose: current configuration
-    T_start = forward_kinematics(model, q_init, backend='numpy', return_end=True)
+    T_start = forward_kinematics(model, q_init, return_end=True)
     
     # End pose: translate +0.1m in X, rotate 45° around Z
     T_end = T_start.copy()
@@ -289,7 +289,6 @@ def demo_cartesian_trajectory(model, end_link, q_init, plot=False):
             duration=2.0,
             num_points=50,
             q_init=q_init,
-            ik_backend='numpy',
             ik_method='dls'
         )
         

@@ -43,8 +43,8 @@ def compare_fk(model_a: RobotModel, model_b: RobotModel, q):
 	:param q: Joint configuration (min DOF length)
 	"""
 	beauty_print("Compute and compare FK", type="module", centered=True)
-	T_a = forward_kinematics(model_a, q, backend='numpy', return_end=True)
-	T_b = forward_kinematics(model_b, q, backend='numpy', return_end=True)
+	T_a = forward_kinematics(model_a, q, return_end=True)
+	T_b = forward_kinematics(model_b, q, return_end=True)
 	pa, pb = T_a[:3, 3], T_b[:3, 3]
 	Ra, Rb = T_a[:3, :3], T_b[:3, :3]
 	pos_err = np.linalg.norm(pa - pb)
@@ -73,12 +73,12 @@ def validate_kinematics_methods(model: RobotModel, q: np.ndarray):
 	beauty_print("1️⃣  Forward Kinematics (FK) Validation", type="info")
 	
 	# Call via RobotModel.fk()
-	fk_model_full = model.fk(q, backend='numpy', return_end=False)
-	fk_model_end = model.fk(q, backend='numpy', return_end=True)
+	fk_model_full = model.fk(q, return_end=False)
+	fk_model_end = model.fk(q, return_end=True)
 	
 	# Call via standalone function
-	fk_standalone_full = forward_kinematics(model, q, backend='numpy', return_end=False)
-	fk_standalone_end = forward_kinematics(model, q, backend='numpy', return_end=True)
+	fk_standalone_full = forward_kinematics(model, q, return_end=False)
+	fk_standalone_end = forward_kinematics(model, q, return_end=True)
 	
 	# Compare results
 	fk_full_match = np.allclose(fk_model_full['end'], fk_standalone_full['end'], atol=1e-10)
@@ -96,10 +96,10 @@ def validate_kinematics_methods(model: RobotModel, q: np.ndarray):
 	beauty_print("2️⃣  Jacobian Validation", type="info")
 	
 	# Call via RobotModel.jacobian()
-	J_model = model.jacobian(q, backend='numpy', method='analytic')
+	J_model = model.jacobian(q, method='analytic')
 	
 	# Call via standalone function
-	J_standalone = jacobian(model, q, backend='numpy', method='analytic')
+	J_standalone = jacobian(model, q, method='analytic')
 	
 	# Compare results
 	J_match = np.allclose(J_model, J_standalone, atol=1e-10)
@@ -123,7 +123,6 @@ def validate_kinematics_methods(model: RobotModel, q: np.ndarray):
 	ik_result_model = model.ik(
 		target_pose.tolist(),
 		q_initial=q_initial,
-		backend='numpy',
 		method='pinv',
 		max_iters=100,
 		pos_tol=1e-4,
@@ -135,7 +134,6 @@ def validate_kinematics_methods(model: RobotModel, q: np.ndarray):
 		model,
 		target_pose.tolist(),
 		q_initial,  # q0 is a positional argument
-		backend='numpy',
 		method='pinv',
 		max_iters=100,
 		pos_tol=1e-4,
@@ -158,8 +156,8 @@ def validate_kinematics_methods(model: RobotModel, q: np.ndarray):
 		print(f"     Solution diff: {q_diff:.2e} rad")
 		
 		# Verify both solutions reach the target
-		fk_check_model = model.fk(q_model, backend='numpy', return_end=True)
-		fk_check_standalone = forward_kinematics(model, q_standalone, backend='numpy', return_end=True)
+		fk_check_model = model.fk(q_model, return_end=True)
+		fk_check_standalone = forward_kinematics(model, q_standalone, return_end=True)
 		pose_err_model = np.linalg.norm(fk_check_model[:3, 3] - target_pose[:3, 3])
 		pose_err_standalone = np.linalg.norm(fk_check_standalone[:3, 3] - target_pose[:3, 3])
 		

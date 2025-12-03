@@ -61,7 +61,7 @@ class WorkspaceAnalyzer:
     >>> print(f"Workspace volume: {volume:.4f} m³")
     """
     
-    def __init__(self, model: "RobotModel", backend: str = 'numpy'):
+    def __init__(self, model: "RobotModel"):
         """
         Initialize workspace analyzer.
         
@@ -69,11 +69,8 @@ class WorkspaceAnalyzer:
         ----------
         model : RobotModel
             Robot model
-        backend : str
-            Computation backend ('numpy' or 'torch')
         """
         self.model = model
-        self.backend = backend
         self.num_dof = model.num_dof
         
         # Cache for workspace data
@@ -465,7 +462,7 @@ class WorkspaceAnalyzer:
         
         for q in q_samples:
             # Compute manipulability
-            J = jacobian(self.model, q, backend=self.backend)
+            J = jacobian(self.model, q)
             
             # Manipulability measure: sqrt(det(J @ J.T))
             if isinstance(J, np.ndarray):
@@ -475,7 +472,7 @@ class WorkspaceAnalyzer:
                 manipulability = torch.sqrt(torch.det(J @ J.T)).item()
             
             if manipulability >= manipulability_threshold:
-                T = forward_kinematics(self.model, q, backend=self.backend, return_end=True)
+                T = forward_kinematics(self.model, q, return_end=True)
                 if isinstance(T, np.ndarray):
                     safe_points.append(T[:3, 3])
                 else:
@@ -637,7 +634,7 @@ class WorkspaceAnalyzer:
         
         points = []
         for q in q_samples:
-            T = forward_kinematics(self.model, q, backend=self.backend, return_end=True)
+            T = forward_kinematics(self.model, q, return_end=True)
             if isinstance(T, np.ndarray):
                 points.append(T[:3, 3])
             else:
@@ -655,7 +652,7 @@ class WorkspaceAnalyzer:
         from robocore.kinematics.fk import forward_kinematics
         
         def compute_point(q):
-            T = forward_kinematics(self.model, q, backend='numpy', return_end=True)
+            T = forward_kinematics(self.model, q, return_end=True)
             return T[:3, 3]
         
         with ThreadPoolExecutor(max_workers=num_workers) as executor:

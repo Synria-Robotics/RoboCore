@@ -78,7 +78,7 @@ def analyze_workspace_quick(model, num_samples=3000):
     print("Step 1: Workspace Analysis")
     print("="*70)
     
-    analyzer = WorkspaceAnalyzer(model, backend='numpy')
+    analyzer = WorkspaceAnalyzer(model)
     
     # Compute reachable workspace
     print(f"\nAnalyzing reachable workspace ({num_samples} samples)...")
@@ -138,7 +138,7 @@ def plan_trajectory_simple(model, workspace_data, num_waypoints=4):
     waypoints_joint = [q_start]
     
     # Get start position
-    T_start = forward_kinematics(model, q_start, backend='numpy', return_end=True)
+    T_start = forward_kinematics(model, q_start, return_end=True)
     p_start = T_start[:3, 3]
     waypoints_cartesian.append(p_start)
     
@@ -161,13 +161,13 @@ def plan_trajectory_simple(model, workspace_data, num_waypoints=4):
         waypoints_cartesian.append(target)
         
         # Solve IK
-        T_current = forward_kinematics(model, q_current, backend='numpy', return_end=True)
+        T_current = forward_kinematics(model, q_current, return_end=True)
         T_target = T_current.copy()
         T_target[:3, 3] = target
         
         result = inverse_kinematics(
             model, T_target, q_current,
-            backend='numpy', method='dls',
+            , method='dls',
             max_iters=200, pos_tol=1e-4, ori_tol=1e-4,
             multi_start=3,  # Multiple attempts
             multi_noise=0.3

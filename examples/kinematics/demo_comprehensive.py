@@ -83,7 +83,7 @@ def compute_fk_ik_jacobian(
         print(f"Input Joint Angles (degrees):")
         print(f"  q = {beauty_print_array(np.rad2deg(joint_angles))}")
     
-    T_fk = forward_kinematics(robot_model, joint_angles, backend='numpy', return_end=True)
+    T_fk = forward_kinematics(robot_model, joint_angles, return_end=True)
     
     # Extract position and orientation
     position_fk = T_fk[:3, 3]
@@ -143,7 +143,6 @@ def compute_fk_ik_jacobian(
         robot_model,
         T_fk,
         q_init,
-        backend='numpy',
         method='dls',
         max_iters=ik_max_iters,
         pos_tol=ik_pos_tol,
@@ -170,7 +169,7 @@ def compute_fk_ik_jacobian(
         print(f"  ||Δq|| = {np.linalg.norm(q_diff):.6e} rad")
     
     # Verify IK solution with FK
-    T_ik_verify = forward_kinematics(robot_model, ik_result['q'], backend='numpy', return_end=True)
+    T_ik_verify = forward_kinematics(robot_model, ik_result['q'], return_end=True)
     position_ik = T_ik_verify[:3, 3]
     rotation_ik = T_ik_verify[:3, :3]
     
@@ -203,7 +202,7 @@ def compute_fk_ik_jacobian(
         print(f"Computing Jacobian at joint angles:")
         print(f"  q = {beauty_print_array(joint_angles)}")
     
-    J = jacobian(robot_model, joint_angles, backend='numpy', method='analytic')
+    J = jacobian(robot_model, joint_angles, method='analytic')
     
     results['jacobian'] = {
         'J': J,
@@ -239,7 +238,7 @@ def compute_fk_ik_jacobian(
         print(f"Computing Jacobian at IK solved joints:")
         print(f"  q_ik = {beauty_print_array(ik_result['q'])}")
         
-        J_ik = jacobian(robot_model, ik_result['q'], backend='numpy', method='analytic')
+        J_ik = jacobian(robot_model, ik_result['q'], method='analytic')
         
         results['jacobian_ik'] = {
             'J': J_ik,
@@ -304,7 +303,7 @@ def run_closure_validation(robot_model: RobotModel, args):
     
     # Sample target configuration
     q_true = sample_q(robot_model)
-    fk_true = forward_kinematics(robot_model, q_true, backend='numpy', return_end=True)
+    fk_true = forward_kinematics(robot_model, q_true, return_end=True)
     
     beauty_print("Target Configuration", type="module")
     beauty_print(f"  q* = {beauty_print_array(np.array(q_true), 4)}")
@@ -333,7 +332,6 @@ def run_closure_validation(robot_model: RobotModel, args):
                 robot_model,
                 fk_true,
                 q0,
-                backend='numpy',
                 method=m,
                 max_iters=120,
                 pos_tol=5e-4,
@@ -346,7 +344,7 @@ def run_closure_validation(robot_model: RobotModel, args):
             dt_ms = (perf_counter() - t0) * 1000.0
             
             # Verify solution
-            fk_rec = forward_kinematics(robot_model, res['q'], backend='numpy', return_end=True)
+            fk_rec = forward_kinematics(robot_model, res['q'], return_end=True)
             pos_diff = np.linalg.norm(fk_true[:3, 3] - fk_rec[:3, 3])
             ang_deg = orientation_angle_deg(rotation_matrix(fk_true), rotation_matrix(fk_rec))
             

@@ -17,3 +17,8 @@ mesh_to_sdf
 lxml
 torch
 tqdm
+
+# Git dependencies
+synriard @ git+https://github.com/Synria-Robotics/Synria-Robot-Descriptions.git
+openrd @ git+https://github.com/Synria-Robotics/Open-Robot-Descriptions.git
+

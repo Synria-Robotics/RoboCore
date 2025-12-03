@@ -31,7 +31,6 @@ def forward_kinematics(
     model: Any,
     q: Sequence[float] | Any,
     *,
-    backend: str = 'auto',
     return_end: bool = False,
     return_all_links: bool = False,
     link_names: Sequence[str] | None = None,
@@ -42,15 +41,14 @@ def forward_kinematics(
     
     :param model: RobotModel instance
     :param q: Joint configuration (array-like or dict {joint_name: value})
-    :param backend: 'auto'|'numpy'|'torch'
     :param return_end: Return only end-effector pose (legacy, conflicts with return_all_links)
     :param return_all_links: Return FK for all links in the kinematic tree (uses multi-chain solver)
     :param link_names: Specific links to compute FK for (only with return_all_links=True)
-    :param device: Torch device when using torch backend
-    :param dtype: Torch dtype when using torch backend
+    :param device: Torch device when using torch backend (uses global backend setting)
+    :param dtype: Torch dtype when using torch backend (uses global backend setting)
     :return: Mapping link->pose or single 4x4 pose if return_end=True
     """
-    b = get_backend() if backend == 'auto' else backend
+    b = get_backend()
 
     # Multi-chain FK path
     if return_all_links:

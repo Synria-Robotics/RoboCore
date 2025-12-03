@@ -64,11 +64,7 @@ cd RoboCore
 
 # Install (development mode)
 pip install -e .
-pip install -r requirement.txt
-git submodule update --init --recursive  # pull the robot descriptions
-
-# Optional: Install with PyTorch for GPU support
-pip install torch torchvision  # Should install the version compatible with your computer's device (e.g. CUDA version)
+pip install -r requirements.txt
 ```
 
 ---
@@ -89,7 +85,7 @@ robot.print_tree()
 
 # Forward Kinematics
 q = [0.0] * robot.num_dof
-pose = robot.fk(q, backend='numpy', return_end=True)
+pose = robot.fk(q, return_end=True)
 
 # Inverse Kinematics
 result = robot.ik(pose, q_initial=q, method='pinv')
@@ -103,14 +99,17 @@ J = robot.jacobian(q, method='analytic')  # Shape: (6, dof)
 
 ```python
 import torch
+import robocore as rc
 
 # Generate random configurations
 q_batch = robot.random_q_batch(batch_size=1000)
 
+# Set global backend for GPU
+rc.set_backend('torch', device='cuda')
+
 # Batch FK on GPU
 poses = robot.fk(
     torch.tensor(q_batch), 
-    backend='torch', 
     device='cuda',
     return_end=True
 )

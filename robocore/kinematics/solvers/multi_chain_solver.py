@@ -31,7 +31,6 @@ class MultiChainIKSolver:
                       tol: float = 1e-3,
                       damping: float = 1e-3,
                       step_limit: float = 0.2,
-                      backend: str = 'numpy',
                       verbose: bool = False) -> Dict[str, Any]:
         """Solve multi-chain IK using weighted least squares.
         
@@ -43,7 +42,6 @@ class MultiChainIKSolver:
         :param tol: Convergence tolerance
         :param damping: DLS damping factor
         :param step_limit: Maximum joint step per iteration (rad)
-        :param backend: Computation backend ('numpy' or 'torch')
         :param verbose: Print iteration info
         :return: Solution dictionary with q_by_group, success, iters, residual
         """
@@ -78,11 +76,11 @@ class MultiChainIKSolver:
                     g = task.group
                     model = self.groups[g]
                     qg = slice_group(q, g)
-                    T_cur = model.fk(qg, backend=backend, return_end=True)
+                    T_cur = model.fk(qg, return_end=True)
                     T_cur = T_cur.detach().cpu().numpy() if hasattr(T_cur, 'detach') else np.array(T_cur)
                     
                     e = self._pose_error_np(T_cur, np.array(task.target))
-                    Jg = single_jacobian(model, qg, backend=backend)
+                    Jg = single_jacobian(model, qg)
                     Jg = Jg.detach().cpu().numpy() if hasattr(Jg, 'detach') else np.array(Jg)
                     
                     # Pad into full vector
@@ -108,8 +106,8 @@ class MultiChainIKSolver:
                     qa = slice_group(q, ga)
                     qb = slice_group(q, gb)
                     
-                    Ta = ma.fk(qa, backend=backend, return_end=True)
-                    Tb = mb.fk(qb, backend=backend, return_end=True)
+                    Ta = ma.fk(qa, return_end=True)
+                    Tb = mb.fk(qb, return_end=True)
                     
                     if hasattr(Ta, 'detach'):
                         Ta = Ta.detach().cpu().numpy()
@@ -119,7 +117,7 @@ class MultiChainIKSolver:
                     
                     e = self._relative_pose_error_np(Ta, Tb, np.array(task.target))
                     # Use analytic relative Jacobian for speed
-                    Jr = self._relative_jacobian_analytic(ma, mb, qa, qb, backend=backend)
+                    Jr = self._relative_jacobian_analytic(ma, mb, qa, qb)
                     Jr = Jr.detach().cpu().numpy() if hasattr(Jr, 'detach') else np.array(Jr)
                     
                     # Place Jr into columns of a+b
@@ -185,7 +183,6 @@ class MultiChainIKSolver:
                           tol: float = 1e-3,
                           damping: float = 1e-4,
                           step_limit: float = 0.15,
-                          backend: str = 'numpy',
                           verbose: bool = False) -> Dict[str, Any]:
         """Solve multi-chain IK using hierarchical nullspace projection.
         
@@ -197,7 +194,6 @@ class MultiChainIKSolver:
         :param tol: Convergence tolerance
         :param damping: Pseudoinverse damping
         :param step_limit: Maximum joint step per iteration
-        :param backend: Computation backend
         :param verbose: Print iteration info
         :return: Solution dictionary
         """
@@ -232,11 +228,11 @@ class MultiChainIKSolver:
                         g = task.group
                         model = self.groups[g]
                         qg = slice_group(q, g)
-                        T_cur = model.fk(qg, backend=backend, return_end=True)
+                        T_cur = model.fk(qg, return_end=True)
                         T_cur = T_cur.detach().cpu().numpy() if hasattr(T_cur, 'detach') else np.array(T_cur)
                         
                         e = self._pose_error_np(T_cur, np.array(task.target))
-                        Jg = single_jacobian(model, qg, backend=backend)
+                        Jg = single_jacobian(model, qg)
                         Jg = Jg.detach().cpu().numpy() if hasattr(Jg, 'detach') else np.array(Jg)
                         
                         Jpad = np.zeros((6, n_total))
@@ -259,8 +255,8 @@ class MultiChainIKSolver:
                         qa = slice_group(q, ga)
                         qb = slice_group(q, gb)
                         
-                        Ta = ma.fk(qa, backend=backend, return_end=True)
-                        Tb = mb.fk(qb, backend=backend, return_end=True)
+                        Ta = ma.fk(qa, return_end=True)
+                        Tb = mb.fk(qb, return_end=True)
                         
                         if hasattr(Ta, 'detach'):
                             Ta = Ta.detach().cpu().numpy()
@@ -270,7 +266,7 @@ class MultiChainIKSolver:
                         
                         e = self._relative_pose_error_np(Ta, Tb, np.array(task.target))
                         # Use analytic relative Jacobian for speed
-                        Jr = self._relative_jacobian_analytic(ma, mb, qa, qb, backend=backend)
+                        Jr = self._relative_jacobian_analytic(ma, mb, qa, qb)
                         Jr = Jr.detach().cpu().numpy() if hasattr(Jr, 'detach') else np.array(Jr)
                         
                         Jpad = np.zeros((Jr.shape[0], n_total))
@@ -401,8 +397,7 @@ class MultiChainIKSolver:
     @staticmethod
     @staticmethod
     def _relative_jacobian_analytic(model_a: RobotModel, model_b: RobotModel,
-                                    q_a: np.ndarray, q_b: np.ndarray,
-                                    backend: str = 'numpy') -> np.ndarray:
+                                    q_a: np.ndarray, q_b: np.ndarray) -> np.ndarray:
         """Compute relative Jacobian using analytical method.
         
         For relative pose T_rel = inv(T_a) @ T_b, the Jacobian is:
@@ -414,12 +409,11 @@ class MultiChainIKSolver:
         :param model_b: Second chain model
         :param q_a: First chain joint configuration
         :param q_b: Second chain joint configuration
-        :param backend: Computation backend
         :return: 6 × (n_a + n_b) Jacobian matrix
         """
         # Compute individual Jacobians using analytic method
-        J_a = single_jacobian(model_a, q_a, backend=backend, method='analytic')
-        J_b = single_jacobian(model_b, q_b, backend=backend, method='analytic')
+        J_a = single_jacobian(model_a, q_a, method='analytic')
+        J_b = single_jacobian(model_b, q_b, method='analytic')
         
         # Convert to numpy if needed
         if hasattr(J_a, 'detach'):
@@ -429,8 +423,8 @@ class MultiChainIKSolver:
         J_b = np.array(J_b)
         
         # Compute forward kinematics
-        T_a = model_a.fk(q_a, backend=backend, return_end=True)
-        T_b = model_b.fk(q_b, backend=backend, return_end=True)
+        T_a = model_a.fk(q_a, return_end=True)
+        T_b = model_b.fk(q_b, return_end=True)
         
         if hasattr(T_a, 'detach'):
             T_a = T_a.detach().cpu().numpy()
@@ -466,7 +460,6 @@ class MultiChainIKSolver:
     @staticmethod
     def _relative_jacobian_numeric(model_a: RobotModel, model_b: RobotModel,
                                    q_a: np.ndarray, q_b: np.ndarray,
-                                   backend: str = 'numpy',
                                    eps: float = 1e-7) -> np.ndarray:
         """Compute relative Jacobian using numerical differentiation.
         
@@ -474,13 +467,12 @@ class MultiChainIKSolver:
         :param model_b: Second chain model
         :param q_a: First chain joint configuration
         :param q_b: Second chain joint configuration
-        :param backend: Computation backend
         :param eps: Finite difference epsilon
         :return: 6 × (n_a + n_b) Jacobian matrix
         """
         def rel_pose_vec(qa, qb):
-            Ta = model_a.fk(qa, backend=backend, return_end=True)
-            Tb = model_b.fk(qb, backend=backend, return_end=True)
+            Ta = model_a.fk(qa, return_end=True)
+            Tb = model_b.fk(qb, return_end=True)
             if hasattr(Ta, 'detach'):
                 Ta = Ta.detach().cpu().numpy()
                 Tb = Tb.detach().cpu().numpy()

@@ -29,6 +29,7 @@ from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.fk import forward_kinematics
 from robocore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
 from robocore.kinematics.fk_utils.fk_solver_numpy import FKSolverNumPy
+import robocore
 
 
 def random_q_in_limits(model, seed=42):
@@ -66,10 +67,12 @@ class TestFKConsistency:
         q_test = random_q_in_limits(robot_model, seed=42)
         
         # NumPy FK
-        T_np = forward_kinematics(robot_model, q_test, backend='numpy', return_end=True)
+        robocore.set_backend('numpy')
+        T_np = forward_kinematics(robot_model, q_test, return_end=True)
         
         # PyTorch FK
-        T_torch = forward_kinematics(robot_model, q_test, backend='torch', return_end=True, 
+        robocore.set_backend('torch', device='cpu')
+        T_torch = forward_kinematics(robot_model, q_test, return_end=True, 
                                      device='cpu', dtype=torch.float64)
         T_torch_np = T_torch.cpu().numpy()
         
@@ -86,7 +89,8 @@ class TestFKConsistency:
         # Individual FK
         T_individual = []
         for q in q_batch_list:
-            T = forward_kinematics(robot_model, q, backend='torch', return_end=True,
+            robocore.set_backend('torch', device='cpu')
+            T = forward_kinematics(robot_model, q, return_end=True,
                                   device='cpu', dtype=torch.float64)
             T_individual.append(T)
         
@@ -108,8 +112,10 @@ class TestFKConsistency:
         """Test FK at zero configuration."""
         q_zero = np.zeros(robot_model.num_dof)
         
-        T_np = forward_kinematics(robot_model, q_zero, backend='numpy', return_end=True)
-        T_torch = forward_kinematics(robot_model, q_zero, backend='torch', return_end=True,
+        robocore.set_backend('numpy')
+        T_np = forward_kinematics(robot_model, q_zero, return_end=True)
+        robocore.set_backend('torch', device='cpu')
+        T_torch = forward_kinematics(robot_model, q_zero, return_end=True,
                                      device='cpu', dtype=torch.float64)
         
         # Should be valid transformation matrices

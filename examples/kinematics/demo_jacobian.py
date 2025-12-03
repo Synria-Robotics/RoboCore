@@ -30,6 +30,7 @@ from robocore.modeling import RobotModel
 from robocore.kinematics.jacobian import jacobian
 from robocore.utils.beauty_logger import beauty_print
 from robocore.utils.path import get_robocore_path
+import robocore
 
 
 def main(args):
@@ -43,30 +44,33 @@ def main(args):
     rng = np.random.default_rng(args.seed)
 
     if args.backend == 'numpy':
+        # Set global backend
+        robocore.set_backend('numpy')
+
         # NumPy backend comparison
         beauty_print("[1] Analytic vs Numeric Jacobian (NumPy)", type="module", centered=False)
 
         q = np.zeros(model.num_chain_dof)
 
         # Warmup
-        jacobian(model, q, backend='numpy', method='analytic')
-        jacobian(model, q, backend='numpy', method='numeric')
+        jacobian(model, q, method='analytic')
+        jacobian(model, q, method='numeric')
 
         # Timing
         n_runs = 100
         t0 = time.perf_counter()
         for _ in range(n_runs):
-            Ja = jacobian(model, q, backend='numpy', method='analytic')
+            Ja = jacobian(model, q, method='analytic')
         time_analytic = (time.perf_counter() - t0) / n_runs * 1000
 
         t0 = time.perf_counter()
         for _ in range(n_runs):
-            Jn = jacobian(model, q, backend='numpy', method='numeric')
+            Jn = jacobian(model, q, method='numeric')
         time_numeric = (time.perf_counter() - t0) / n_runs * 1000
 
         # Compare
-        Ja = jacobian(model, q, backend='numpy', method='analytic')
-        Jn = jacobian(model, q, backend='numpy', method='numeric')
+        Ja = jacobian(model, q, method='analytic')
+        Jn = jacobian(model, q, method='numeric')
         diff = Ja - Jn
 
         beauty_print(f"Analytic time:  {time_analytic:.4f} ms")
@@ -85,8 +89,8 @@ def main(args):
         for i in range(args.samples):
             q_rand = model.random_q(rng)
 
-            Ja = jacobian(model, q_rand, backend='numpy', method='analytic')
-            Jn = jacobian(model, q_rand, backend='numpy', method='numeric')
+            Ja = jacobian(model, q_rand, method='analytic')
+            Jn = jacobian(model, q_rand, method='numeric')
             max_diff = np.max(np.abs(Ja - Jn))
             max_diffs.append(max_diff)
 
@@ -104,15 +108,18 @@ def main(args):
             return
 
         device = torch.device(args.device)
+        # Set global backend
+        robocore.set_backend('torch', device=str(device))
+
         beauty_print(f"PyTorch device: {device}", type="info")
         beauty_print("[1] Analytic vs Numeric vs Autograd Jacobian (PyTorch)", type="module")
 
         q = torch.zeros(model.num_chain_dof, dtype=torch.float64, device=device)
 
         # Compute all three using unified interface
-        Ja = jacobian(model, q, backend='torch', method='analytic', device=device)
-        Jn = jacobian(model, q, backend='torch', method='numeric', device=device)
-        Jg = jacobian(model, q, backend='torch', method='autograd', device=device)
+        Ja = jacobian(model, q, method='analytic', device=device)
+        Jn = jacobian(model, q, method='numeric', device=device)
+        Jg = jacobian(model, q, method='autograd', device=device)
 
         # Compare
         diff_an = (Ja - Jn).cpu().numpy()
@@ -137,17 +144,17 @@ def main(args):
 
         t0 = time.perf_counter()
         for _ in range(n_runs):
-            _ = jacobian(model, q, backend='torch', method='analytic', device=device)
+            _ = jacobian(model, q, method='analytic', device=device)
         time_analytic = (time.perf_counter() - t0) / n_runs * 1000
 
         t0 = time.perf_counter()
         for _ in range(n_runs):
-            _ = jacobian(model, q, backend='torch', method='numeric', device=device)
+            _ = jacobian(model, q, method='numeric', device=device)
         time_numeric = (time.perf_counter() - t0) / n_runs * 1000
 
         t0 = time.perf_counter()
         for _ in range(n_runs):
-            _ = jacobian(model, q, backend='torch', method='autograd', device=device)
+            _ = jacobian(model, q, method='autograd', device=device)
         time_autograd = (time.perf_counter() - t0) / n_runs * 1000
 
         beauty_print(f"Analytic:   {time_analytic:.4f} ms")

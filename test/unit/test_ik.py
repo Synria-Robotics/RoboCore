@@ -27,6 +27,7 @@ from pathlib import Path
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.ik import inverse_kinematics
 from robocore.kinematics.fk import forward_kinematics
+import robocore
 
 
 def random_q_in_limits(model, seed=42):
@@ -64,14 +65,14 @@ class TestIKMethods:
         """Test that all IK methods can solve basic problems."""
         # Generate target pose
         q_target = random_q_in_limits(robot_model, seed=42)
-        target_pose = forward_kinematics(robot_model, q_target, backend='numpy', return_end=True)
+        target_pose = forward_kinematics(robot_model, q_target, return_end=True)
         
         # Try to solve from different initial guess
         q_init = random_q_in_limits(robot_model, seed=43)
         
         result = inverse_kinematics(
             robot_model, target_pose, q_init,
-            backend='numpy', method=method,
+, method=method,
             max_iters=100, pos_tol=1e-4, ori_tol=1e-4
         )
         
@@ -84,19 +85,19 @@ class TestIKMethods:
         """Test FK-IK-FK closure property."""
         # Start with known configuration
         q_start = random_q_in_limits(robot_model, seed=42)
-        T_start = forward_kinematics(robot_model, q_start, backend='numpy', return_end=True)
+        T_start = forward_kinematics(robot_model, q_start, return_end=True)
         
         # Solve IK from different initial guess
         q_init = random_q_in_limits(robot_model, seed=43)
         result = inverse_kinematics(
             robot_model, T_start, q_init,
-            backend='numpy', method='dls',
+            method='dls',
             max_iters=100, pos_tol=1e-4, ori_tol=1e-4
         )
         
         if result['success']:
             # Verify FK of solution matches target
-            T_result = forward_kinematics(robot_model, result['q'], backend='numpy', return_end=True)
+            T_result = forward_kinematics(robot_model, result['q'], return_end=True)
             
             # Position should match
             pos_diff = np.linalg.norm(T_start[:3, 3] - T_result[:3, 3])
@@ -111,12 +112,12 @@ class TestIKMethods:
     def test_ik_convergence_tracking(self, robot_model):
         """Test that IK tracks convergence properly."""
         q_target = random_q_in_limits(robot_model, seed=42)
-        target_pose = forward_kinematics(robot_model, q_target, backend='numpy', return_end=True)
+        target_pose = forward_kinematics(robot_model, q_target, return_end=True)
         q_init = random_q_in_limits(robot_model, seed=43)
         
         result = inverse_kinematics(
             robot_model, target_pose, q_init,
-            backend='numpy', method='dls',
+            method='dls',
             max_iters=100, pos_tol=1e-4, ori_tol=1e-4
         )
         
@@ -133,12 +134,12 @@ class TestIKMethods:
     def test_ik_joint_limits(self, robot_model):
         """Test that IK respects joint limits."""
         q_target = random_q_in_limits(robot_model, seed=42)
-        target_pose = forward_kinematics(robot_model, q_target, backend='numpy', return_end=True)
+        target_pose = forward_kinematics(robot_model, q_target, return_end=True)
         q_init = random_q_in_limits(robot_model, seed=43)
         
         result = inverse_kinematics(
             robot_model, target_pose, q_init,
-            backend='numpy', method='dls',
+, method='dls',
             max_iters=100
         )
         
@@ -170,7 +171,7 @@ class TestIKEdgeCases:
         
         result = inverse_kinematics(
             robot_model, target_pose, q_init,
-            backend='numpy', method='dls',
+            method='dls',
             max_iters=50, pos_tol=1e-4, ori_tol=1e-4
         )
         
@@ -183,14 +184,14 @@ class TestIKEdgeCases:
     def test_ik_zero_configuration(self, robot_model):
         """Test IK from zero configuration."""
         q_zero = np.zeros(robot_model.num_dof)
-        T_zero = forward_kinematics(robot_model, q_zero, backend='numpy', return_end=True)
+        T_zero = forward_kinematics(robot_model, q_zero, return_end=True)
         
         # Solve from slightly perturbed initial guess
         q_init = np.ones(robot_model.num_dof) * 0.1
         
         result = inverse_kinematics(
             robot_model, T_zero, q_init,
-            backend='numpy', method='dls',
+            method='dls',
             max_iters=100
         )
         

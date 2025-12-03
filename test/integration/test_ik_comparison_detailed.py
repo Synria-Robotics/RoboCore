@@ -28,6 +28,7 @@ from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.ik import inverse_kinematics
 from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
 from robocore.kinematics.fk import forward_kinematics
+import robocore
 
 
 def random_q_in_limits(model, seed=42):
@@ -57,9 +58,11 @@ def compare_single_ik(model, target_pose, q_init, device='cpu'):
     
     # NumPy 求解
     print("\n[NumPy IK]")
+    # Set global backend
+    robocore.set_backend('numpy')
+    
     result_np = inverse_kinematics(
         model, target_pose, q_init,
-        backend='numpy',
         method='dls',
         max_iters=100,
         pos_tol=1e-4,
@@ -137,7 +140,7 @@ def batch_comparison(model, n_samples=32, device='cpu', seed=42):
     target_poses = []
     for i in range(n_samples):
         q = random_q_in_limits(model, seed=seed+i)
-        T = forward_kinematics(model, q, backend='numpy', return_end=True)
+        T = forward_kinematics(model, q, return_end=True)
         # 随机初始解
         q_init = random_q_in_limits(model, seed=seed+n_samples+i)
         
@@ -153,7 +156,7 @@ def batch_comparison(model, n_samples=32, device='cpu', seed=42):
     for i in range(n_samples):
         res = inverse_kinematics(
             model, target_poses[i], q_batch[i],
-            backend='numpy', method='dls',
+, method='dls',
             max_iters=100, pos_tol=1e-4, ori_tol=1e-4
         )
         np_results.append(res)
@@ -254,7 +257,7 @@ def main():
     if args.single:
         # 单样本详细对比
         q_target = random_q_in_limits(model, seed=args.seed)
-        target_pose = forward_kinematics(model, q_target, backend='numpy', return_end=True)
+        target_pose = forward_kinematics(model, q_target, return_end=True)
         q_init = random_q_in_limits(model, seed=args.seed + 1)
         
         compare_single_ik(model, target_pose, q_init, device=args.device)

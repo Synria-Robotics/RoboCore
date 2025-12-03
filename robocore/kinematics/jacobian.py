@@ -31,7 +31,6 @@ def jacobian(
     model: Any,
     q: Sequence[float] | Any,
     *,
-    backend: str = 'auto',
     method: str = 'analytic',
     # Local / partial options
     target_link: Optional[str] = None,
@@ -47,18 +46,17 @@ def jacobian(
     """
     :param model: RobotModel instance
     :param q: Joint configuration
-    :param backend: 'auto'|'numpy'|'torch'
     :param method: 'analytic'|'numeric'|'autograd'
     :param target_link: Target link name
     :param joint_indices: Selected joint indices
     :param row_mask: Row selection mask (len=6)
     :param epsilon: Finite-difference step (numeric)
     :param use_central_diff: Use central difference (numeric)
-    :param device: Torch device when using torch backend
-    :param dtype: Torch dtype when using torch backend
+    :param device: Torch device when using torch backend (uses global backend setting)
+    :param dtype: Torch dtype when using torch backend (uses global backend setting)
     :return: 6xn Jacobian matrix
     """
-    b = get_backend() if backend == 'auto' else backend
+    b = get_backend()
 
     method = method.lower()
 

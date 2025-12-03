@@ -56,7 +56,7 @@ def relative_pose_error(T_left: np.ndarray, T_right: np.ndarray, T_rel_desired: 
     return np.concatenate([e_pos, e_ori])
 
 
-def relative_jacobian(left_model, right_model, q_left, q_right, backend: str = 'numpy') -> np.ndarray:
+def relative_jacobian(left_model, right_model, q_left, q_right) -> np.ndarray:
     """Construct Jacobian for relative pose task (numerical differentiation).
     
     Maps joint velocities to relative pose velocity:
@@ -69,15 +69,14 @@ def relative_jacobian(left_model, right_model, q_left, q_right, backend: str = '
     :param right_model: Right arm robot model
     :param q_left: Left arm joint configuration
     :param q_right: Right arm joint configuration
-    :param backend: Backend for computation ('numpy' or 'auto')
     :return: 6 x (nL + nR) relative Jacobian matrix
     """
     eps = 1e-7
     
     def rel_pose_6d(qL, qR):
         """Compute relative pose as 6D vector (position + axis-angle)."""
-        TL = left_model.fk(qL, backend=backend, return_end=True)
-        TR = right_model.fk(qR, backend=backend, return_end=True)
+        TL = left_model.fk(qL, return_end=True)
+        TR = right_model.fk(qR, return_end=True)
         
         # Ensure numpy
         if hasattr(TL, 'detach'):

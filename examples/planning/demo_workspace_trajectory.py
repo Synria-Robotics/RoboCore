@@ -51,7 +51,7 @@ def analyze_workspace_for_planning(model, num_samples=5000, safe_threshold=0.01)
     print("步骤 1: 工作空间分析")
     print("="*70)
     
-    analyzer = WorkspaceAnalyzer(model, backend='numpy')
+    analyzer = WorkspaceAnalyzer(model)
     
     # 计算可达工作空间
     print(f"\n正在计算可达工作空间 (样本数: {num_samples})...")
@@ -228,7 +228,7 @@ def plan_trajectory_in_workspace(
     waypoints_joint = []
     
     # 起始点
-    T_start = forward_kinematics(model, q_start, backend='numpy', return_end=True)
+    T_start = forward_kinematics(model, q_start, return_end=True)
     p_start = T_start[:3, 3]
     waypoints_cartesian.append(p_start)
     waypoints_joint.append(q_start)
@@ -269,14 +269,14 @@ def plan_trajectory_in_workspace(
     
     for i, target_pos in enumerate(waypoints_cartesian[1:], 1):
         # 构造目标位姿（保持当前方向）
-        T_current = forward_kinematics(model, q_current, backend='numpy', return_end=True)
+        T_current = forward_kinematics(model, q_current, return_end=True)
         T_target = T_current.copy()
         T_target[:3, 3] = target_pos
         
         # IK求解
         result = inverse_kinematics(
             model, T_target, q_current,
-            backend='numpy', method='dls',
+            , method='dls',
             max_iters=200, pos_tol=1e-4, ori_tol=1e-4
         )
         
@@ -315,7 +315,7 @@ def plan_trajectory_in_workspace(
     print(f"\n验证轨迹在工作空间内...")
     trajectory_positions = []
     for q in q_traj:
-        T = forward_kinematics(model, q, backend='numpy', return_end=True)
+        T = forward_kinematics(model, q, return_end=True)
         trajectory_positions.append(T[:3, 3])
     
     trajectory_positions = np.array(trajectory_positions)

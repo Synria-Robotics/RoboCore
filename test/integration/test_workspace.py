@@ -59,7 +59,6 @@ class TestWorkspaceAnalyzer:
                 'y': (-0.5, 0.5),
                 'z': (0.0, 0.5)
             },
-            backend='numpy'
         )
         
         assert 'reachable_points' in result or 'grid' in result
@@ -72,7 +71,6 @@ class TestWorkspaceAnalyzer:
         
         result = analyzer.compute_workspace_volume(
             resolution=0.15,  # Coarse for speed
-            backend='numpy'
         )
         
         # Volume should be positive
@@ -92,8 +90,8 @@ class TestWorkspaceAnalyzer:
         point_far = np.array([10.0, 10.0, 10.0])
         
         try:
-            is_reachable_near = analyzer.is_reachable(point_near, backend='numpy')
-            is_reachable_far = analyzer.is_reachable(point_far, backend='numpy')
+            is_reachable_near = analyzer.is_reachable(point_near, )
+            is_reachable_far = analyzer.is_reachable(point_far, )
             
             # Near point more likely reachable than far point
             assert isinstance(is_reachable_near, bool)
@@ -106,7 +104,7 @@ class TestWorkspaceAnalyzer:
         analyzer = WorkspaceAnalyzer(robot_model)
         
         try:
-            boundary = analyzer.compute_boundary(resolution=0.2, backend='numpy')
+            boundary = analyzer.compute_boundary(resolution=0.2, )
             
             assert 'min_reach' in boundary or 'bounds' in boundary
             assert 'max_reach' in boundary or 'bounds' in boundary
@@ -124,7 +122,7 @@ class TestWorkspaceVisualization:
         analyzer = WorkspaceAnalyzer(robot_model)
         
         try:
-            plot_data = analyzer.get_plot_data(resolution=0.15, backend='numpy')
+            plot_data = analyzer.get_plot_data(resolution=0.15, )
             
             # Should return data suitable for plotting
             assert plot_data is not None
@@ -138,7 +136,7 @@ class TestWorkspaceVisualization:
         
         try:
             # XY plane at z=0.3
-            section = analyzer.cross_section(plane='xy', height=0.3, resolution=0.1, backend='numpy')
+            section = analyzer.cross_section(plane='xy', height=0.3, resolution=0.1, )
             
             assert section is not None
             assert 'points' in section or 'grid' in section

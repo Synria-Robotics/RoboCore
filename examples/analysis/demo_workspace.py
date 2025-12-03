@@ -286,7 +286,7 @@ def main():
     print(f"✓ Loaded {args.robot} ({dof}-DOF)")
     
     # Create analyzer
-    analyzer = WorkspaceAnalyzer(model, backend='numpy')
+    analyzer = WorkspaceAnalyzer(model)
     print(f"✓ Workspace analyzer initialized")
     
     # Demo 1: Reachable workspace

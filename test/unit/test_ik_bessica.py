@@ -22,6 +22,7 @@ from pathlib import Path
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.fk import forward_kinematics
 from robocore.kinematics.ik import inverse_kinematics
+import robocore
 
 
 URDF_PATH = Path('robocore/assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
@@ -71,18 +72,18 @@ class TestBessicaSevenDOF:
     @pytest.mark.parametrize("method", ["pinv", "dls"])  # transpose 通常也行，可按需加入
     def test_fk_ik_fk_closure(self, left_arm, method):
         q_target = random_q_in_limits(left_arm, seed=42)
-        T_target = forward_kinematics(left_arm, q_target, backend='numpy', return_end=True)
+        T_target = forward_kinematics(left_arm, q_target, return_end=True)
         q_init = random_q_in_limits(left_arm, seed=43)
 
         res = inverse_kinematics(
             left_arm, T_target, q_init,
-            backend='numpy', method=method,
+            method=method,
             max_iters=180, pos_tol=1e-4, ori_tol=1e-4
         )
         assert 'success' in res
         assert len(res['q']) == left_arm.num_dof
         if res['success']:
-            T_res = forward_kinematics(left_arm, res['q'], backend='numpy', return_end=True)
+            T_res = forward_kinematics(left_arm, res['q'], return_end=True)
             # 位置误差
             pos_err = np.linalg.norm(T_target[:3, 3] - T_res[:3, 3])
             # 姿态误差（轴角幅值）
@@ -95,14 +96,14 @@ class TestBessicaSevenDOF:
     def test_redundant_position_only_nullspace(self, left_arm):
         """位置-only 任务下测试 nullspace 关节居中效果（7DOF 冗余）。"""
         q_target = random_q_in_limits(left_arm, seed=11)
-        T_target = forward_kinematics(left_arm, q_target, backend='numpy', return_end=True)
+        T_target = forward_kinematics(left_arm, q_target, return_end=True)
         # 仅取位置部分作为任务目标（行掩码）——用原姿态以便 orientation 不影响（但我们放宽 ori_tol）
         q_init = random_q_in_limits(left_arm, seed=99)
 
         # 基准：无 nullspace
         base = inverse_kinematics(
             left_arm, T_target, q_init,
-            backend='numpy', method='pinv',
+            method='pinv',
             row_mask=[1,1,1,0,0,0],
             max_iters=160, pos_tol=1e-4, ori_tol=1e2,  # 放宽姿态容差
             nullspace_gain=0.0,
@@ -111,7 +112,7 @@ class TestBessicaSevenDOF:
         # 启用 nullspace 居中
         with_ns = inverse_kinematics(
             left_arm, T_target, q_init,
-            backend='numpy', method='pinv',
+            method='pinv',
             row_mask=[1,1,1,0,0,0],
             max_iters=160, pos_tol=1e-4, ori_tol=1e2,
             nullspace_gain=0.4,
@@ -186,7 +187,7 @@ class TestBessicaSevenDOF:
         q_init = random_q_in_limits(left_arm, seed=13)
         res = inverse_kinematics(
             left_arm, T_link, q_init,
-            backend='numpy', method='pinv',
+            method='pinv',
             target_link=target_link,
             max_iters=150, pos_tol=1e-4, ori_tol=1e-4
         )
