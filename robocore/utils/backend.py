@@ -45,7 +45,6 @@ class BackendManager:
         self._backend: Literal['numpy', 'torch'] = 'numpy'
         self._device: str = 'cpu'
         self._dtype = np.float64
-        self._torch_dtype = None
         self._torch_available = False
         
         # Try to import torch
@@ -53,7 +52,6 @@ class BackendManager:
             import torch as _torch
             self._torch = _torch
             self._torch_available = True
-            self._torch_dtype = _torch.float64
         except ImportError:
             self._torch = None
     
@@ -82,31 +80,34 @@ class BackendManager:
                     raise RuntimeError("CUDA is not available")
             self._device = device
             
-            # Set dtype
+            # Set dtype - convert to torch dtype if needed
             if dtype is None:
-                self._torch_dtype = self._torch.float64
+                self._dtype = self._torch.float64
+            else:
+                if hasattr(dtype, '__module__') and 'torch' in dtype.__module__:
+                    # Already a torch dtype
+                    self._dtype = dtype
+                else:
+                    # Convert numpy dtype to torch
+                    if dtype == np.float32:
+                        self._dtype = self._torch.float32
+                    else:
+                        self._dtype = self._torch.float64
+        else:
+            self._device = 'cpu'
+            # Set dtype - convert to numpy dtype if needed
+            if dtype is None:
                 self._dtype = np.float64
             else:
                 if hasattr(dtype, '__module__') and 'torch' in dtype.__module__:
-                    self._torch_dtype = dtype
-                    # Map torch dtype to numpy
+                    # Convert torch dtype to numpy
                     if dtype == self._torch.float32:
                         self._dtype = np.float32
                     else:
                         self._dtype = np.float64
                 else:
+                    # Already a numpy dtype
                     self._dtype = dtype
-                    # Map numpy dtype to torch
-                    if dtype == np.float32:
-                        self._torch_dtype = self._torch.float32
-                    else:
-                        self._torch_dtype = self._torch.float64
-        else:
-            self._device = 'cpu'
-            if dtype is not None:
-                self._dtype = dtype
-            else:
-                self._dtype = np.float64
 
         beauty_print(f"Backend set to {backend} on device {self._device} with dtype {self._dtype}")
 
@@ -121,8 +122,6 @@ class BackendManager:
     
     def get_dtype(self):
         """Get current dtype."""
-        if self._backend == 'torch':
-            return self._torch_dtype
         return self._dtype
     
     def ensure_array(self, data):
@@ -140,17 +139,16 @@ class BackendManager:
             else:
                 return np.array(data, dtype=self._dtype)
         else:  # torch
-            target_dtype = self._torch_dtype
             if self._torch_available and isinstance(data, self._torch.Tensor):
-                data = data.to(device=self._device, dtype=target_dtype)
+                data = data.to(device=self._device, dtype=self._dtype)
                 return data
             elif isinstance(data, np.ndarray):
                 return self._torch.from_numpy(data).to(
-                    device=self._device, dtype=target_dtype
+                    device=self._device, dtype=self._dtype
                 )
             else:
                 return self._torch.tensor(
-                    data, device=self._device, dtype=target_dtype
+                    data, device=self._device, dtype=self._dtype
                 )
     
     def array(self, data, dtype=None):
@@ -164,9 +162,7 @@ class BackendManager:
         if self._backend == 'numpy':
             return np.array(data, dtype=dtype if dtype is not None else self._dtype)
         else:
-            if dtype is None:
-                dtype = self._torch_dtype
-            return self._torch.tensor(data, device=self._device, dtype=dtype)
+            return self._torch.tensor(data, device=self._device, dtype=dtype if dtype is not None else self._dtype)
     
     def zeros(self, shape, dtype=None):
         """
@@ -179,9 +175,7 @@ class BackendManager:
         if self._backend == 'numpy':
             return np.zeros(shape, dtype=dtype if dtype is not None else self._dtype)
         else:
-            if dtype is None:
-                dtype = self._torch_dtype
-            return self._torch.zeros(shape, device=self._device, dtype=dtype)
+            return self._torch.zeros(shape, device=self._device, dtype=dtype if dtype is not None else self._dtype)
     
     def ones(self, shape, dtype=None):
         """
@@ -194,9 +188,7 @@ class BackendManager:
         if self._backend == 'numpy':
             return np.ones(shape, dtype=dtype if dtype is not None else self._dtype)
         else:
-            if dtype is None:
-                dtype = self._torch_dtype
-            return self._torch.ones(shape, device=self._device, dtype=dtype)
+            return self._torch.ones(shape, device=self._device, dtype=dtype if dtype is not None else self._dtype)
     
     def eye(self, n, dtype=None):
         """
@@ -209,9 +201,7 @@ class BackendManager:
         if self._backend == 'numpy':
             return np.eye(n, dtype=dtype if dtype is not None else self._dtype)
         else:
-            if dtype is None:
-                dtype = self._torch_dtype
-            return self._torch.eye(n, device=self._device, dtype=dtype)
+            return self._torch.eye(n, device=self._device, dtype=dtype if dtype is not None else self._dtype)
     
     @property
     def module(self):

@@ -20,23 +20,18 @@ Website: https://synriarobotics.ai
 """
 
 from __future__ import annotations
-import os
 import argparse
 import time
 import numpy as np
-from pathlib import Path
 
+import robocore as rc
 from robocore.modeling import RobotModel
 from robocore.kinematics.jacobian import jacobian
 from robocore.utils.beauty_logger import beauty_print
-from robocore.utils.path import get_robocore_path
-import robocore
 
 
 def main(args):
-    # Load model
-    model_path = args.model_path
-    model = RobotModel(model_path, end_link=args.end_link)
+    model = RobotModel(args.model_path, end_link=args.end_link)
 
     beauty_print(f"Jacobian Validation: {model.name} ({model.num_dof} DOF)", type="module")
     beauty_print(f"Backend: {args.backend}", type="info")
@@ -44,8 +39,7 @@ def main(args):
     rng = np.random.default_rng(args.seed)
 
     if args.backend == 'numpy':
-        # Set global backend
-        robocore.set_backend('numpy')
+        rc.set_backend('numpy')
 
         # NumPy backend comparison
         beauty_print("[1] Analytic vs Numeric Jacobian (NumPy)", type="module", centered=False)
@@ -100,16 +94,11 @@ def main(args):
         beauty_print(f"  Max:    {np.max(max_diffs):.3e}")
         beauty_print(f"  Min:    {np.min(max_diffs):.3e}")
 
-    else:  # torch
-        try:
-            import torch
-        except ImportError:
-            beauty_print("PyTorch not available", type="error")
-            return
+    else:
+        import torch
 
         device = torch.device(args.device)
-        # Set global backend
-        robocore.set_backend('torch', device=str(device))
+        rc.set_backend('torch', device=str(device))
 
         beauty_print(f"PyTorch device: {device}", type="info")
         beauty_print("[1] Analytic vs Numeric vs Autograd Jacobian (PyTorch)", type="module")

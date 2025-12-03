@@ -35,15 +35,12 @@ def main(args):
     rc.set_backend(backend)
 
     start_time = time.time()
-    model_path = args.model_path
-    end_link = args.end_link
-    joint_angles = args.joint_angles
 
-    robot_model = RobotModel(str(model_path), end_link=end_link)
+    robot_model = RobotModel(str(args.model_path), end_link=args.end_link)
     robot_model.summary(show_chain=True)
     robot_model.print_tree(show_fixed=True)
 
-    T_fk = forward_kinematics(robot_model, joint_angles, return_end=True)
+    T_fk = forward_kinematics(robot_model, args.joint_angles, return_end=True)
     position_fk = T_fk[:3, 3]
     rotation_fk = T_fk[:3, :3]
 
