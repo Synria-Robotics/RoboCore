@@ -67,7 +67,7 @@ class JacobianSolverTorch:
         :param model: robot model.
         """
         self.model = model
-        self.n = model.num_dof
+        self.n = model.num_chain_dof
     
     def solve(
         self,
@@ -248,43 +248,58 @@ class JacobianSolverTorch:
         J = torch.zeros((6, self.n), dtype=dtype, device=device)
         fk_solver = FKSolverTorch(self.model)
         
-        if use_central_diff:
-            T_ref = fk_solver.solve(q, return_end_only=True, device=device, dtype=dtype)["end"]
-            R_ref = T_ref[:3, :3].clone()
-            
-            for i in range(self.n):
-                qp = q.clone()
-                qp[i] += epsilon
-                T_pos = fk_solver.solve(qp, return_end_only=True, device=device, dtype=dtype)["end"]
-                p_pos = T_pos[:3, 3]
-                R_pos = T_pos[:3, :3]
-                
-                qn = q.clone()
-                qn[i] -= epsilon
-                T_neg = fk_solver.solve(qn, return_end_only=True, device=device, dtype=dtype)["end"]
-                p_neg = T_neg[:3, 3]
-                R_neg = T_neg[:3, :3]
-                
-                J[:3, i] = (p_pos - p_neg) / (2 * epsilon)
-                
-                err_pos = rotation_error(R_ref, R_pos)
-                err_neg = rotation_error(R_ref, R_neg)
-                J[3:6, i] = (err_pos - err_neg) / (2 * epsilon)
-        else:
-            T_ref = fk_solver.solve(q, return_end_only=True, device=device, dtype=dtype)["end"]
-            R_ref = T_ref[:3, :3]
-            p_ref = T_ref[:3, 3]
-            
-            for i in range(self.n):
-                qp = q.clone()
-                qp[i] += epsilon
-                T_pos = fk_solver.solve(qp, return_end_only=True, device=device, dtype=dtype)["end"]
-                p_pos = T_pos[:3, 3]
-                R_pos = T_pos[:3, :3]
-                
-                J[:3, i] = (p_pos - p_ref) / epsilon
-                err = rotation_error(R_ref, R_pos)
-                J[3:6, i] = err / epsilon
+        # Set backend to torch to ensure rotation_error returns torch tensors
+        original_backend = get_backend()
+        set_backend('torch', device=str(device), dtype=dtype)
+
+        try:
+            if use_central_diff:
+                T_ref = fk_solver.solve(q, return_end_only=True, device=device, dtype=dtype)["end"]
+                R_ref = T_ref[:3, :3].clone()
+
+                for i in range(self.n):
+                    qp = q.clone()
+                    qp[i] += epsilon
+                    T_pos = fk_solver.solve(qp, return_end_only=True, device=device, dtype=dtype)["end"]
+                    p_pos = T_pos[:3, 3]
+                    R_pos = T_pos[:3, :3]
+
+                    qn = q.clone()
+                    qn[i] -= epsilon
+                    T_neg = fk_solver.solve(qn, return_end_only=True, device=device, dtype=dtype)["end"]
+                    p_neg = T_neg[:3, 3]
+                    R_neg = T_neg[:3, :3]
+
+                    J[:3, i] = (p_pos - p_neg) / (2 * epsilon)
+
+                    err_pos = rotation_error(R_ref, R_pos)
+                    err_neg = rotation_error(R_ref, R_neg)
+                    # Ensure err_pos and err_neg are torch tensors
+                    if not torch.is_tensor(err_pos):
+                        err_pos = torch.tensor(err_pos, dtype=dtype, device=device)
+                    if not torch.is_tensor(err_neg):
+                        err_neg = torch.tensor(err_neg, dtype=dtype, device=device)
+                    J[3:6, i] = (err_pos - err_neg) / (2 * epsilon)
+            else:
+                T_ref = fk_solver.solve(q, return_end_only=True, device=device, dtype=dtype)["end"]
+                R_ref = T_ref[:3, :3]
+                p_ref = T_ref[:3, 3]
+
+                for i in range(self.n):
+                    qp = q.clone()
+                    qp[i] += epsilon
+                    T_pos = fk_solver.solve(qp, return_end_only=True, device=device, dtype=dtype)["end"]
+                    p_pos = T_pos[:3, 3]
+                    R_pos = T_pos[:3, :3]
+
+                    J[:3, i] = (p_pos - p_ref) / epsilon
+                    err = rotation_error(R_ref, R_pos)
+                    # Ensure err is torch tensor
+                    if not torch.is_tensor(err):
+                        err = torch.tensor(err, dtype=dtype, device=device)
+                    J[3:6, i] = err / epsilon
+        finally:
+            set_backend(original_backend)
         
         return J
     

@@ -72,8 +72,17 @@ class IKSolverTorch:
 
         # 统一 dtype 默认 float64（用户可覆盖）
         self.dtype = dtype if dtype is not None else torch.float64
-        # 关节数量（假定 model._chain_actuated 与 numpy 版本一致）
-        self.n = len(getattr(model, "_actuated"))
+        # 关节数量
+        # NumPy 版使用 model._chain_actuated / model.num_chain_dof，这里保持一致
+        if hasattr(model, "num_chain_dof"):
+            self.n = int(model.num_chain_dof)
+        elif hasattr(model, "_chain_actuated"):
+            self.n = len(model._chain_actuated)  # type: ignore[attr-defined]
+        else:
+            raise AttributeError(
+                "RobotModel instance missing 'num_chain_dof' / '_chain_actuated'; "
+                "expected recent RobotModel implementation."
+            )
         # Initialize FK solver
         self.fk_solver = FKSolverTorch(model)
         # Initialize Jacobian solver
@@ -91,6 +100,9 @@ class IKSolverTorch:
         method: str = "pinv",
         pos_weight: float = 1.0,
         ori_weight: float = 1.0,
+        # For API compatibility with NumPy solver; when not None, it overrides
+        # use_numeric_jacobian below (use_analytic_jacobian=True -> use_numeric_jacobian=False)
+        use_analytic_jacobian: Optional[bool] = None,
         # Local task options
         target_link: str | None = None,
         row_mask: Optional[Sequence[int | bool]] = None,
@@ -132,6 +144,11 @@ class IKSolverTorch:
             q0 = torch.tensor(q0, dtype=self.dtype, device=self.device)
         else:
             q0 = q0.to(dtype=self.dtype, device=self.device)
+        
+        # Map NumPy-style flag if provided
+        if use_analytic_jacobian is not None:
+            # NumPy: use_analytic_jacobian=True → analytic; here that means NOT numeric
+            use_numeric_jacobian = not bool(use_analytic_jacobian)
         
         # Detect batch mode
         is_batch = target_pose.ndim == 3  # [B, 4, 4]
@@ -549,12 +566,11 @@ class IKSolverTorch:
     def _apply_joint_limits(self, q: Tensor) -> Tensor:
         out = q.clone()
         for js in self.model._chain_actuated:  # type: ignore[attr-defined]
-            if js.limit is not None:
-                lo, hi = js.limit
-                if lo is not None:
-                    out[js.index] = torch.clamp(out[js.index], min=float(lo))
-                if hi is not None:
-                    out[js.index] = torch.clamp(out[js.index], max=float(hi))
+            if js.limit_lower is not None or js.limit_upper is not None:
+                if js.limit_lower is not None:
+                    out[js.index] = torch.clamp(out[js.index], min=float(js.limit_lower))
+                if js.limit_upper is not None:
+                    out[js.index] = torch.clamp(out[js.index], max=float(js.limit_upper))
         return out
 
     # ==================== Partial FK (single) ====================

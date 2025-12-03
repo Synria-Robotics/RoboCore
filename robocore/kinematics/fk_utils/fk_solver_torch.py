@@ -66,7 +66,7 @@ class FKSolverTorch:
         :param model: robot model.
         """
         self.model = model
-        self.n = model.num_dof
+        self.n = model.num_chain_dof
         self.joint_chain = model._chain_joints
         self.actuated_joints = model._chain_actuated
         self.base_link = model.base_link
@@ -139,8 +139,12 @@ class FKSolverTorch:
             raise ValueError(f"Expected q with {self.n} elements, got {q.shape[0]}")
         
         q_map = {j.name: q[j.index] for j in self.actuated_joints}
+        
+        # Determine root link (first joint's parent, which may be 'world' if world_to_base_joint exists)
+        root_link = self.joint_chain[0].parent if len(self.joint_chain) > 0 else self.base_link
+        
         poses: Dict[str, torch.Tensor] = {
-            self.base_link: torch.eye(4, dtype=dtype, device=q.device)
+            root_link: torch.eye(4, dtype=dtype, device=q.device)
         }
         
         # Set backend to torch temporarily
@@ -149,6 +153,9 @@ class FKSolverTorch:
         
         try:
             for joint in self.joint_chain:
+                # Ensure parent pose exists (for cases where parent is not base_link)
+                if joint.parent not in poses:
+                    poses[joint.parent] = torch.eye(4, dtype=dtype, device=q.device)
                 parent_pose = poses[joint.parent]
                 
                 # origin 变换

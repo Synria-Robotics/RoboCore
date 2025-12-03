@@ -107,7 +107,7 @@ def main(args):
         beauty_print(f"PyTorch device: {device}", type="info")
         beauty_print("[1] Analytic vs Numeric vs Autograd Jacobian (PyTorch)", type="module")
 
-        q = torch.zeros(model.num_dof, dtype=torch.float64, device=device)
+        q = torch.zeros(model.num_chain_dof, dtype=torch.float64, device=device)
 
         # Compute all three using unified interface
         Ja = jacobian(model, q, backend='torch', method='analytic', device=device)
@@ -158,12 +158,13 @@ def main(args):
 
 
 if __name__ == '__main__':
+    import synriard
+    model_path = synriard.get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="urdf")
+
     parser = argparse.ArgumentParser(description="Jacobian validation")
-    parser.add_argument('--model-path', type=str, 
-                        # default=get_robocore_path("assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf"),
-                        default=get_robocore_path("assets/robot_descriptions/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml"),
+    parser.add_argument('--model-path', type=str, default=model_path,
                         help='Path to URDF file (default: Alicia-D)')
-    parser.add_argument('--backend', choices=['numpy', 'torch'], default='numpy', help='Backend to test')
+    parser.add_argument('--backend', choices=['numpy', 'torch'], default='torch', help='Backend to test')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')    
     parser.add_argument('--device', default='cpu', help='PyTorch device (if torch backend)')
     parser.add_argument('--samples', type=int, default=10, help='Number of test configurations')

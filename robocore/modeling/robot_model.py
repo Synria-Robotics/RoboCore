@@ -169,8 +169,24 @@ class RobotModel:
             self._graph.setdefault(j.parent, []).append(j)
 
     def _build_chain(self):
+        # Check if world_to_base_joint exists - if so, start from world instead of base_link
+        # This ensures we include the world_to_base transformation in the kinematic chain
+        world_to_base_joint = None
+        for j in self.parsed_model.joints:
+            if j.name == 'world_to_base_joint' and j.parent == 'world' and j.child == self.base_link:
+                world_to_base_joint = j
+                break
+
+        # Determine the actual root link for chain building
+        if world_to_base_joint is not None:
+            # Start from world to include world_to_base_joint transformation
+            chain_root = 'world'
+        else:
+            # Use base_link as before
+            chain_root = self.base_link
+
         # Linearize active chain and collect actuated joints
-        self._chain_joints = self._linearize_chain(self.base_link, self.end_link)
+        self._chain_joints = self._linearize_chain(chain_root, self.end_link)
         self._chain_actuated = []
         idx = 0
         for j in self._chain_joints:

@@ -89,13 +89,19 @@ class FKSolverNumPy:
             # Build quick lookup
             q_map = {j.name: q[j.index] for j in self.actuated_joints}
 
-            # Base pose
+            # Determine root link (first joint's parent, which may be 'world' if world_to_base_joint exists)
+            root_link = self.joint_chain[0].parent if len(self.joint_chain) > 0 else self.base_link
+
+            # Base pose - start from root link
             poses: Dict[str, np.ndarray] = {
-                self.base_link: np.eye(4, dtype=np.float64)
+                root_link: np.eye(4, dtype=np.float64)
             }
 
             # Traverse chain
             for joint in self.joint_chain:
+                # Ensure parent pose exists (for cases where parent is not base_link)
+                if joint.parent not in poses:
+                    poses[joint.parent] = np.eye(4, dtype=np.float64)
                 parent_pose = poses[joint.parent]
 
                 # Joint origin transform (static)
