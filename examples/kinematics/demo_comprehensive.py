@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RoboCore Module
+"""RobotCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -26,18 +26,18 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
-from robocore.modeling.robot_model import RobotModel
-from robocore.kinematics.fk import forward_kinematics
-from robocore.kinematics.ik import inverse_kinematics
-from robocore.kinematics.jacobian import jacobian
+from robotcore.modeling.robot_model import RobotModel
+from robotcore.kinematics.fk import forward_kinematics
+from robotcore.kinematics.ik import inverse_kinematics
+from robotcore.kinematics.jacobian import jacobian
 
-from robocore.configs import ConfigManager, get_default_config
+from robotcore.configs import ConfigManager, get_default_config
 from omegaconf import OmegaConf
-from robocore.utils.beauty_logger import beauty_print_array, beauty_print
+from robotcore.utils.beauty_logger import beauty_print_array, beauty_print
 import random
 import math
 from time import perf_counter
-from robocore.transform import get_rotation, rotation_distance
+from robotcore.transform import get_rotation, rotation_distance
 
 
 def compute_fk_ik_jacobian(
@@ -478,8 +478,8 @@ if __name__ == '__main__':
     robot_group.add_argument(
         '--urdf',
         type=str,
-        default='robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf',
-        # default='robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf',
+        default='robotcore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf',
+        # default='robotcore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf',
         help='Path to URDF file'
     )
     robot_group.add_argument(

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RoboCore Module
+"""RobotCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -25,10 +25,10 @@ import numpy as np
 import torch
 import pytest
 from pathlib import Path
-from robocore.modeling.robot_model import RobotModel
-from robocore.kinematics.jacobian import jacobian
-from robocore.kinematics.jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
-from robocore.kinematics.jacobian_utils.jacobian_solver_numpy import JacobianSolverNumPy
+from robotcore.modeling.robot_model import RobotModel
+from robotcore.kinematics.jacobian import jacobian
+from robotcore.kinematics.jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
+from robotcore.kinematics.jacobian_utils.jacobian_solver_numpy import JacobianSolverNumPy
 
 
 def random_q_in_limits(model, seed=42):
@@ -52,7 +52,7 @@ def random_q_in_limits(model, seed=42):
 @pytest.fixture(scope="module")
 def robot_model():
     """Load robot model for testing."""
-    urdf_path = Path('robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
+    urdf_path = Path('robotcore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
     if not urdf_path.exists():
         pytest.skip(f"URDF not found: {urdf_path}")
     return RobotModel(str(urdf_path), end_link='tool0')

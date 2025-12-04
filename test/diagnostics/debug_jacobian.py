@@ -2,8 +2,8 @@
 """快速诊断双臂雅克比问题"""
 
 import numpy as np
-from robocore.modeling.robot_model import BimanualRobotModel
-from robocore.utils.path import get_robocore_path
+from robotcore.modeling.robot_model import BimanualRobotModel
+from robotcore.utils.path import get_robocore_path
 
 # 加载机器人
 mjcf_path = get_robocore_path("assets/robot/mjcf/Bessica-D_v1_0/Bessica-D_Interactive.xml")

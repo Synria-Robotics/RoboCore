@@ -4,9 +4,9 @@ Validates that simultaneous solving reaches both targets within tolerances.
 """
 from __future__ import annotations
 import numpy as np
-from robocore.modeling.robot_model import RobotModel
-from robocore.utils.path import get_robocore_path
-from robocore.kinematics.bimanual import dual_fk, dual_ik
+from robotcore.modeling.robot_model import RobotModel
+from robotcore.utils.path import get_robocore_path
+from robotcore.kinematics.bimanual import dual_fk, dual_ik
 
 URDF_REL = "assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf"
 

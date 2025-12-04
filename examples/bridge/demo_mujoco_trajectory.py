@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RoboCore Module
+"""RobotCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -20,6 +20,11 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
+from robotcore.planning.trajectory import multi_waypoint_trajectory
+from robotcore.kinematics.ik import inverse_kinematics
+from robotcore.kinematics.fk import forward_kinematics
+from robotcore.analysis.workspace_analyzer import WorkspaceAnalyzer
+from robotcore.modeling.robot_model import RobotModel
 import os
 import numpy as np
 import argparse
@@ -29,14 +34,9 @@ import sys
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from robocore.modeling.robot_model import RobotModel
-from robocore.analysis.workspace_analyzer import WorkspaceAnalyzer
-from robocore.kinematics.fk import forward_kinematics
-from robocore.kinematics.ik import inverse_kinematics
-from robocore.planning.trajectory import multi_waypoint_trajectory
 
 try:
-    from robocore.bridge.sim.mujoco.trajectory_visualizer import TrajectoryVisualizer
+    from robotcore.bridge.sim.mujoco.trajectory_visualizer import TrajectoryVisualizer
     MUJOCO_AVAILABLE = True
 except ImportError:
     MUJOCO_AVAILABLE = False
@@ -45,7 +45,7 @@ except ImportError:
 
 def find_mjcf_file(robot_name: str, arm: str = 'left') -> Path:
     """Find MuJoCo MJCF file for robot."""
-    assets_dir = Path(__file__).parent.parent / 'robocore' / 'assets'
+    assets_dir = Path(__file__).parent.parent / 'robotcore' / 'assets'
     
     # Search for MJCF files
     mjcf_dirs = [
@@ -247,10 +247,10 @@ def main():
     # Load robot model
     print(f"\nLoading robot model...")
     if args.robot == 'alicia':
-        urdf_path = os.path.join(Path(__file__).parent.parent, '../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
+        urdf_path = os.path.join(Path(__file__).parent.parent, '../robotcore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
         dof = 6
     else:  # bessica
-        urdf_path = os.path.join(Path(__file__).parent.parent, '../robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
+        urdf_path = os.path.join(Path(__file__).parent.parent, '../robotcore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
         dof = 7
     
     model = RobotModel(str(urdf_path))
@@ -268,7 +268,7 @@ def main():
         print(f"\nTo create MuJoCo MJCF file:")
         print(f"  1. Manually convert URDF to MJCF format")
         print(f"  2. Or use --mjcf to specify MJCF file path")
-        print(f"\nMJCF example location: robocore/assets/robot/mjcf/")
+        print(f"\nMJCF example location: robotcore/assets/robot/mjcf/")
         print(f"\nFallback: Attempting to load URDF directly (may have compatibility issues)")
         
         # Try to use URDF directly

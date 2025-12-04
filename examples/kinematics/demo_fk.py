@@ -22,11 +22,11 @@ Website: https://synriarobotics.ai
 import numpy as np
 import argparse
 
-from robocore.modeling.robot_model import RobotModel
-from robocore.kinematics.fk import forward_kinematics
-from robocore.utils.beauty_logger import beauty_print_array, beauty_print
-from robocore.utils.path import get_robocore_path
-from robocore.transform.conversions import *
+from robotcore.modeling.robot_model import RobotModel
+from robotcore.kinematics.fk import forward_kinematics
+from robotcore.utils.beauty_logger import beauty_print_array, beauty_print
+from robotcore.utils.path import get_robocore_path
+from robotcore.transform.conversions import *
 
 
 def main(args):

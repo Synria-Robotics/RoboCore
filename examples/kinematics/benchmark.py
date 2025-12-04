@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RoboCore Module
+"""RobotCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -29,18 +29,18 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from robocore.modeling import RobotModel
-from robocore.kinematics import forward_kinematics, inverse_kinematics, jacobian
-from robocore.utils.beauty_logger import beauty_print
-from robocore.utils.path import get_robocore_path
+from robotcore.modeling import RobotModel
+from robotcore.kinematics import forward_kinematics, inverse_kinematics, jacobian
+from robotcore.utils.beauty_logger import beauty_print
+from robotcore.utils.path import get_robocore_path
 
 # Check PyTorch availability
 _HAS_TORCH = False
 try:
     import torch
     _HAS_TORCH = True
-    from robocore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
-    from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
+    from robotcore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
+    from robotcore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
 except ImportError:
     pass
 
@@ -349,7 +349,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description="Unified Benchmark Suite for RoboCore Kinematics",
+        description="Unified Benchmark Suite for RobotCore Kinematics",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 

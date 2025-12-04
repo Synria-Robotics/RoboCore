@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RoboCore Module
+"""RobotCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -24,7 +24,7 @@ Website: https://synriarobotics.ai
 import numpy as np
 import torch
 import pytest
-from robocore.transform import (
+from robotcore.transform import (
     rpy_to_matrix,
     matrix_to_rpy,
     quaternion_to_matrix,
@@ -152,7 +152,7 @@ class TestBackendConsistency:
     @pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires PyTorch")
     def test_rpy_numpy_vs_torch(self):
         """Test RPY conversion consistency between NumPy and PyTorch."""
-        from robocore.utils.backend import set_backend, get_backend
+        from robotcore.utils.backend import set_backend, get_backend
         
         roll, pitch, yaw = 0.1, 0.2, 0.3
         

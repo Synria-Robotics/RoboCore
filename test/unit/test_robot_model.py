@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RoboCore Module
+"""RobotCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -23,13 +23,13 @@ Website: https://synriarobotics.ai
 
 import pytest
 from pathlib import Path
-from robocore.modeling.robot_model import RobotModel
+from robotcore.modeling.robot_model import RobotModel
 
 
 @pytest.fixture(scope="module")
 def urdf_path():
     """Path to test URDF file."""
-    path = Path('robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
+    path = Path('robotcore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
     if not path.exists():
         pytest.skip(f"URDF not found: {path}")
     return str(path)

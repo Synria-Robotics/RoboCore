@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to RoboCore will be documented in this file.
+All notable changes to RobotCore will be documented in this file.
 
 ## [1.0.0] - 2024-10-04
 
@@ -10,13 +10,13 @@ All notable changes to RoboCore will be documented in this file.
 - **[CRITICAL]** Batch IK accuracy issue: Fixed FK chain traversal to include fixed joints
   - Success rate improved from 41% to 78% (now matches NumPy baseline)
   - Jacobian matrix accuracy improved to perfect match (max_diff: 0.126 → 0.0)
-  - File: `robocore/kinematics/ik_utils/ik_solver_torch.py`
+  - File: `robotcore/kinematics/ik_utils/ik_solver_torch.py`
 
 - **Backend contamination**: NumPy solvers now properly isolate backend state
-  - Files: `robocore/kinematics/fk_utils/fk_solver_numpy.py`, `robocore/kinematics/jacobian_utils/jacobian_solver_numpy.py`
+  - Files: `robotcore/kinematics/fk_utils/fk_solver_numpy.py`, `robotcore/kinematics/jacobian_utils/jacobian_solver_numpy.py`
 
 - **Type annotations**: Fixed Tensor type imports for proper IDE support
-  - File: `robocore/kinematics/ik_utils/ik_solver_torch.py`
+  - File: `robotcore/kinematics/ik_utils/ik_solver_torch.py`
 
 ### Changed
 - Cleaned debug code from production solvers

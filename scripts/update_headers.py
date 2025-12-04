@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """Batch update file headers with Synria Robotics copyright notice.
 
-This script updates all Python files in the RoboCore project with
+This script updates all Python files in the RobotCore project with
 a standardized header containing copyright and license information.
 """
 
@@ -42,9 +42,9 @@ def extract_title(content: str) -> str:
     if docstring_match:
         first_line = docstring_match.group(1).strip().split('\n')[0]
         # Remove common prefixes
-        first_line = re.sub(r'^(RoboCore\s*-?\s*)?', '', first_line, flags=re.IGNORECASE)
+        first_line = re.sub(r'^(RobotCore\s*-?\s*)?', '', first_line, flags=re.IGNORECASE)
         return first_line.strip()
-    return "RoboCore Module"
+    return "RobotCore Module"
 
 
 def update_python_file(filepath: Path, dry_run: bool = False) -> Tuple[bool, str]:

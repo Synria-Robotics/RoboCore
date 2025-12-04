@@ -13,15 +13,15 @@ Tests:
 import pytest
 import numpy as np
 from pathlib import Path
-from robocore.modeling.robot_model import RobotModel
-from robocore.kinematics.bimanual import (
+from robotcore.modeling.robot_model import RobotModel
+from robotcore.kinematics.bimanual import (
     nullspace_projector,
     dual_ik_hierarchical,
     relative_pose_error,
     Task,
 )
-from robocore.transform.se3 import make_transform
-from robocore.transform.so3 import rpy_to_matrix
+from robotcore.transform.se3 import make_transform
+from robotcore.transform.so3 import rpy_to_matrix
 
 
 class TestNullspaceProjector:
@@ -75,7 +75,7 @@ class TestHierarchicalIK:
     @pytest.fixture
     def dual_arms(self):
         """Load dual-arm models."""
-        urdf_path = Path("robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
+        urdf_path = Path("robotcore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
         
         if not urdf_path.exists():
             pytest.skip(f"Bessica URDF not found: {urdf_path}")

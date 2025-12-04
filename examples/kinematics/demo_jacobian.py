@@ -26,10 +26,10 @@ import time
 import numpy as np
 from pathlib import Path
 
-from robocore.modeling import RobotModel
-from robocore.kinematics.jacobian import jacobian
-from robocore.utils.beauty_logger import beauty_print
-from robocore.utils.path import get_robocore_path
+from robotcore.modeling import RobotModel
+from robotcore.kinematics.jacobian import jacobian
+from robotcore.utils.beauty_logger import beauty_print
+from robotcore.utils.path import get_robocore_path
 
 
 def main(args):

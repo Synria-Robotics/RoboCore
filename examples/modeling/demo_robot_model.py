@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RoboCore Module
+"""RobotCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -27,12 +27,12 @@ import argparse
 import numpy as np
 from pathlib import Path
 
-from robocore.modeling.robot_model import RobotModel
-from robocore.kinematics.fk import forward_kinematics
-from robocore.kinematics.ik import inverse_kinematics
-from robocore.kinematics.jacobian import jacobian
-from robocore.utils.beauty_logger import beauty_print, beauty_print_array
-from robocore.utils.path import get_robocore_path
+from robotcore.modeling.robot_model import RobotModel
+from robotcore.kinematics.fk import forward_kinematics
+from robotcore.kinematics.ik import inverse_kinematics
+from robotcore.kinematics.jacobian import jacobian
+from robotcore.utils.beauty_logger import beauty_print, beauty_print_array
+from robotcore.utils.path import get_robocore_path
 
 
 def compare_fk(model_a: RobotModel, model_b: RobotModel, q):

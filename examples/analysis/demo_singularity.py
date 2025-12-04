@@ -21,14 +21,14 @@ Website: https://synriarobotics.ai
 
 import os
 from pathlib import Path
-from robocore.modeling.robot_model import RobotModel
-from robocore.analysis.singularity_analyzer import SingularityAnalyzer
-from robocore.utils.beauty_logger import beauty_print
+from robotcore.modeling.robot_model import RobotModel
+from robotcore.analysis.singularity_analyzer import SingularityAnalyzer
+from robotcore.utils.beauty_logger import beauty_print
 
 
 def main():
     base = Path(__file__).resolve().parents[1]
-    urdf = os.path.join(base, "../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
+    urdf = os.path.join(base, "../robotcore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
     model = RobotModel(str(urdf), end_link="tool0")
 
     analyzer = SingularityAnalyzer(model)

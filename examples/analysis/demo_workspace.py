@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RoboCore Module
+"""RobotCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -26,8 +26,8 @@ import argparse
 from pathlib import Path
 import time
 
-from robocore.modeling.robot_model import RobotModel
-from robocore.analysis.workspace_analyzer import WorkspaceAnalyzer
+from robotcore.modeling.robot_model import RobotModel
+from robotcore.analysis.workspace_analyzer import WorkspaceAnalyzer
 
 
 def demo_reachable_workspace(analyzer, num_samples=10000, visualize=False):
@@ -275,10 +275,10 @@ def main():
     print(f"\nLoading robot model...")
     
     if args.robot == 'alicia':
-        urdf_path = os.path.join(Path(__file__).parent.parent, '../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
+        urdf_path = os.path.join(Path(__file__).parent.parent, '../robotcore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
         dof = 6
     else:  # bessica
-        urdf_path = os.path.join(Path(__file__).parent.parent, '../robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
+        urdf_path = os.path.join(Path(__file__).parent.parent, '../robotcore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
         dof = 7
     
     model = RobotModel(str(urdf_path))

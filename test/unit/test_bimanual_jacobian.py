@@ -14,8 +14,8 @@ import pytest
 import numpy as np
 from pathlib import Path
 
-from robocore.modeling.robot_model import BimanualRobotModel
-from robocore.utils.path import get_robocore_path
+from robotcore.modeling.robot_model import BimanualRobotModel
+from robotcore.utils.path import get_robocore_path
 
 
 @pytest.fixture
@@ -58,7 +58,7 @@ def numerical_jacobian_relative(robot, q_left, q_right, epsilon=1e-6):
     
     Uses the utils.relative_jacobian function which is already numerically validated.
     """
-    from robocore.kinematics.utils import relative_jacobian
+    from robotcore.kinematics.utils import relative_jacobian
     
     return relative_jacobian(
         robot.left_model, robot.right_model,

@@ -8,7 +8,7 @@
 
 ### 1. 坐标变换与表示 ✅ 较完善
 
-**已有功能** (`robocore/transform/transform_core.py`):
+**已有功能** (`robotcore/transform/transform_core.py`):
 ```
 ✅ RPY (Roll-Pitch-Yaw) → 旋转矩阵
 ✅ 轴角 (Axis-Angle) → 旋转矩阵 (Rodrigues公式)
@@ -49,7 +49,7 @@
 
 **建议**:
 ```python
-# robocore/transform/rotation.py (新建)
+# robotcore/transform/rotation.py (新建)
 from dataclasses import dataclass
 
 @dataclass
@@ -81,7 +81,7 @@ def rotation_matrix_to_euler(R: np.ndarray, convention='XYZ') -> Tuple[float, fl
 
 **已有功能**:
 ```
-✅ URDF解析 (robocore/modeling/robot_model.py)
+✅ URDF解析 (robotcore/modeling/robot_model.py)
 ✅ MJCF支持 (通过MuJoCo桥接)
 ✅ 运动链提取 (串联机构)
 ✅ 关节限位读取
@@ -90,7 +90,7 @@ def rotation_matrix_to_euler(R: np.ndarray, convention='XYZ') -> Tuple[float, fl
 **可能缺失**:
 ```
 ⚠️ DH参数完整支持
-   - 有DH提取功能 (robocore/transform/dh.py)
+   - 有DH提取功能 (robotcore/transform/dh.py)
    - 但可能缺少：直接从DH参数构建机器人
 
 ❌ 并联机构 (Parallel Robots)
@@ -112,19 +112,19 @@ def rotation_matrix_to_euler(R: np.ndarray, convention='XYZ') -> Tuple[float, fl
 
 **建议**:
 ```python
-# robocore/modeling/dh_robot.py (新建)
+# robotcore/modeling/dh_robot.py (新建)
 class DHRobot(RobotModel):
     """从DH参数直接构建机器人"""
     def __init__(self, dh_params: List[DHRow], convention='standard'):
         ...
 
-# robocore/modeling/parallel_robot.py (新建)
+# robotcore/modeling/parallel_robot.py (新建)
 class ParallelRobot(RobotModel):
     """并联机器人"""
     def __init__(self, urdf_path, closed_chains):
         ...
         
-# robocore/modeling/tree_robot.py (新建)
+# robotcore/modeling/tree_robot.py (新建)
 class TreeRobot(RobotModel):
     """树状机器人（人形等）"""
     def forward_kinematics_branch(self, branch_name, q):
@@ -139,7 +139,7 @@ class TreeRobot(RobotModel):
 
 **已有功能**:
 ```
-✅ URDF正运动学 (robocore/modeling/robot_model.py)
+✅ URDF正运动学 (robotcore/modeling/robot_model.py)
 ✅ DH正运动学 (standard/modified)
 ✅ 返回末端位姿 (4x4矩阵)
 ✅ 返回所有连杆位姿 (可选)
@@ -164,7 +164,7 @@ class TreeRobot(RobotModel):
 
 **建议**:
 ```python
-# robocore/kinematics/fk.py (增强)
+# robotcore/kinematics/fk.py (增强)
 def forward_velocity(
     robot_model: RobotModel,
     q: np.ndarray,
@@ -222,7 +222,7 @@ def forward_kinematics_link(
 
 **建议**:
 ```python
-# robocore/kinematics/jacobian.py (增强)
+# robotcore/kinematics/jacobian.py (增强)
 def jacobian_derivative(
     robot_model: RobotModel,
     q: np.ndarray,
@@ -301,7 +301,7 @@ def task_jacobian(
 
 **建议**:
 ```python
-# robocore/kinematics/ik_analytical.py (新建)
+# robotcore/kinematics/ik_analytical.py (新建)
 class AnalyticalIKSolver:
     """特定机器人的解析IK"""
     @staticmethod
@@ -310,7 +310,7 @@ class AnalyticalIKSolver:
         # 返回所有可能的解 (最多8个)
         ...
 
-# robocore/kinematics/ik.py (增强)
+# robotcore/kinematics/ik.py (增强)
 def inverse_kinematics_redundant(
     robot_model: RobotModel,
     target_pose: np.ndarray,
@@ -512,7 +512,7 @@ def inverse_kinematics_constrained(
 
 **建议**:
 ```python
-# robocore/planning/trajectory/interpolation.py (新建)
+# robotcore/planning/trajectory/interpolation.py (新建)
 def resample_trajectory(
     t_orig: np.ndarray,
     q_orig: np.ndarray,
@@ -548,7 +548,7 @@ def time_scale_trajectory(
 
 **当前状态**:
 ```
-❌ robocore/dynamics/ 文件夹为空
+❌ robotcore/dynamics/ 文件夹为空
 ```
 
 **需要的功能**:
@@ -582,14 +582,14 @@ def time_scale_trajectory(
 
 **建议**:
 ```python
-# robocore/dynamics/__init__.py (新建)
+# robotcore/dynamics/__init__.py (新建)
 from .inverse_dynamics import inverse_dynamics
 from .forward_dynamics import forward_dynamics
 from .mass_matrix import mass_matrix
 from .coriolis import coriolis_centrifugal
 from .gravity import gravity_vector
 
-# robocore/dynamics/inverse_dynamics.py
+# robotcore/dynamics/inverse_dynamics.py
 def inverse_dynamics(
     robot_model: RobotModel,
     q: np.ndarray,
@@ -603,7 +603,7 @@ def inverse_dynamics(
     """
     ...
 
-# robocore/dynamics/forward_dynamics.py
+# robotcore/dynamics/forward_dynamics.py
 def forward_dynamics(
     robot_model: RobotModel,
     q: np.ndarray,
@@ -630,7 +630,7 @@ def forward_dynamics(
 
 **当前状态**:
 ```
-❌ robocore/controller/ 文件夹为空
+❌ robotcore/controller/ 文件夹为空
 ```
 
 **需要的功能**:
@@ -654,12 +654,12 @@ def forward_dynamics(
 ```
 
 **设计原则**:
-- **RoboCore**: 提供控制算法（只计算控制律）
+- **RobotCore**: 提供控制算法（只计算控制律）
 - **SDK**: 负责实时执行（读写硬件）
 
 **建议**:
 ```python
-# robocore/controller/trajectory_controller.py (新建)
+# robotcore/controller/trajectory_controller.py (新建)
 class TrajectoryController:
     """轨迹跟踪PD/PID控制"""
     def __init__(self, Kp, Kd, Ki=None):
@@ -673,7 +673,7 @@ class TrajectoryController:
         """返回控制力矩（或位置修正）"""
         ...
 
-# robocore/controller/computed_torque.py (新建)
+# robotcore/controller/computed_torque.py (新建)
 class ComputedTorqueController:
     """基于模型的前馈+反馈控制"""
     def __init__(self, robot_model, Kp, Kd):
@@ -815,20 +815,20 @@ class ComputedTorqueController:
 
 1. **四元数支持** [P0]
    ```python
-   robocore/transform/quaternion.py
+   robotcore/transform/quaternion.py
    - Quaternion类
    - 各种转换函数
    ```
 
 2. **旋转表示转换** [P0]
    ```python
-   robocore/transform/rotation_convert.py
+   robotcore/transform/rotation_convert.py
    - rotation_matrix_to_*系列函数
    ```
 
 3. **轨迹插值工具** [P0]
    ```python
-   robocore/planning/trajectory/interpolation.py
+   robotcore/planning/trajectory/interpolation.py
    - resample_trajectory
    - smooth_trajectory
    - time_scale_trajectory
@@ -838,15 +838,15 @@ class ComputedTorqueController:
 
 4. **速度运动学** [P1]
    ```python
-   robocore/kinematics/fk.py
+   robotcore/kinematics/fk.py
    - forward_velocity
-   robocore/kinematics/jacobian.py
+   robotcore/kinematics/jacobian.py
    - jacobian_derivative
    ```
 
 5. **动力学模块** [P1]
    ```python
-   robocore/dynamics/
+   robotcore/dynamics/
    - inverse_dynamics.py
    - mass_matrix.py
    - coriolis.py
@@ -855,14 +855,14 @@ class ComputedTorqueController:
 
 6. **控制器模块** [P1]
    ```python
-   robocore/controller/
+   robotcore/controller/
    - trajectory_controller.py
    - computed_torque.py
    ```
 
 7. **LQT规划迁移** [P1]
    ```python
-   robocore/planning/trajectory/lqt_planner.py
+   robotcore/planning/trajectory/lqt_planner.py
    ```
 
 ### 第三阶段：高级特性（按需）
