@@ -452,6 +452,9 @@ def main(args):
 
 
 if __name__ == '__main__':
+    import synriard
+    model_path = synriard.get_model_path("Alicia_D", version="v5_6", variant="gripper_50mm")
+
     parser = argparse.ArgumentParser(
         description='Compute FK, IK (DLS), and Jacobian (Analytical) for specified joint angles',
         formatter_class=argparse.RawDescriptionHelpFormatter
@@ -478,8 +481,7 @@ if __name__ == '__main__':
     robot_group.add_argument(
         '--urdf',
         type=str,
-        default='robotcore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf',
-        # default='robotcore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf',
+        default=model_path,
         help='Path to URDF file'
     )
     robot_group.add_argument(

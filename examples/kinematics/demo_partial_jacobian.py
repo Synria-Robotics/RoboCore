@@ -14,7 +14,6 @@ Run:
 import argparse
 import numpy as np
 from robotcore.modeling.robot_model import RobotModel
-from robotcore.utils.path import get_robocore_path
 from robotcore.utils.beauty_logger import beauty_print, beauty_print_array
 
 
@@ -55,8 +54,11 @@ def main(args):
 
 
 if __name__ == "__main__":
+    import synriard
+    model_path = synriard.get_model_path("Alicia_D", version="v5_6", variant="gripper_50mm")
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('--urdf', type=str, default=get_robocore_path("assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf"))
+    parser.add_argument('--urdf', type=str, default=model_path)
     parser.add_argument('--end-link', type=str, default='tool0')
     parser.add_argument('--elbow-link', type=str, default=None, help='Optional intermediate link name (e.g. elbow link)')
     args = parser.parse_args()

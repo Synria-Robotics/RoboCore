@@ -29,7 +29,6 @@ from pathlib import Path
 from robotcore.modeling import RobotModel
 from robotcore.kinematics.jacobian import jacobian
 from robotcore.utils.beauty_logger import beauty_print
-from robotcore.utils.path import get_robocore_path
 
 
 def main(args):
@@ -166,8 +165,11 @@ def main(args):
 
 
 if __name__ == '__main__':
+    import synriard
+    model_path = synriard.get_model_path("Alicia_D", version="v5_6", variant="gripper_50mm")
+
     parser = argparse.ArgumentParser(description="Jacobian validation")
-    parser.add_argument('--urdf', type=str, default=get_robocore_path("assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf"),
+    parser.add_argument('--urdf', type=str, default=model_path,
                         help='Path to URDF file (default: Alicia-D)')
     parser.add_argument('--backend', choices=['numpy', 'torch'], default='numpy',
                         help='Backend to test')

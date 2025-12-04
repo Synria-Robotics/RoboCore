@@ -21,8 +21,6 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
-import os
-import sys
 import time
 import argparse
 import numpy as np
@@ -32,7 +30,6 @@ from typing import Dict, List, Tuple
 from robotcore.modeling import RobotModel
 from robotcore.kinematics import forward_kinematics, inverse_kinematics, jacobian
 from robotcore.utils.beauty_logger import beauty_print
-from robotcore.utils.path import get_robocore_path
 
 # Check PyTorch availability
 _HAS_TORCH = False
@@ -348,6 +345,9 @@ def main(args):
 
 
 if __name__ == '__main__':
+    import synriard
+    model_path = synriard.get_model_path("Alicia_D", version="v5_6", variant="gripper_50mm")
+
     parser = argparse.ArgumentParser(
         description="Unified Benchmark Suite for RobotCore Kinematics",
         formatter_class=argparse.RawDescriptionHelpFormatter
@@ -355,7 +355,7 @@ if __name__ == '__main__':
 
     # Global options
     parser.add_argument('--urdf', type=str,
-                        default=get_robocore_path('assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf'),
+                        default=model_path,
                         help='Path to URDF file')
     parser.add_argument('--end-link', type=str, default='tool0',
                         help='End-effector link name')
