@@ -22,29 +22,40 @@
 | **Modeling** | URDF parsing | ✅ |
 | | MJCF parsing | ✅ |
 | | Robot model abstraction | ✅ |
+| | Multi-chain support | ✅ |
 | | Bimanual robot model | ✅ |
+| | Workspace analysis | ✅ |
 | **Transform** | SE(3) operations | ✅ |
 | | SO(3) operations | ✅ |
 | | Rotation conversions | ✅ |
 | | Quaternion operations | ✅ |
-| **Analysis** | Workspace analysis | 🟡 |
+| **Planning** | Joint space (polynomial/spline/multi-segment) | ✅ |
+| | Cartesian space (linear/circular/spline) | ✅ |
+| | Orientation planning (SLERP) | ✅ |
+| | Velocity profiles (trapezoidal/S-curve) | ✅ |
+| **Control** | Joint position controller (PD/PID) | ✅ |
+| | Joint velocity controller | ✅ |
+| | Joint trajectory tracking controller | ✅ |
+| | Cartesian position controller | ✅ |
+| | Cartesian velocity controller | ✅ |
+| | Cartesian trajectory tracking controller | ✅ |
+| | Computed torque controller | ⚪ |
+| | Impedance controller | ⚪ |
+| | MPC controller | ⚪ |
+| **Analysis** | Workspace analysis | ✅ |
 | | Singularity analysis | 🟡 |
-| **Planning** | Joint space trajectory | 🟡 |
-| | Cartesian space trajectory | 🟡 |
-| | Velocity profiles | 🟡 |
 | **WDF** | SDF (Signed Distance Field) | ✅ |
 | | RDF (Relative Distance Field) | ✅ |
 | | Visualization | ✅ |
 | **Config** | YAML configuration | ✅ |
 | | Config schemas | ✅ |
 | **Bridge** | MuJoCo simulation bridge | ✅ |
+| | Physics simulation & evaluation | ✅ |
 | | Real robot bridge (partial) | 🟡 |
 | **Dynamics** | Inverse dynamics | ⚪ |
 | | Forward dynamics | ⚪ |
 | | Mass matrix computation | ⚪ |
-| **Control** | PID controller | ⚪ |
-| | MPC controller | ⚪ |
-| | Impedance controller | ⚪ |
+| | Coriolis & gravity computation | ⚪ |
 | **Collision** | Mesh-based collision detection | ⚪ |
 | | Distance computation | ⚪ |
 | **Path Planning** | RRT/RRT* algorithms | ⚪ |

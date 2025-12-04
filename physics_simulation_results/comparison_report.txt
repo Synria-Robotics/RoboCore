@@ -1,0 +1,67 @@
+======================================================================
+Trajectory Execution Comparison Report
+======================================================================
+
+Comparisons:
+  1. position_smooth
+     (control_mode=position, trajectory_type=smooth)
+  2. position_non_smooth
+     (control_mode=position, trajectory_type=non_smooth)
+  3. velocity_smooth
+     (control_mode=velocity, trajectory_type=smooth)
+  4. velocity_non_smooth
+     (control_mode=velocity, trajectory_type=non_smooth)
+  5. torque_smooth
+     (control_mode=torque, trajectory_type=smooth)
+  6. torque_non_smooth
+     (control_mode=torque, trajectory_type=non_smooth)
+
+Summary Statistics
+----------------------------------------------------------------------
+Position Tracking Error (RMS):
+  position_smooth: 0.725506
+  position_non_smooth: 0.856798
+  velocity_smooth: 0.784228
+  velocity_non_smooth: 0.895079
+  torque_smooth: 12.945452
+  torque_non_smooth: 22.507879
+
+Position Tracking Error (Max):
+  position_smooth: 3.280704
+  position_non_smooth: 3.412973
+  velocity_smooth: 3.262187
+  velocity_non_smooth: 3.330543
+  torque_smooth: 40.308547
+  torque_non_smooth: 97.431147
+
+Jerk (Max):
+  position_smooth: 249410822.736361
+  position_non_smooth: 249834819.239982
+  velocity_smooth: 249556379.373769
+  velocity_non_smooth: 246369978.797398
+  torque_smooth: 29718844.842436
+  torque_non_smooth: 184779891.754989
+
+Max Torque:
+  position_smooth: 5.000000
+  position_non_smooth: 5.000000
+  velocity_smooth: 5.000000
+  velocity_non_smooth: 5.000000
+  torque_smooth: 5.000000
+  torque_non_smooth: 5.000000
+
+Vibration Detected:
+  position_smooth: Yes
+  position_non_smooth: Yes
+  velocity_smooth: Yes
+  velocity_non_smooth: Yes
+  torque_smooth: Yes
+  torque_non_smooth: Yes
+
+Best Performers:
+----------------------------------------------------------------------
+  Best Tracking: position_smooth
+  Smoothest: torque_smooth
+  Lowest Torque: position_smooth
+
+======================================================================

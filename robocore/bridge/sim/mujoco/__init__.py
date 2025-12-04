@@ -1,4 +1,4 @@
-"""High-Performance Robotics Kinematics Library
+"""MuJoCo physics simulation modules.
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -19,26 +19,31 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
-__version__ = "1.0.0"
-__author__ = "Synria Robotics Team"
-__copyright__ = "Copyright (c) 2025 Synria Robotics Co., Ltd."
-__license__ = "GPL-3.0"
-
-from . import modeling
-from . import kinematics
-from . import transform
-from . import planning
-from . import analysis
-from . import configs
-from . import utils
-from . import control
-
-# Export backend management functions
-from .utils.backend import set_backend, get_backend
+from .physics_simulator import PhysicsSimulator
+from .trajectory_executor import TrajectoryExecutor
+from .trajectory_evaluator import TrajectoryEvaluator
+from .comparison_analyzer import ComparisonAnalyzer
+from .utils import (
+    interpolate_trajectory,
+    interpolate_trajectory_with_derivatives,
+    compute_jerk,
+    fft_analysis,
+    detect_vibration,
+    compute_rms_error,
+    compute_max_error
+)
 
 __all__ = [
-    'set_backend',
-    'get_backend',
-    'control',
+    'PhysicsSimulator',
+    'TrajectoryExecutor',
+    'TrajectoryEvaluator',
+    'ComparisonAnalyzer',
+    'interpolate_trajectory',
+    'interpolate_trajectory_with_derivatives',
+    'compute_jerk',
+    'fft_analysis',
+    'detect_vibration',
+    'compute_rms_error',
+    'compute_max_error',
 ]
 

@@ -1,4 +1,4 @@
-"""High-Performance Robotics Kinematics Library
+"""Joint Space Trajectory Planning
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -19,26 +19,19 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
-__version__ = "1.0.0"
-__author__ = "Synria Robotics Team"
-__copyright__ = "Copyright (c) 2025 Synria Robotics Co., Ltd."
-__license__ = "GPL-3.0"
-
-from . import modeling
-from . import kinematics
-from . import transform
-from . import planning
-from . import analysis
-from . import configs
-from . import utils
-from . import control
-
-# Export backend management functions
-from .utils.backend import set_backend, get_backend
+from .polynomial import (
+    CubicPolynomialPlanner,
+    QuinticPolynomialPlanner,
+    SepticPolynomialPlanner,
+)
+from .spline import BSplinePlanner
+from .multi_segment import MultiSegmentPlanner
 
 __all__ = [
-    'set_backend',
-    'get_backend',
-    'control',
+    'CubicPolynomialPlanner',
+    'QuinticPolynomialPlanner',
+    'SepticPolynomialPlanner',
+    'BSplinePlanner',
+    'MultiSegmentPlanner',
 ]
 

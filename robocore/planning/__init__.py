@@ -1,4 +1,4 @@
-"""Planning Module
+"""Trajectory Planning Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -19,33 +19,43 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
-from robocore.planning.trajectory.joint_space import (
-    cubic_polynomial_trajectory,
-    quintic_polynomial_trajectory,
-    linear_joint_trajectory
-)
+from .base import BaseTrajectoryPlanner
 
-from robocore.planning.trajectory.cartesian_space import (
-    linear_cartesian_trajectory,
-    circular_cartesian_trajectory
+# Joint space planners
+from .joint_space.polynomial import (
+    CubicPolynomialPlanner,
+    QuinticPolynomialPlanner,
+    SepticPolynomialPlanner,
 )
+from .joint_space.spline import BSplinePlanner
+from .joint_space.multi_segment import MultiSegmentPlanner
 
-from robocore.planning.trajectory.velocity_profile import (
-    trapezoidal_velocity_profile,
-    s_curve_velocity_profile
-)
+# Cartesian space planners
+from .cartesian_space.position import LinearPositionPlanner
+from .cartesian_space.orientation import SLERPPlanner
+from .cartesian_space.circular import CircularArcPlanner
+from .cartesian_space.spline import SplineCurvePlanner
+
+# Velocity profiles
+from .velocity_profile.trapezoidal import TrapezoidalVelocityProfile
+from .velocity_profile.s_curve import SCurveVelocityProfile
 
 __all__ = [
+    # Base
+    'BaseTrajectoryPlanner',
     # Joint space
-    'cubic_polynomial_trajectory',
-    'quintic_polynomial_trajectory',
-    'linear_joint_trajectory',
-    
+    'CubicPolynomialPlanner',
+    'QuinticPolynomialPlanner',
+    'SepticPolynomialPlanner',
+    'BSplinePlanner',
+    'MultiSegmentPlanner',
     # Cartesian space
-    'linear_cartesian_trajectory',
-    'circular_cartesian_trajectory',
-    
+    'LinearPositionPlanner',
+    'SLERPPlanner',
+    'CircularArcPlanner',
+    'SplineCurvePlanner',
     # Velocity profiles
-    'trapezoidal_velocity_profile',
-    's_curve_velocity_profile',
+    'TrapezoidalVelocityProfile',
+    'SCurveVelocityProfile',
 ]
+
