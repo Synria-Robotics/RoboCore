@@ -89,15 +89,26 @@ class JointVelocityController(BaseController):
         qdd_desired = self._ensure_array(qdd_desired)
         
         # Infer number of joints from input
+        num_joints = len(qd)
         if self._num_joints is None:
-            self._num_joints = len(qd)
+            self._num_joints = num_joints
             self._normalize_gain()
         
+        # Ensure gain is matrix (if it was scalar, expand now)
+        Kp = self.Kp
+        if Kp.ndim == 0:
+            # Scalar gain - expand to diagonal matrix
+            if self._backend_manager.is_numpy:
+                Kp = np.eye(num_joints) * Kp
+            else:
+                import torch
+                Kp = torch.eye(num_joints, device=Kp.device, dtype=Kp.dtype) * Kp
+
         # Compute velocity error
         error = qdd_desired - qd
         
         # Control law
-        tau = self.Kp @ error
+        tau = Kp @ error
         
         return tau
 

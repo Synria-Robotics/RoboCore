@@ -64,6 +64,11 @@ class JointPositionController(BaseController):
         :param integral_limit: Integral saturation limit
         :param dt: Time step
         """
+        # Initialize state variables first (before super().__init__ calls _reset_state)
+        self._num_joints = None
+        self.integral_error = None
+        self.last_error = None
+        
         super().__init__()
         
         # Convert gains to arrays
@@ -85,11 +90,6 @@ class JointPositionController(BaseController):
         
         # Ensure gains are matrices (handle scalar/vector inputs)
         self._normalize_gains()
-        
-        # State variables
-        self.integral_error = None
-        self.last_error = None
-        self._num_joints = None
     
     def _normalize_gains(self):
         """Normalize gain matrices to proper shape."""
@@ -120,7 +120,8 @@ class JointPositionController(BaseController):
     
     def _reset_state(self):
         """Reset controller state."""
-        if self._num_joints is not None:
+        # Only reset if _num_joints is already set
+        if hasattr(self, '_num_joints') and self._num_joints is not None:
             self.integral_error = self._zeros(self._num_joints)
         else:
             self.integral_error = None
@@ -147,10 +148,24 @@ class JointPositionController(BaseController):
         qd_desired = self._ensure_array(qd_desired)
         
         # Infer number of joints from input
+        num_joints = len(q)
         if self._num_joints is None:
-            self._num_joints = len(q)
+            self._num_joints = num_joints
             self._normalize_gains()
             self._reset_state()
+        
+        # Ensure gains are matrices (if they were scalars, expand now)
+        Kp = self.Kp
+        Kd = self.Kd
+        if Kp.ndim == 0:
+            # Scalar gain - expand to diagonal matrix
+            if self._backend_manager.is_numpy:
+                Kp = np.eye(num_joints) * Kp
+                Kd = np.eye(num_joints) * Kd
+            else:
+                import torch
+                Kp = torch.eye(num_joints, device=Kp.device, dtype=Kp.dtype) * Kp
+                Kd = torch.eye(num_joints, device=Kd.device, dtype=Kd.dtype) * Kd
         
         # Compute errors
         error = qd_desired - q
@@ -161,10 +176,13 @@ class JointPositionController(BaseController):
             error_dot = -qd  # Assume desired velocity is zero
         
         # PD term
-        tau = self.Kp @ error + self.Kd @ error_dot
+        tau = Kp @ error + Kd @ error_dot
         
         # Integral term (PID)
         if self.use_integral and self.Ki is not None:
+            # Initialize integral if needed
+            if self.integral_error is None:
+                self.integral_error = self._zeros(num_joints)
             # Update integral
             self.integral_error = self.integral_error + error * self.dt
             
@@ -185,7 +203,15 @@ class JointPositionController(BaseController):
                         )
             
             # Add integral term
-            tau = tau + self.Ki @ self.integral_error
+            Ki = self.Ki
+            if Ki.ndim == 0:
+                # Scalar gain - expand to diagonal matrix
+                if self._backend_manager.is_numpy:
+                    Ki = np.eye(num_joints) * Ki
+                else:
+                    import torch
+                    Ki = torch.eye(num_joints, device=Ki.device, dtype=Ki.dtype) * Ki
+            tau = tau + Ki @ self.integral_error
         
         return tau
     

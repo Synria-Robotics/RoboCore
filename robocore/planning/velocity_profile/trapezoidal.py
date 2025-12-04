@@ -86,6 +86,7 @@ class TrapezoidalVelocityProfile(BaseTrajectoryPlanner):
                 t_const = duration / 3.0
                 a_max = distance / (t_accel ** 2)
                 v_max = a_max * t_accel
+                t_total = duration
             elif v_max is None:
                 # Compute v_max from a_max
                 # distance = v_max^2 / a_max + v_max * (T - 2*v_max/a_max)
@@ -108,6 +109,8 @@ class TrapezoidalVelocityProfile(BaseTrajectoryPlanner):
                         t_total = 2 * t_accel
                         t_const = 0.0
                         v_max = a_max * t_accel
+                    else:
+                        t_total = duration
             elif a_max is None:
                 # Compute a_max from v_max
                 # Try trapezoidal first
@@ -179,7 +182,6 @@ class TrapezoidalVelocityProfile(BaseTrajectoryPlanner):
                 v[i] = v_const
                 a[i] = 0.0
             else:
-                else:
                 # Deceleration phase
                 s_accel = 0.5 * a_max * t_accel ** 2
                 v_const = a_max * t_accel

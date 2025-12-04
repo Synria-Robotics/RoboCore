@@ -22,6 +22,7 @@ Website: https://synriarobotics.ai
 from __future__ import annotations
 
 from typing import Any, Dict, Optional, Union
+import numpy as np
 
 from robocore.planning.base import BaseTrajectoryPlanner
 from robocore.planning.joint_space.polynomial import (

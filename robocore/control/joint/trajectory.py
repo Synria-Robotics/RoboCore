@@ -217,12 +217,29 @@ class JointTrajectoryController(BaseController):
             else:
                 qddd_desired = self._ensure_array(qddd_desired)
         
+        # Ensure gains are matrices (if they were scalars, expand now)
+        num_joints = len(q)
+        Kp = self.Kp
+        Kd = self.Kd
+        Kff = self.Kff
+        if Kp.ndim == 0:
+            # Scalar gain - expand to diagonal matrix
+            if self._backend_manager.is_numpy:
+                Kp = np.eye(num_joints) * Kp
+                Kd = np.eye(num_joints) * Kd
+                Kff = np.eye(num_joints) * Kff
+            else:
+                import torch
+                Kp = torch.eye(num_joints, device=Kp.device, dtype=Kp.dtype) * Kp
+                Kd = torch.eye(num_joints, device=Kd.device, dtype=Kd.dtype) * Kd
+                Kff = torch.eye(num_joints, device=Kff.device, dtype=Kff.dtype) * Kff
+
         # Compute errors
         error = qd_desired - q
         error_dot = qdd_desired - qd
         
         # Feedback term
-        tau_fb = self.Kp @ error + self.Kd @ error_dot
+        tau_fb = Kp @ error + Kd @ error_dot
         
         # Feedforward term
         if self.use_dynamics:
@@ -232,7 +249,7 @@ class JointTrajectoryController(BaseController):
             raise NotImplementedError("Full dynamics feedforward requires dynamics module (not yet implemented)")
         else:
             # Simple acceleration feedforward
-            tau_ff = self.Kff @ qddd_desired
+            tau_ff = Kff @ qddd_desired
         
         # Total control torque
         tau = tau_fb + tau_ff

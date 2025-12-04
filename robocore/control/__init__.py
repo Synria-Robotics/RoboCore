@@ -1,4 +1,4 @@
-"""Control Module
+"""Robot Control Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -19,21 +19,27 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
+from robocore.control.cartesian import (
+    CartesianPositionController,
+    CartesianVelocityController,
+    CartesianTrajectoryController,
+)
+from robocore.control.joint import (
+    JointPositionController,
+    JointVelocityController,
+    JointTrajectoryController,
+)
 from robocore.control.base import BaseController
-from robocore.control.joint.position import JointPositionController
-from robocore.control.joint.velocity import JointVelocityController
-from robocore.control.joint.trajectory import JointTrajectoryController
-from robocore.control.cartesian.position import CartesianPositionController
-from robocore.control.cartesian.velocity import CartesianVelocityController
-from robocore.control.cartesian.trajectory import CartesianTrajectoryController
 
 __all__ = [
+    # Base
     'BaseController',
-    'JointPositionController',
-    'JointVelocityController',
-    'JointTrajectoryController',
+    # Cartesian controllers
     'CartesianPositionController',
     'CartesianVelocityController',
     'CartesianTrajectoryController',
+    # Joint controllers
+    'JointPositionController',
+    'JointVelocityController',
+    'JointTrajectoryController',
 ]
-

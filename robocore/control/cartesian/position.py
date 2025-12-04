@@ -27,10 +27,10 @@ import numpy as np
 
 from robocore.control.base import BaseController
 from robocore.transform.conversions import (
-    quaternion_to_rotation_matrix,
     matrix_to_quaternion,
+    matrix_to_axis_angle,
 )
-from robocore.transform.so3 import rotation_matrix_to_axis_angle
+from robocore.transform.so3 import quaternion_to_matrix
 
 
 class CartesianPositionController(BaseController):
@@ -130,14 +130,16 @@ class CartesianPositionController(BaseController):
         q_desired = xd_desired[3:]
         
         # Convert quaternions to rotation matrices
-        R_current = quaternion_to_rotation_matrix(q_current)
-        R_desired = quaternion_to_rotation_matrix(q_desired)
+        R_current = quaternion_to_matrix(q_current)
+        R_desired = quaternion_to_matrix(q_desired)
         
         # Compute relative rotation
         R_error = R_desired @ R_current.T
         
         # Convert to axis-angle representation
-        axis_angle = rotation_matrix_to_axis_angle(R_error)
+        axis, angle = matrix_to_axis_angle(R_error)
+        # Convert to axis-angle vector (axis * angle)
+        axis_angle = axis * angle
         
         # Combine errors
         if self._backend_manager.is_numpy:
