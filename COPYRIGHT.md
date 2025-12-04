@@ -2,9 +2,9 @@
 
 Copyright © 2025 Synria Robotics Co., Ltd.
 
-## RobotCore Software
+## RoboCore Software
 
-RobotCore is free software developed by Synria Robotics Co., Ltd.
+RoboCore is free software developed by Synria Robotics Co., Ltd.
 
 **Company**: Synria Robotics Co., Ltd.  
 **Website**: https://synriarobotics.ai  
@@ -29,7 +29,7 @@ See the [LICENSE](LICENSE) file for the full license text.
 
 ## Trademarks
 
-"RobotCore" and the Synria Robotics logo are trademarks of 
+"RoboCore" and the Synria Robotics logo are trademarks of 
 Synria Robotics Co., Ltd. All other trademarks are the property 
 of their respective owners.
 

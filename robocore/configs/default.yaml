@@ -1,0 +1,39 @@
+# RoboCore Default Configuration
+# ==============================
+
+robot:
+  urdf_path: "robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf"
+  end_link: "tool0"
+  base_link: null
+
+kinematics:
+  # Forward Kinematics
+  fk_backend: "numpy"  # numpy | torch
+  return_end_only: true
+  
+  # Inverse Kinematics
+  ik:
+    method: "dls"  # dls | jacobian_transpose | pseudoinverse
+    backend: "numpy"  # numpy | torch
+    solver:
+      max_iterations: 100
+      position_tolerance: 1.0e-4
+      orientation_tolerance: 1.0e-4
+      damping: 0.01
+  
+  # Jacobian
+  jacobian_method: "analytic"  # analytic | numeric | autograd
+  jacobian_backend: "numpy"  # numpy | torch
+  
+  # Compute backend
+  compute:
+    backend: "numpy"  # numpy | torch
+    device: "cpu"  # cpu | cuda | cuda:0 | cuda:1 | mps
+    dtype: "float32"  # float32 | float64
+    batch_size: null
+    use_jit: false
+
+# Logging
+verbose: false
+log_level: "INFO"  # DEBUG | INFO | WARNING | ERROR
+seed: null

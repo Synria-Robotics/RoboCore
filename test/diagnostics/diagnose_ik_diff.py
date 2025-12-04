@@ -23,10 +23,10 @@ import numpy as np
 import torch
 import os
 from pathlib import Path
-from robotcore import RobotModel
-from robotcore.kinematics.ik_utils.ik_solver_numpy import IKSolverNumPy
-from robotcore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
-from robotcore.utils.beauty_logger import beauty_print
+from robocore import RobotModel
+from robocore.kinematics.ik_utils.ik_solver_numpy import IKSolverNumPy
+from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
+from robocore.utils.beauty_logger import beauty_print
 
 
 def compare_single_case(model, target_pose, q0, method='pinv'):
@@ -212,7 +212,7 @@ def batch_analysis(model, n_samples=20):
 def main():
     # Load model
     base = Path(__file__).resolve().parents[1]
-    urdf = os.path.join(base, "../robotcore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
+    urdf = os.path.join(base, "../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf")
     model = RobotModel(str(urdf), end_link='tool0')
     
     beauty_print(f"IK Diagnostic Tool: {model.name} ({model.num_dof()} DOF)", type="module")

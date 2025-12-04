@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RobotCore Module
+"""RoboCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -27,17 +27,17 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-from robotcore.modeling import RobotModel
-from robotcore.kinematics import forward_kinematics, inverse_kinematics, jacobian
-from robotcore.utils.beauty_logger import beauty_print
+from robocore.modeling import RobotModel
+from robocore.kinematics import forward_kinematics, inverse_kinematics, jacobian
+from robocore.utils.beauty_logger import beauty_print
 
 # Check PyTorch availability
 _HAS_TORCH = False
 try:
     import torch
     _HAS_TORCH = True
-    from robotcore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
-    from robotcore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
+    from robocore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
+    from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
 except ImportError:
     pass
 
@@ -349,7 +349,7 @@ if __name__ == '__main__':
     model_path = synriard.get_model_path("Alicia_D", version="v5_6", variant="gripper_50mm")
 
     parser = argparse.ArgumentParser(
-        description="Unified Benchmark Suite for RobotCore Kinematics",
+        description="Unified Benchmark Suite for RoboCore Kinematics",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 

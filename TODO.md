@@ -1,4 +1,4 @@
-# RobotCore Development Roadmap
+# RoboCore Development Roadmap
 
 基于机器人学基础知识体系的功能完整性评估和开发计划。
 
@@ -39,7 +39,7 @@
 
 #### 1.1 四元数支持 ✅ (95%)
 
-文件: `robotcore/transform/conversions.py`, `so3.py`
+文件: `robocore/transform/conversions.py`, `so3.py`
 
 已实现：normalize / conjugate / inverse / multiply / 全部互转 / SLERP / 双后端 / 批处理
 
@@ -52,7 +52,7 @@
 可选：rotation_distance / rotation_error / 12序列便捷封装（函数已支持 seq）。
 
 #### 1.3 高级变换 ❌ 未实现 (可选 - P2优先级)
-文件: `robotcore/transform/advanced.py` (待新建)
+文件: `robocore/transform/advanced.py` (待新建)
 
 - [ ] **对偶四元数 (Dual Quaternion)** - 同时表示旋转+平移
   - [ ] `DualQuaternion` 类
@@ -74,7 +74,7 @@
 ### 2. 轨迹插值与时间同步
 
 #### 2.1 时间重采样
-**文件**: `robotcore/planning/trajectory/interpolation.py` (新建)
+**文件**: `robocore/planning/trajectory/interpolation.py` (新建)
 
 - [ ] `resample_trajectory(t_orig, q_orig, control_freq, method='cubic')`
   - [ ] 稀疏轨迹 → 固定频率密集轨迹
@@ -90,7 +90,7 @@
   - [ ] PyTorch实现（GPU加速）
 
 #### 2.2 轨迹平滑
-**文件**: `robotcore/planning/trajectory/smoothing.py` (新建)
+**文件**: `robocore/planning/trajectory/smoothing.py` (新建)
 
 - [ ] `smooth_trajectory(t, q, method='moving_average', window=5)`
   - [ ] Moving average 平滑
@@ -102,7 +102,7 @@
   - [ ] 保持位置不变
 
 #### 2.3 轨迹时间缩放
-**文件**: `robotcore/planning/trajectory/scaling.py` (新建)
+**文件**: `robocore/planning/trajectory/scaling.py` (新建)
 
 - [ ] `time_scale_trajectory(t, q, scale_factor)`
   - [ ] `scale > 1` → 减速
@@ -119,7 +119,7 @@
 ### 3. 速度与加速度运动学
 
 #### 3.1 速度正运动学
-**文件**: `robotcore/kinematics/fk.py` (增强)
+**文件**: `robocore/kinematics/fk.py` (增强)
 
 - [ ] `forward_velocity(robot_model, q, qd)` → (v_linear, v_angular)
   - [ ] 通过雅可比计算: `twist = J @ qd`
@@ -129,14 +129,14 @@
   - [ ] 返回所有连杆的速度
 
 #### 3.2 加速度正运动学
-**文件**: `robotcore/kinematics/fk.py` (增强)
+**文件**: `robocore/kinematics/fk.py` (增强)
 
 - [ ] `forward_acceleration(robot_model, q, qd, qdd)` → (a_linear, a_angular)
   - [ ] `a = J @ qdd + dJ/dt @ qd`
   - [ ] 需要先实现 `jacobian_derivative`
 
 #### 3.3 雅可比导数
-**文件**: `robotcore/kinematics/jacobian.py` (增强)
+**文件**: `robocore/kinematics/jacobian.py` (增强)
 
 - [ ] `jacobian_derivative(robot_model, q, qd)` → dJ/dt [6×n]
   - [ ] 数值微分方法（快速）
@@ -146,7 +146,7 @@
   - [ ] `jacobian_derivative_batch(robot_model, q_batch, qd_batch)`
 
 #### 3.4 零空间与任务空间
-**文件**: `robotcore/kinematics/jacobian.py` (增强)
+**文件**: `robocore/kinematics/jacobian.py` (增强)
 
 - [ ] `null_space_projector(J)` → N [n×n]
   - [ ] `N = I - J_pinv @ J`
@@ -162,7 +162,7 @@
 ### 4. 动力学模块
 
 #### 4.1 逆动力学
-**文件**: `robotcore/dynamics/inverse_dynamics.py` (新建)
+**文件**: `robocore/dynamics/inverse_dynamics.py` (新建)
 
 - [ ] `inverse_dynamics(robot_model, q, qd, qdd, external_forces=None)` → tau [n]
   - [ ] 递归Newton-Euler算法（高效）
@@ -176,33 +176,33 @@
   - [ ] PyTorch实现（GPU加速）
 
 #### 4.2 正动力学
-**文件**: `robotcore/dynamics/forward_dynamics.py` (新建)
+**文件**: `robocore/dynamics/forward_dynamics.py` (新建)
 
 - [ ] `forward_dynamics(robot_model, q, qd, tau)` → qdd [n]
   - [ ] 给定力矩 → 计算加速度
   - [ ] ABA算法（Articulated Body Algorithm）
 
 #### 4.3 质量矩阵
-**文件**: `robotcore/dynamics/mass_matrix.py` (新建)
+**文件**: `robocore/dynamics/mass_matrix.py` (新建)
 
 - [ ] `mass_matrix(robot_model, q)` → M(q) [n×n]
   - [ ] 广义质量矩阵
   - [ ] 复合刚体算法（Composite Rigid Body Algorithm）
 
 #### 4.4 科氏力和离心力
-**文件**: `robotcore/dynamics/coriolis.py` (新建)
+**文件**: `robocore/dynamics/coriolis.py` (新建)
 
 - [ ] `coriolis_centrifugal(robot_model, q, qd)` → C(q,qd) [n]
   - [ ] 速度相关力
 
 #### 4.5 重力项
-**文件**: `robotcore/dynamics/gravity.py` (新建)
+**文件**: `robocore/dynamics/gravity.py` (新建)
 
 - [ ] `gravity_vector(robot_model, q, gravity=[0, 0, -9.81])` → g(q) [n]
   - [ ] 重力补偿向量
 
 #### 4.6 摩擦力模型（可选）
-**文件**: `robotcore/dynamics/friction.py` (新建)
+**文件**: `robocore/dynamics/friction.py` (新建)
 
 - [ ] 粘性摩擦模型
 - [ ] 库伦摩擦模型
@@ -212,7 +212,7 @@
 **备选方案**: 集成 Pinocchio 库
 
 - [ ] 评估 Pinocchio 性能
-- [ ] 封装 Pinocchio API 到 RobotCore 接口
+- [ ] 封装 Pinocchio API 到 RoboCore 接口
 - [ ] 保持接口一致性
 
 ---
@@ -220,7 +220,7 @@
 ### 5. 控制器模块
 
 #### 5.1 位置控制器
-**文件**: `robotcore/controller/position_controller.py` (新建)
+**文件**: `robocore/controller/position_controller.py` (新建)
 
 - [ ] `PDController` 类
   - [ ] `__init__(Kp, Kd)`
@@ -231,21 +231,21 @@
   - [ ] 积分抗饱和
 
 #### 5.2 轨迹跟踪控制器
-**文件**: `robotcore/controller/trajectory_controller.py` (新建)
+**文件**: `robocore/controller/trajectory_controller.py` (新建)
 
 - [ ] `TrajectoryController` 类
   - [ ] 前馈 + PD反馈
   - [ ] `compute_control(q_ref, qd_ref, qdd_ref, q, qd)` → tau/q_cmd
 
 #### 5.3 计算力矩控制
-**文件**: `robotcore/controller/computed_torque.py` (新建)
+**文件**: `robocore/controller/computed_torque.py` (新建)
 
 - [ ] `ComputedTorqueController` 类
   - [ ] 基于模型的控制
   - [ ] `tau = M(q)qdd_ref + C(q,qd) + g(q) + Kp(q_ref-q) + Kd(qd_ref-qd)`
 
 #### 5.4 阻抗/导纳控制（可选）
-**文件**: `robotcore/controller/impedance_controller.py` (新建)
+**文件**: `robocore/controller/impedance_controller.py` (新建)
 
 - [ ] `ImpedanceController` 类（力控制）
 - [ ] `AdmittanceController` 类
@@ -255,7 +255,7 @@
 ### 6. 冗余逆运动学
 
 #### 6.1 零空间优化
-**文件**: `robotcore/kinematics/ik.py` (增强)
+**文件**: `robocore/kinematics/ik.py` (增强)
 
 - [ ] `inverse_kinematics_redundant(robot_model, target_pose, q0, secondary_objective, **kwargs)`
   - [ ] 主任务: 到达目标位姿
@@ -268,7 +268,7 @@
   - [ ] `'collision'` - 避碰（需碰撞检测）
 
 #### 6.2 约束逆运动学
-**文件**: `robotcore/kinematics/ik.py` (增强)
+**文件**: `robocore/kinematics/ik.py` (增强)
 
 - [ ] `inverse_kinematics_constrained(robot_model, target_pose, q0, constraints, **kwargs)`
   - [ ] `fixed_joints` - 固定某些关节
@@ -280,7 +280,7 @@
 ### 7. LQT轨迹规划迁移
 
 #### 7.1 从AD-SDK迁移LQT
-**文件**: `robotcore/planning/trajectory/lqt_planner.py` (新建)
+**文件**: `robocore/planning/trajectory/lqt_planner.py` (新建)
 
 - [ ] 移植LQT轨迹优化算法
 - [ ] 适配RoboCore接口
@@ -294,7 +294,7 @@
 ### 8. 解析逆运动学
 
 #### 8.1 特定机器人闭式解
-**文件**: `robotcore/kinematics/ik_analytical.py` (新建)
+**文件**: `robocore/kinematics/ik_analytical.py` (新建)
 
 - [ ] `solve_6dof_spherical_wrist(T, robot_params)` → List[q]
   - [ ] Puma 560
@@ -311,21 +311,21 @@
 ### 9. 并联与树状机器人
 
 #### 9.1 并联机器人
-**文件**: `robotcore/modeling/parallel_robot.py` (新建)
+**文件**: `robocore/modeling/parallel_robot.py` (新建)
 
 - [ ] `ParallelRobot` 类
 - [ ] 闭环约束处理
 - [ ] 并联FK/IK求解
 
 #### 9.2 树状机器人
-**文件**: `robotcore/modeling/tree_robot.py` (新建)
+**文件**: `robocore/modeling/tree_robot.py` (新建)
 
 - [ ] `TreeRobot` 类（人形、多臂）
 - [ ] 分支运动学链
 - [ ] `forward_kinematics_branch(branch_name, q)`
 
 #### 9.3 移动机械臂
-**文件**: `robotcore/modeling/mobile_manipulator.py` (新建)
+**文件**: `robocore/modeling/mobile_manipulator.py` (新建)
 
 - [ ] 移动底座 + 机械臂
 - [ ] 浮动基座（Floating Base）
@@ -335,14 +335,14 @@
 ### 10. 避障与路径规划
 
 #### 10.1 采样规划器
-**文件**: `robotcore/planning/sampling_planner.py` (新建)
+**文件**: `robocore/planning/sampling_planner.py` (新建)
 
 - [ ] RRT (Rapidly-exploring Random Tree)
 - [ ] RRT* (优化版本)
 - [ ] PRM (Probabilistic Roadmap)
 
 #### 10.2 图搜索
-**文件**: `robotcore/planning/graph_planner.py` (新建)
+**文件**: `robocore/planning/graph_planner.py` (新建)
 
 - [ ] A* 算法
 - [ ] Dijkstra 算法
@@ -352,7 +352,7 @@
 ### 11. 样条轨迹
 
 #### 11.1 样条插值
-**文件**: `robotcore/planning/trajectory/spline.py` (新建)
+**文件**: `robocore/planning/trajectory/spline.py` (新建)
 
 - [ ] B-spline 插值
 - [ ] Bezier 曲线
@@ -363,19 +363,19 @@
 ### 12. 碰撞检测
 
 #### 12.1 自碰撞检测
-**文件**: `robotcore/collision/self_collision.py` (新建)
+**文件**: `robocore/collision/self_collision.py` (新建)
 
 - [ ] 简化几何体（球、胶囊、凸包）
 - [ ] AABB碰撞检测
 
 #### 12.2 环境碰撞
-**文件**: `robotcore/collision/environment_collision.py` (新建)
+**文件**: `robocore/collision/environment_collision.py` (新建)
 
 - [ ] 机器人 vs 障碍物
 - [ ] OBB碰撞检测
 
 #### 12.3 距离计算
-**文件**: `robotcore/collision/distance.py` (新建)
+**文件**: `robocore/collision/distance.py` (新建)
 
 - [ ] 最小距离查询
 - [ ] 最近点对
@@ -392,13 +392,13 @@
 ### 13. 奇异性回避
 
 #### 13.1 奇异性分类
-**文件**: `robotcore/analysis/singularity_analyzer.py` (增强)
+**文件**: `robocore/analysis/singularity_analyzer.py` (增强)
 
 - [ ] 边界奇异 vs 内部奇异
 - [ ] 位姿奇异 vs 配置奇异
 
 #### 13.2 奇异性回避
-**文件**: `robotcore/analysis/singularity_avoidance.py` (新建)
+**文件**: `robocore/analysis/singularity_avoidance.py` (新建)
 
 - [ ] 梯度场避障
 - [ ] 最小化条件数
@@ -408,13 +408,13 @@
 ### 14. 工作空间高级分析
 
 #### 14.1 方向工作空间
-**文件**: `robotcore/analysis/workspace_analyzer.py` (增强)
+**文件**: `robocore/analysis/workspace_analyzer.py` (增强)
 
 - [ ] 给定位置，可达的所有姿态
 - [ ] 姿态能力图（Orientation Capability Map）
 
 #### 14.2 速度/力工作空间
-**文件**: `robotcore/analysis/workspace_analyzer.py` (增强)
+**文件**: `robocore/analysis/workspace_analyzer.py` (增强)
 
 - [ ] 速度工作空间
 - [ ] 力/力矩工作空间
@@ -502,7 +502,7 @@
 
 ## 📌 设计原则
 
-### RobotCore 定位
+### RoboCore 定位
 - ✅ **提供算法**：运动学、动力学、轨迹规划
 - ✅ **离线使用**：仿真、分析、可视化
 - ❌ **不做硬件IO**：实时控制留给SDK层

@@ -1,6 +1,6 @@
 ![](./imgs/logo.jpeg)
 
-# RobotCore: Unified High-Throughput Robotics Library
+# RoboCore: Unified High-Throughput Robotics Library
 
 [![License](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
@@ -59,8 +59,8 @@
 
 ```bash
 # Clone repository
-git clone https://github.com/Synria-Robotics/RobotCore.git
-cd RobotCore
+git clone https://github.com/Synria-Robotics/RoboCore.git
+cd RoboCore
 
 # Install (development mode)
 pip install -e .
@@ -76,7 +76,7 @@ pip install torch torchvision
 ### Basic Example
 
 ```python
-from robotcore.modeling import RobotModel
+from robocore.modeling import RobotModel
 
 # Load robot (auto-detects URDF/MJCF)
 robot = RobotModel("path/to/robot.urdf")
@@ -149,7 +149,7 @@ pytest test/unit/          # Unit tests
 pytest test/integration/   # Integration tests
 
 # With coverage report
-pytest --cov=robotcore --cov-report=html
+pytest --cov=robocore --cov-report=html
 ```
 
 ---
@@ -177,8 +177,8 @@ pytest --cov=robotcore --cov-report=html
 ## 🏗️ Project Structure
 
 ```
-RobotCore/
-├── robotcore/
+RoboCore/
+├── robocore/
 │   ├── modeling/          # Robot model abstraction & parsers
 │   ├── kinematics/        # FK/IK/Jacobian solvers
 │   ├── transform/         # SE(3)/SO(3) operations
@@ -218,11 +218,11 @@ See the [LICENSE](LICENSE) file for the full license text.
 
 ```bibtex
 @software{robocore2025,
-  title = {RobotCore: High-Performance Robotics Kinematics Library},
+  title = {RoboCore: High-Performance Robotics Kinematics Library},
   author = {Synria Robotics Team},
   year = {2025},
   publisher = {Synria Robotics Co., Ltd.},
-  url = {https://github.com/Synria-Robotics/RobotCore},
+  url = {https://github.com/Synria-Robotics/RoboCore},
   version = {1.0.0}
 }
 ```

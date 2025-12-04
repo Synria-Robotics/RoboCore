@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RobotCore Module
+"""RoboCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -24,14 +24,14 @@ Website: https://synriarobotics.ai
 import pytest
 import numpy as np
 from pathlib import Path
-from robotcore.modeling.robot_model import RobotModel
-from robotcore.analysis.workspace_analyzer import WorkspaceAnalyzer
+from robocore.modeling.robot_model import RobotModel
+from robocore.analysis.workspace_analyzer import WorkspaceAnalyzer
 
 
 @pytest.fixture(scope="module")
 def robot_model():
     """Load robot model for workspace testing."""
-    urdf_path = Path('robotcore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
+    urdf_path = Path('robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
     if not urdf_path.exists():
         pytest.skip(f"URDF not found: {urdf_path}")
     return RobotModel(str(urdf_path), end_link='tool0')

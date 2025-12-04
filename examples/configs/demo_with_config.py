@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RobotCore Module
+"""RoboCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -26,11 +26,11 @@ import argparse
 from pathlib import Path
 from omegaconf import OmegaConf
 
-from robotcore.configs import ConfigManager, get_default_config
-from robotcore.modeling.robot_model import RobotModel
-from robotcore.kinematics.fk import forward_kinematics
-from robotcore.kinematics.ik import inverse_kinematics
-from robotcore.kinematics.jacobian import jacobian
+from robocore.configs import ConfigManager, get_default_config
+from robocore.modeling.robot_model import RobotModel
+from robocore.kinematics.fk import forward_kinematics
+from robocore.kinematics.ik import inverse_kinematics
+from robocore.kinematics.jacobian import jacobian
 
 
 def print_separator(title: str = "", width: int = 80):

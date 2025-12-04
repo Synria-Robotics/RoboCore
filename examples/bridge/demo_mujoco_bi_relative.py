@@ -8,8 +8,8 @@ Copyright (c) 2025 Synria Robotics Co., Ltd.
 """
 
 import sys
-from robotcore.bridge.sim.mujoco.interactive_dual_arm import InteractiveDualArmIK
-from robotcore.utils.path import get_robocore_path
+from robocore.bridge.sim.mujoco.interactive_dual_arm import InteractiveDualArmIK
+from robocore.utils.path import get_robocore_path
 
 
 def main():

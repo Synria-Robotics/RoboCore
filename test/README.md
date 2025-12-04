@@ -1,6 +1,6 @@
-# RobotCore Tests
+# RoboCore Tests
 
-This directory contains automated tests for the RobotCore library.
+This directory contains automated tests for the RoboCore library.
 
 ## Structure
 
@@ -37,7 +37,7 @@ pytest test/ -v
 
 ### Run with coverage
 ```bash
-pytest test/ --cov=robotcore --cov-report=html
+pytest test/ --cov=robocore --cov-report=html
 ```
 
 ## Test Categories
@@ -116,14 +116,14 @@ These tests are designed to be run in CI pipelines:
 - name: Run tests
   run: |
     pip install pytest pytest-cov
-    pytest test/ --cov=robotcore
+    pytest test/ --cov=robocore
 ```
 
 ## Requirements
 
 - pytest >= 7.0
 - pytest-cov (optional, for coverage)
-- All RobotCore dependencies (PyTorch, NumPy, etc.)
+- All RoboCore dependencies (PyTorch, NumPy, etc.)
 
 ## Adding New Tests
 
@@ -135,5 +135,5 @@ These tests are designed to be run in CI pipelines:
 
 ## Known Issues
 
-- Tests require URDF file at `robotcore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf`
+- Tests require URDF file at `robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf`
 - GPU tests require CUDA-capable device (automatically skip if unavailable)

@@ -26,9 +26,9 @@ import time
 import numpy as np
 from pathlib import Path
 
-from robotcore.modeling import RobotModel
-from robotcore.kinematics.jacobian import jacobian
-from robotcore.utils.beauty_logger import beauty_print
+from robocore.modeling import RobotModel
+from robocore.kinematics.jacobian import jacobian
+from robocore.utils.beauty_logger import beauty_print
 
 
 def main(args):

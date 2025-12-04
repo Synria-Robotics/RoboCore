@@ -13,8 +13,8 @@ Run:
 
 import argparse
 import numpy as np
-from robotcore.modeling.robot_model import RobotModel
-from robotcore.utils.beauty_logger import beauty_print, beauty_print_array
+from robocore.modeling.robot_model import RobotModel
+from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 
 def main(args):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RobotCore Module
+"""RoboCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -23,9 +23,9 @@ Website: https://synriarobotics.ai
 import numpy as np
 import time
 
-from robotcore.utils.beauty_logger import beauty_print, beauty_print_matrix
-from robotcore.utils.backend import set_backend, get_backend
-from robotcore.transform import *
+from robocore.utils.beauty_logger import beauty_print, beauty_print_matrix
+from robocore.utils.backend import set_backend, get_backend
+from robocore.transform import *
 
 
 def print_matrix(name, matrix, precision=4):
@@ -363,7 +363,7 @@ def demo_performance():
 
 def main():
     """Run all demos."""
-    beauty_print("RobotCore Transform Module Demo", type="module")
+    beauty_print("RoboCore Transform Module Demo", type="module")
     print("  Unified numpy/torch backend for 3D transformations")    
     
     try:

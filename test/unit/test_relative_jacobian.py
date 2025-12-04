@@ -12,15 +12,15 @@ Tests:
 
 import pytest
 import numpy as np
-from robotcore.modeling.robot_model import RobotModel
-from robotcore.kinematics.bimanual import (
+from robocore.modeling.robot_model import RobotModel
+from robocore.kinematics.bimanual import (
     relative_pose_error,
     adjoint_matrix,
     relative_jacobian,
     Task,
 )
-from robotcore.transform.se3 import make_transform
-from robotcore.transform.so3 import rpy_to_matrix
+from robocore.transform.se3 import make_transform
+from robocore.transform.so3 import rpy_to_matrix
 
 
 def transform_matrix(position, rpy):
@@ -156,7 +156,7 @@ class TestRelativeJacobian:
         
         # Use Bessica-D dual-arm URDF
         base_path = Path(__file__).parent.parent.parent
-        urdf_path = base_path / "robotcore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf"
+        urdf_path = base_path / "robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf"
         
         if not urdf_path.exists():
             pytest.skip(f"Bessica URDF not found: {urdf_path}")
@@ -198,7 +198,7 @@ class TestRelativeJacobian:
             T_rel = np.linalg.inv(TL) @ TR
             
             p = T_rel[0:3, 3]
-            from robotcore.transform.conversions import matrix_to_axis_angle
+            from robocore.transform.conversions import matrix_to_axis_angle
             axis, angle = matrix_to_axis_angle(T_rel[0:3, 0:3])
             return np.concatenate([p, axis * angle])
         

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RobotCore Module
+"""RoboCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -25,12 +25,12 @@ import numpy as np
 import argparse
 from pathlib import Path
 
-from robotcore.modeling.robot_model import RobotModel
-from robotcore.kinematics.fk import forward_kinematics
-from robotcore.kinematics.ik import inverse_kinematics
+from robocore.modeling.robot_model import RobotModel
+from robocore.kinematics.fk import forward_kinematics
+from robocore.kinematics.ik import inverse_kinematics
 
 # Trajectory planning
-from robotcore.planning.trajectory import (
+from robocore.planning.trajectory import (
     cubic_polynomial_trajectory,
     quintic_polynomial_trajectory,
     linear_joint_trajectory,
@@ -357,12 +357,12 @@ def main():
     # Load robot model
     print("Loading robot model...")
     if args.robot == 'alicia':
-        urdf_path = os.path.join(Path(__file__).parent.parent, '../robotcore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
+        urdf_path = os.path.join(Path(__file__).parent.parent, '../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
         end_link = 'tool0'
         dof = 6
     else:  # bessica
         urdf_path = os.path.join(Path(__file__).parent.parent,
-                                 '../robotcore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
+                                 '../robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
         end_link = f'{args.arm}_arm_gripper_{args.arm}_finger'
         dof = 7
     

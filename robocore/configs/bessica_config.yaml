@@ -1,0 +1,34 @@
+# Bessica-D Robot Configuration
+# ==============================
+
+robot:
+  urdf_path: "robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf"
+  end_link: "left_arm_gripper_left_finger"  # or right_arm_gripper_left_finger
+  base_link: null
+
+kinematics:
+  fk_backend: "numpy"
+  return_end_only: true
+  
+  ik:
+    method: "dls"
+    backend: "numpy"
+    solver:
+      max_iterations: 100
+      position_tolerance: 1.0e-4
+      orientation_tolerance: 1.0e-4
+      damping: 0.01
+  
+  jacobian_method: "analytic"
+  jacobian_backend: "numpy"
+  
+  compute:
+    backend: "numpy"
+    device: "cpu"
+    dtype: "float32"
+    batch_size: null
+    use_jit: false
+
+verbose: false
+log_level: "INFO"
+seed: null

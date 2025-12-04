@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RobotCore Module
+"""RoboCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -24,10 +24,10 @@ Website: https://synriarobotics.ai
 import numpy as np
 import torch
 from pathlib import Path
-from robotcore.modeling.robot_model import RobotModel
-from robotcore.kinematics.ik import inverse_kinematics
-from robotcore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
-from robotcore.kinematics.fk import forward_kinematics
+from robocore.modeling.robot_model import RobotModel
+from robocore.kinematics.ik import inverse_kinematics
+from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
+from robocore.kinematics.fk import forward_kinematics
 
 
 def random_q_in_limits(model, seed=42):
@@ -234,7 +234,7 @@ def batch_comparison(model, n_samples=32, device='cpu', seed=42):
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--urdf', default='robotcore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
+    parser.add_argument('--urdf', default='robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
     parser.add_argument('--end-link', default='tool0')
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--batch-size', type=int, default=32)

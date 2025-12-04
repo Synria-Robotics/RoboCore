@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RobotCore Module
+"""RoboCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -24,19 +24,19 @@ Website: https://synriarobotics.ai
 import pytest
 import yaml
 from pathlib import Path
-from robotcore.configs.config_manager import ConfigManager
+from robocore.configs.config_manager import ConfigManager
 
 
 @pytest.fixture(scope="module")
 def default_config_path():
     """Path to default configuration."""
-    return Path('robotcore/configs/default.yaml')
+    return Path('robocore/configs/default.yaml')
 
 
 @pytest.fixture(scope="module")
 def gpu_config_path():
     """Path to GPU configuration."""
-    return Path('robotcore/configs/gpu_config.yaml')
+    return Path('robocore/configs/gpu_config.yaml')
 
 
 class TestConfigManager:
@@ -151,7 +151,7 @@ class TestConfigSchema:
     
     def test_all_configs_loadable(self):
         """Test all config files in configs/ are loadable."""
-        config_dir = Path('robotcore/configs')
+        config_dir = Path('robocore/configs')
         if not config_dir.exists():
             pytest.skip("Config directory not found")
         

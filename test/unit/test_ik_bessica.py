@@ -19,12 +19,12 @@ import numpy as np
 import pytest
 from pathlib import Path
 
-from robotcore.modeling.robot_model import RobotModel
-from robotcore.kinematics.fk import forward_kinematics
-from robotcore.kinematics.ik import inverse_kinematics
+from robocore.modeling.robot_model import RobotModel
+from robocore.kinematics.fk import forward_kinematics
+from robocore.kinematics.ik import inverse_kinematics
 
 
-URDF_PATH = Path('robotcore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
+URDF_PATH = Path('robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
 LEFT_END = 'left_arm_gripper_left_finger'
 RIGHT_END = 'right_arm_gripper_left_finger'
 
@@ -147,7 +147,7 @@ class TestBessicaSevenDOF:
         # 直接利用整链 FK 拿末端，再用 jacobian 早停逻辑？——简单起见手写局部遍历或借用局部 IK：
         # 这里使用先完整 FK 然后再通过局部 IK 验证（姿态一致→成功更容易）
         # 为稳定，写一个小的局部 forward traversal：
-        from robotcore.kinematics.jacobian import jacobian  # noqa: F401 (ensure import side effects if any)
+        from robocore.kinematics.jacobian import jacobian  # noqa: F401 (ensure import side effects if any)
         # 复用数值版逻辑（简化：复制 numpy 早停策略）
         def fk_until(model, q, link):
             q_map = {js.name: q[js.index] for js in model._actuated}  # type: ignore[attr-defined]

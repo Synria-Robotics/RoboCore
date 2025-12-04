@@ -2,10 +2,10 @@
 
 import numpy as np
 from pathlib import Path
-from robotcore.modeling.robot_model import RobotModel
-from robotcore.kinematics.bimanual import Task, dual_ik_hierarchical, relative_pose_error
+from robocore.modeling.robot_model import RobotModel
+from robocore.kinematics.bimanual import Task, dual_ik_hierarchical, relative_pose_error
 
-urdf_path = Path("robotcore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
+urdf_path = Path("robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
 
 left = RobotModel(str(urdf_path), end_link='left_arm_gripper_left_finger')
 right = RobotModel(str(urdf_path), end_link='right_arm_gripper_right_finger')

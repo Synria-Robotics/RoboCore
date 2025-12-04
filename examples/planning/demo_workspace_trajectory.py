@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RobotCore Module
+"""RoboCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -27,11 +27,11 @@ from pathlib import Path
 import time
 import warnings
 
-from robotcore.modeling.robot_model import RobotModel
-from robotcore.analysis.workspace_analyzer import WorkspaceAnalyzer
-from robotcore.kinematics.fk import forward_kinematics
-from robotcore.kinematics.ik import inverse_kinematics
-from robotcore.planning.trajectory import (
+from robocore.modeling.robot_model import RobotModel
+from robocore.analysis.workspace_analyzer import WorkspaceAnalyzer
+from robocore.kinematics.fk import forward_kinematics
+from robocore.kinematics.ik import inverse_kinematics
+from robocore.planning.trajectory import (
     quintic_polynomial_trajectory,
     linear_cartesian_trajectory,
     circular_cartesian_trajectory,
@@ -296,7 +296,7 @@ def plan_trajectory_in_workspace(
     print(f"\n生成平滑轨迹（五次多项式）...")
     waypoints_joint = np.array(waypoints_joint)
     
-    from robotcore.planning.trajectory import multi_waypoint_trajectory
+    from robocore.planning.trajectory import multi_waypoint_trajectory
     
     t_traj, q_traj, qd_traj, qdd_traj = multi_waypoint_trajectory(
         waypoints_joint,
@@ -495,11 +495,11 @@ def main():
     print("Loading robot model...")
     if args.robot == 'alicia':
         urdf_path = os.path.join(Path(__file__).parent.parent,
-                                 '../robotcore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
+                                 '../robocore/assets/robot/urdf/Alicia-D_v5_4/alicia_duo_with_gripper.urdf')
         dof = 6
     else:  # bessica
         urdf_path = os.path.join(Path(__file__).parent.parent,
-                                 '../robotcore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
+                                 '../robocore/assets/robot/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
         dof = 7
     
     model = RobotModel(str(urdf_path))

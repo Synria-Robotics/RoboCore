@@ -23,8 +23,8 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 
-from robotcore.transform.conversions import matrix_to_euler
-from robotcore.transform.so3 import euler_to_matrix
+from robocore.transform.conversions import matrix_to_euler
+from robocore.transform.so3 import euler_to_matrix
 
 
 class TestEulerConversions:
@@ -266,7 +266,7 @@ class TestEulerSpecialCases:
     
     def test_consistency_with_rpy(self):
         """Test that RPY is equivalent to specific Euler conventions."""
-        from robotcore.transform.conversions import matrix_to_rpy, rpy_to_matrix
+        from robocore.transform.conversions import matrix_to_rpy, rpy_to_matrix
         
         rpy = np.array([0.1, 0.2, 0.3])  # roll, pitch, yaw
         

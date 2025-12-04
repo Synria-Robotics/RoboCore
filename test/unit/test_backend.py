@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RobotCore Module
+"""RoboCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -23,7 +23,7 @@ Website: https://synriarobotics.ai
 
 import pytest
 import numpy as np
-from robotcore.utils.backend import BackendManager, get_backend, set_backend
+from robocore.utils.backend import BackendManager, get_backend, set_backend
 
 
 class TestBackendManager:
@@ -109,7 +109,7 @@ class TestBackendManager:
         """Test backend affects array type creation."""
         original = get_backend()
         try:
-            from robotcore.utils.backend import zeros, eye
+            from robocore.utils.backend import zeros, eye
             
             # NumPy backend
             set_backend('numpy')

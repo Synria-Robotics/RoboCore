@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RobotCore Module
+"""RoboCore Module
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -26,18 +26,18 @@ import argparse
 from pathlib import Path
 from typing import Optional
 
-from robotcore.modeling.robot_model import RobotModel
-from robotcore.kinematics.fk import forward_kinematics
-from robotcore.kinematics.ik import inverse_kinematics
-from robotcore.kinematics.jacobian import jacobian
+from robocore.modeling.robot_model import RobotModel
+from robocore.kinematics.fk import forward_kinematics
+from robocore.kinematics.ik import inverse_kinematics
+from robocore.kinematics.jacobian import jacobian
 
-from robotcore.configs import ConfigManager, get_default_config
+from robocore.configs import ConfigManager, get_default_config
 from omegaconf import OmegaConf
-from robotcore.utils.beauty_logger import beauty_print_array, beauty_print
+from robocore.utils.beauty_logger import beauty_print_array, beauty_print
 import random
 import math
 from time import perf_counter
-from robotcore.transform import get_rotation, rotation_distance
+from robocore.transform import get_rotation, rotation_distance
 
 
 def compute_fk_ik_jacobian(

@@ -7,9 +7,9 @@ Shows unified framework for:
 """
 from __future__ import annotations
 import numpy as np
-from robotcore.modeling.robot_model import RobotModel
-from robotcore.kinematics.task import absolute_task, relative_task
-from robotcore.utils.beauty_logger import beauty_print
+from robocore.modeling.robot_model import RobotModel
+from robocore.kinematics.task import absolute_task, relative_task
+from robocore.utils.beauty_logger import beauty_print
 
 
 def demo_weighted_tasks():
