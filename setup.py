@@ -10,7 +10,7 @@ match = re.search(r"__version__\s*=\s*['\"]([^'\"]+)['\"]", init_text)
 version = match.group(1) if match else "0.0.0"
 
 setup(
-    name="robocore",
+    name="synria-robocore",
     version=version,
     description="Unified High-Throughput Robotics Library",
     long_description=readme,
