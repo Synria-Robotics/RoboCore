@@ -73,6 +73,7 @@ def inverse_kinematics(
     method: str = 'dls',
     multi_start: int = 0,
     multi_noise: float = 0.3,
+    q0_retries: Optional[Sequence[Sequence[float]] | np.ndarray] = None,
     random_seed: Optional[int] = None,
     # Local / partial task options
     target_link: Optional[str] = None,
@@ -99,8 +100,9 @@ def inverse_kinematics(
     :param target_pose: Target pose(s) - 4x4 matrix or [B, 4, 4] array
     :param q0: Initial configuration(s) - [n] or [B, n] array
     :param method: 'pinv'|'dls'|'transpose'
-    :param multi_start: Restart trials (only for single mode)
-    :param multi_noise: Gaussian noise scale (radians)
+    :param multi_start: Restart trials (only for single mode, ignored if q0_retries is provided)
+    :param multi_noise: Gaussian noise scale (radians, used only with multi_start)
+    :param q0_retries: Multiple initial guesses - [R, n] array (only for single mode)
     :param random_seed: Seed for reproducibility
     :param torch_device: Torch device when using torch backend (uses global backend setting)
     :param torch_dtype: Torch dtype when using torch backend (uses global backend setting)
@@ -122,11 +124,21 @@ def inverse_kinematics(
         batch_size = target_normalized.shape[0]
 
         if b == 'numpy':
+            # Extract solver initialization parameters
+            solver_init_kwargs = {}
+            if 'min_damping' in solver_kwargs:
+                solver_init_kwargs['min_damping'] = solver_kwargs['min_damping']
+            if 'max_damping' in solver_kwargs:
+                solver_init_kwargs['max_damping'] = solver_kwargs['max_damping']
+            if 'base_step' in solver_kwargs:
+                solver_init_kwargs['base_step'] = solver_kwargs['base_step']
+
             solver = IKSolverNumPy(
                 model,
                 max_iters=solver_kwargs.get('max_iters', 120),
                 pos_tol=solver_kwargs.get('pos_tol', 1e-4),
                 ori_tol=solver_kwargs.get('ori_tol', 1e-4),
+                **solver_init_kwargs,
             )
             results_dict = solver.solve_batch(
                 target_normalized,
@@ -139,7 +151,7 @@ def inverse_kinematics(
                 joint_centering=joint_centering,
                 joint_center_gain=joint_center_gain,
                 joint_center_weights=joint_center_weights,
-                **{k: v for k, v in solver_kwargs.items() if k not in ['max_iters', 'pos_tol', 'ori_tol', 'use_analytic_jacobian']},
+                **{k: v for k, v in solver_kwargs.items() if k not in ['max_iters', 'pos_tol', 'ori_tol', 'use_analytic_jacobian', 'min_damping', 'max_damping', 'base_step']},
             )
             # Convert from dict of lists to list of dicts
             results = []
@@ -212,11 +224,21 @@ def inverse_kinematics(
         solver_kwargs_local = solver_kwargs.copy()
 
         if b == 'numpy':
+            # Extract solver initialization parameters
+            solver_init_kwargs = {}
+            if 'min_damping' in solver_kwargs_local:
+                solver_init_kwargs['min_damping'] = solver_kwargs_local.pop('min_damping')
+            if 'max_damping' in solver_kwargs_local:
+                solver_init_kwargs['max_damping'] = solver_kwargs_local.pop('max_damping')
+            if 'base_step' in solver_kwargs_local:
+                solver_init_kwargs['base_step'] = solver_kwargs_local.pop('base_step')
+
             solver = IKSolverNumPy(
                 model,
                 max_iters=solver_kwargs_local.pop('max_iters', 120),
                 pos_tol=solver_kwargs_local.pop('pos_tol', 1e-4),
                 ori_tol=solver_kwargs_local.pop('ori_tol', 1e-4),
+                **solver_init_kwargs,
             )
             res = solver.solve(
                 target_single,
@@ -238,14 +260,14 @@ def inverse_kinematics(
             from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
 
             dev = torch_device if torch_device is not None else 'cpu'
-            # Support min_damping and max_damping for fixed damping control
-            min_damping = solver_kwargs_local.pop('min_damping', None)
-            max_damping = solver_kwargs_local.pop('max_damping', None)
+            # Extract solver initialization parameters
             solver_kwargs_init = {}
-            if min_damping is not None:
-                solver_kwargs_init['min_damping'] = min_damping
-            if max_damping is not None:
-                solver_kwargs_init['max_damping'] = max_damping
+            if 'min_damping' in solver_kwargs_local:
+                solver_kwargs_init['min_damping'] = solver_kwargs_local.pop('min_damping')
+            if 'max_damping' in solver_kwargs_local:
+                solver_kwargs_init['max_damping'] = solver_kwargs_local.pop('max_damping')
+            if 'base_step' in solver_kwargs_local:
+                solver_kwargs_init['base_step'] = solver_kwargs_local.pop('base_step')
             solver = IKSolverTorch(
                 model,
                 max_iters=solver_kwargs_local.pop('max_iters', 120),
@@ -272,6 +294,28 @@ def inverse_kinematics(
         else:
             raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
 
+    # Handle multiple initial guesses
+    if q0_retries is not None:
+        # Use provided retries
+        q0_retries_arr = np.asarray(q0_retries)
+        if q0_retries_arr.ndim != 2:
+            raise ValueError(f"q0_retries must be 2D array [R, n], got shape {q0_retries_arr.shape}")
+        if q0_retries_arr.shape[1] != len(q0_single):
+            raise ValueError(f"q0_retries DOF mismatch: expected {len(q0_single)}, got {q0_retries_arr.shape[1]}")
+
+        candidates: List[Dict[str, Any]] = []
+        for q_retry in q0_retries_arr:
+            candidates.append(_run_once(q_retry))
+
+        # Select best: first successful, or best error if none successful
+        successes = [c for c in candidates if c.get('success')]
+        if successes:
+            successes.sort(key=lambda c: c.get('err_norm', float('inf')))
+            return successes[0]
+        candidates.sort(key=lambda c: c.get('err_norm', float('inf')))
+        return candidates[0] if not return_all else candidates
+
+    # Original multi_start logic (backward compatible)
     base_res = _run_once(q0_single)
     if base_res.get('success') or multi_start <= 0:
         return base_res
@@ -284,9 +328,9 @@ def inverse_kinematics(
 
     successes = [c for c in candidates if c.get('success')]
     if successes:
-        successes.sort(key=lambda c: c['err_norm'])
+        successes.sort(key=lambda c: c.get('err_norm', float('inf')))
         return successes[0]
-    candidates.sort(key=lambda c: c['err_norm'])
+    candidates.sort(key=lambda c: c.get('err_norm', float('inf')))
 
     if return_all:
         return candidates

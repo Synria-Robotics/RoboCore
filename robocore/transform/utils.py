@@ -171,19 +171,23 @@ def rotation_distance(R1, R2):
 
 def rotation_error(R_current, R_target):
     """
-    Compute rotation error as axis-angle vector.
+    Compute rotation error as axis-angle vector in world frame.
+    
+    For IK with geometric Jacobian, the angular velocity is expressed in world frame,
+    so the rotation error must also be in world frame.
     
     :param R_current: Current rotation matrix, shape (3, 3)
     :param R_target: Target rotation matrix, shape (3, 3)
-    :return: Error vector (axis * angle), shape (3,)
+    :return: Error vector (axis * angle) in world frame, shape (3,)
     """
     bm = get_backend_manager()
     
     R_current = bm.ensure_array(R_current)
     R_target = bm.ensure_array(R_target)
     
-    # R_error = R_current^T @ R_target
-    R_error = rotation_multiply(rotation_inverse(R_current), R_target)
+    # R_error = R_target @ R_current^T (world frame, same as pytorch_kinematics)
+    # This represents the rotation needed to go from current to target orientation
+    R_error = rotation_multiply(R_target, rotation_inverse(R_current))
     
     # Convert to axis-angle
     axis, angle = matrix_to_axis_angle(R_error)

@@ -310,10 +310,14 @@ class IKSolverNumPy:
                 step = 1.0 if method == "transpose" else self.base_step
 
             dq_step = step * dq
-            # 添加步长限制（与 Torch solver 一致）
-            dq_norm = np.linalg.norm(dq_step)
-            if dq_norm > max_step_norm:
-                dq_step = dq_step * (max_step_norm / (dq_norm + 1e-15))
+            
+            # Optional step norm clipping (only when adaptive_step is True)
+            # When adaptive_step=False, user controls step size via base_step (like pytorch_kinematics lr)
+            # max_step_norm is only applied when explicitly needed for stability
+            if adaptive_step and max_step_norm is not None and max_step_norm > 0:
+                dq_norm = np.linalg.norm(dq_step)
+                if dq_norm > max_step_norm:
+                    dq_step = dq_step * (max_step_norm / (dq_norm + 1e-15))
             
             # Update joint angles
             q += dq_step

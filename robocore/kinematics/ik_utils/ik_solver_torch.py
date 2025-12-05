@@ -446,9 +446,13 @@ class IKSolverTorch:
                     step *= 0.5
 
                 dq_step = step * dq
-                dq_norm = torch.linalg.norm(dq_step)
-                if dq_norm > max_step_norm:
-                    dq_step = dq_step * (max_step_norm / (dq_norm + 1e-15))
+                
+                # Only apply max_step_norm clipping when adaptive_step is True
+                # When adaptive_step=False, user controls step via base_step (like pytorch_kinematics lr)
+                if adaptive_step and max_step_norm is not None and max_step_norm > 0:
+                    dq_norm = torch.linalg.norm(dq_step)
+                    if dq_norm > max_step_norm:
+                        dq_step = dq_step * (max_step_norm / (dq_norm + 1e-15))
                 new_q = self._apply_joint_limits(q + dq_step)
 
                 if backtrack:

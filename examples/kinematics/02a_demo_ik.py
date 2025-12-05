@@ -49,7 +49,9 @@ def main(args):
     beauty_print(f"Initial Guess (radians):")
     print(f"  q_init = {beauty_print_array(q_init)}")
 
-    # Solve IK using DLS method
+    # Solve IK using DLS method with default (adaptive) parameters
+    # Note: RoboCore applies joint limits from URDF, while pytorch_kinematics does not.
+    # Use default adaptive parameters for better convergence with joint limits.
     ik_result = inverse_kinematics(
         robot_model,
         T_fk,
