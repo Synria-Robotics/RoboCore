@@ -131,13 +131,20 @@ class JacobianSolverTorch:
     def _solve_analytic(self, q, device, dtype, target_link: str | None = None) -> Tensor:
         """Compute analytic (geometric) Jacobian.
 
+        Coordinate frame convention:
+        - Linear velocity Jacobian (rows 0-2): expressed in WORLD frame
+        - Angular velocity Jacobian (rows 3-5): expressed in WORLD frame
+        
+        This convention matches pytorch_kinematics and is consistent with
+        standard robotics practice where both linear and angular velocities
+        are expressed in the base/world frame.
+
         If target_link is provided, the forward traversal is terminated early
         once the joint whose child link equals target_link is reached. This
         yields a local Jacobian for that intermediate link (with respect to the
-        world frame, angular rows expressed in the local link frame consistent
-        with the end-effector convention). J columns for joints appearing after
-        the truncated link in the kinematic chain (if any) will be zero because
-        they do not influence that link pose.
+        world frame). J columns for joints appearing after the truncated link
+        in the kinematic chain (if any) will be zero because they do not
+        influence that link pose.
         """
         if not torch.is_tensor(q):
             q = torch.tensor(q, dtype=dtype, device=device)
@@ -228,11 +235,9 @@ class JacobianSolverTorch:
             elif js.joint_type == "prismatic":
                 J_geo[:3, i] = z_i
         
-        # Transform angular part to end-effector frame
-        R_end = end_T[:3, :3]
-        J = J_geo.clone()
-        J[3:6, :] = R_end.T @ J_geo[3:6, :]
-        return J
+        # Angular velocity Jacobian is in world frame (consistent with pytorch_kinematics)
+        # No coordinate transformation needed
+        return J_geo
     
     def _solve_numeric(self, q, epsilon, use_central_diff, device, dtype) -> Tensor:
         """Compute numeric Jacobian using finite differences."""
@@ -267,14 +272,18 @@ class JacobianSolverTorch:
 
                 J[:3, i] = (p_pos - p_neg) / (2 * epsilon)
 
-                err_pos = rotation_error(R_ref, R_pos)
-                err_neg = rotation_error(R_ref, R_neg)
+                # Rotation error in end-effector frame
+                err_pos_ee = rotation_error(R_ref, R_pos)
+                err_neg_ee = rotation_error(R_ref, R_neg)
                 # Ensure err_pos and err_neg are torch tensors
-                if not torch.is_tensor(err_pos):
-                    err_pos = torch.tensor(err_pos, dtype=dtype, device=device)
-                if not torch.is_tensor(err_neg):
-                    err_neg = torch.tensor(err_neg, dtype=dtype, device=device)
-                J[3:6, i] = (err_pos - err_neg) / (2 * epsilon)
+                if not torch.is_tensor(err_pos_ee):
+                    err_pos_ee = torch.tensor(err_pos_ee, dtype=dtype, device=device)
+                if not torch.is_tensor(err_neg_ee):
+                    err_neg_ee = torch.tensor(err_neg_ee, dtype=dtype, device=device)
+                # Convert to world frame: e_world = R_ref @ e_ee
+                err_pos_world = R_ref @ err_pos_ee
+                err_neg_world = R_ref @ err_neg_ee
+                J[3:6, i] = (err_pos_world - err_neg_world) / (2 * epsilon)
         else:
             T_ref = fk_solver.solve(q, return_end_only=True, device=device, dtype=dtype)["end"]
             R_ref = T_ref[:3, :3]
@@ -288,11 +297,14 @@ class JacobianSolverTorch:
                 R_pos = T_pos[:3, :3]
 
                 J[:3, i] = (p_pos - p_ref) / epsilon
-                err = rotation_error(R_ref, R_pos)
+                # Rotation error in end-effector frame
+                err_ee = rotation_error(R_ref, R_pos)
                 # Ensure err is torch tensor
-                if not torch.is_tensor(err):
-                    err = torch.tensor(err, dtype=dtype, device=device)
-                J[3:6, i] = err / epsilon
+                if not torch.is_tensor(err_ee):
+                    err_ee = torch.tensor(err_ee, dtype=dtype, device=device)
+                # Convert to world frame: e_world = R_ref @ e_ee
+                err_world = R_ref @ err_ee
+                J[3:6, i] = err_world / epsilon
         
         return J
     
@@ -336,8 +348,8 @@ class JacobianSolverTorch:
             wy = (skew[0, 2] - skew[2, 0]) * 0.5
             wz = (skew[1, 0] - skew[0, 1]) * 0.5
             w_world = torch.stack([wx, wy, wz])
-            w_end = R_T @ w_world
-            J[3:6, j] = w_end
+            # Angular velocity Jacobian in world frame (consistent with pytorch_kinematics)
+            J[3:6, j] = w_world
         
         return J.detach()
     

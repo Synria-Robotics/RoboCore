@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""RoboCore Module
+"""Kinematics FK/IK/Jacobian Benchmark
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -40,8 +40,6 @@ _HAS_TORCH = False
 try:
     import torch
     _HAS_TORCH = True
-    from robocore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
-    from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
 except ImportError:
     pass
 
@@ -214,20 +212,23 @@ def benchmark_fk_numpy_batch(model, q_batch: np.ndarray, warmup: int = 5) -> Dic
     batch_size = q_batch.shape[0]
 
     # Warmup
-    for i in range(min(warmup, batch_size)):
-        _ = forward_kinematics(model, q_batch[i], return_end=True)
+    warmup_batch = q_batch[:min(warmup, batch_size)]
+    _ = forward_kinematics(model, warmup_batch, return_end=True)
     
-    # Benchmark
+    # Benchmark - use batch interface
     start_time = time.perf_counter()
-    results = []
-    for i in range(batch_size):
-        T = forward_kinematics(model, q_batch[i], return_end=True)
-        results.append(T)
+    T_batch = forward_kinematics(model, q_batch, return_end=True)
     end_time = time.perf_counter()
     
     total_time = end_time - start_time
     avg_time = total_time / batch_size
     
+    # Convert to list for compatibility
+    if T_batch.ndim == 3:
+        results = [T_batch[i] for i in range(batch_size)]
+    else:
+        results = [T_batch]
+
     return {
         'backend': 'numpy',
         'batch_size': batch_size,
@@ -244,23 +245,17 @@ def benchmark_fk_torch_batch(model, q_batch: np.ndarray, device: str = 'cpu', wa
         return None
     
     batch_size = q_batch.shape[0]
-    
-    # Convert to torch tensor
-    q_torch = torch.from_numpy(q_batch).float()
-    
-    # Create solver
-    fk_solver = FKSolverTorch(model)
-    
+
     # Warmup - process a small batch
-    warmup_batch = q_torch[:min(warmup, batch_size)]
-    _ = fk_solver.solve(warmup_batch, device=device, dtype=torch.float32)
+    warmup_batch = q_batch[:min(warmup, batch_size)]
+    _ = forward_kinematics(model, warmup_batch, return_end=True, device=device)
     
     if device != 'cpu' and device.startswith('cuda'):
         torch.cuda.synchronize()
     
-    # Benchmark - TRUE BATCH: all samples processed in parallel!
+    # Benchmark - use unified batch interface
     start_time = time.perf_counter()
-    T_batch = fk_solver.solve(q_torch, device=device, dtype=torch.float32)  # [B, 4, 4]
+    T_batch = forward_kinematics(model, q_batch, return_end=True, device=device)  # [B, 4, 4]
     
     if device != 'cpu' and device.startswith('cuda'):
         torch.cuda.synchronize()
@@ -270,8 +265,11 @@ def benchmark_fk_torch_batch(model, q_batch: np.ndarray, device: str = 'cpu', wa
     total_time = end_time - start_time
     avg_time = total_time / batch_size
     
-    # Extract results (for compatibility)
-    results = [T_batch[i].cpu().numpy() for i in range(batch_size)]
+    # Convert to list for compatibility
+    if T_batch.ndim == 3:
+        results = [T_batch[i] for i in range(batch_size)]
+    else:
+        results = [T_batch]
     
     return {
         'backend': f'torch_{device}',
@@ -283,6 +281,87 @@ def benchmark_fk_torch_batch(model, q_batch: np.ndarray, device: str = 'cpu', wa
     }
 
 
+def benchmark_ik_batch(model, target_poses: np.ndarray, q0_batch: np.ndarray,
+                       backend: str, device: str = 'cpu', method: str = 'dls') -> Dict:
+    """Benchmark IK batch computation."""
+    batch_size = target_poses.shape[0]
+
+    # Set backend
+    if backend == 'torch':
+        robocore.set_backend('torch', device=device)
+    else:
+        robocore.set_backend('numpy')
+
+    # Warmup
+    warmup_size = min(5, batch_size)
+    warmup_poses = target_poses[:warmup_size]
+    warmup_q0 = q0_batch[:warmup_size]
+    _ = inverse_kinematics(model, warmup_poses, warmup_q0, method=method)
+
+    if backend == 'torch' and _HAS_TORCH and device.startswith('cuda'):
+        torch.cuda.synchronize()
+
+    # Benchmark
+    start_time = time.perf_counter()
+    results = inverse_kinematics(model, target_poses, q0_batch, method=method)
+    if backend == 'torch' and _HAS_TORCH and device.startswith('cuda'):
+        torch.cuda.synchronize()
+    end_time = time.perf_counter()
+
+    total_time = end_time - start_time
+    avg_time = total_time / batch_size
+    successes = sum(1 for r in results if r.get('success', False))
+
+    return {
+        'backend': f'{backend}_{device}' if backend == 'torch' else backend,
+        'batch_size': batch_size,
+        'total_time': total_time,
+        'avg_time': avg_time,
+        'throughput': batch_size / total_time,
+        'success_rate': successes / batch_size,
+        'results': results
+    }
+
+
+def benchmark_jacobian_batch(model, q_batch: np.ndarray, backend: str,
+                             device: str = 'cpu', method: str = 'analytic') -> Dict:
+    """Benchmark Jacobian batch computation."""
+    batch_size = q_batch.shape[0]
+
+    # Set backend
+    if backend == 'torch':
+        robocore.set_backend('torch', device=device)
+    else:
+        robocore.set_backend('numpy')
+
+    # Warmup
+    warmup_size = min(5, batch_size)
+    warmup_batch = q_batch[:warmup_size]
+    _ = jacobian(model, warmup_batch, method=method, device=device)
+
+    if backend == 'torch' and _HAS_TORCH and device.startswith('cuda'):
+        torch.cuda.synchronize()
+
+    # Benchmark
+    start_time = time.perf_counter()
+    J_batch = jacobian(model, q_batch, method=method, device=device)
+    if backend == 'torch' and _HAS_TORCH and device.startswith('cuda'):
+        torch.cuda.synchronize()
+    end_time = time.perf_counter()
+
+    total_time = end_time - start_time
+    avg_time = total_time / batch_size
+
+    return {
+        'backend': f'{backend}_{device}' if backend == 'torch' else backend,
+        'batch_size': batch_size,
+        'total_time': total_time,
+        'avg_time': avg_time,
+        'throughput': batch_size / total_time,
+        'results': J_batch
+    }
+
+
 def cmd_parallel(args, model):
     """Run parallel/batch processing benchmark."""
     beauty_print("Parallel/Batch Processing Benchmark", type="module", centered=True)
@@ -291,8 +370,11 @@ def cmd_parallel(args, model):
     # Generate random batch
     q_batch = model.random_q_batch(args.batch_size, seed=args.seed)
     
+    # ========== Forward Kinematics ==========
+    beauty_print("Forward Kinematics", type="module", centered=True)
+
     # NumPy benchmark
-    beauty_print("NumPy (Sequential)")
+    beauty_print("NumPy (Batch Interface)")
     robocore.set_backend('numpy')
     result_np = benchmark_fk_numpy_batch(model, q_batch, warmup=5)
     beauty_print(f"  Total time: {result_np['total_time']:.4f} s")
@@ -301,7 +383,7 @@ def cmd_parallel(args, model):
     
     # PyTorch CPU benchmark
     if _HAS_TORCH and 'torch-cpu' in args.backends:
-        beauty_print("PyTorch CPU (Batch)", type="module")
+        beauty_print("PyTorch CPU (Batch)")
         result_torch_cpu = benchmark_fk_torch_batch(model, q_batch, device='cpu', warmup=5)
         beauty_print(f"  Total time: {result_torch_cpu['total_time']:.4f} s")
         beauty_print(f"  Avg time: {result_torch_cpu['avg_time']*1000:.4f} ms/sample")
@@ -319,6 +401,58 @@ def cmd_parallel(args, model):
         speedup = result_np['total_time'] / result_torch_cuda['total_time']
         beauty_print(f"  Speedup over NumPy: {speedup:.2f}x", type="success")
     
+    # ========== Inverse Kinematics ==========
+    if args.include_ik:
+        beauty_print("Inverse Kinematics", type="module", centered=True)
+
+        # Generate target poses from FK
+        target_poses = []
+        for q in q_batch[:min(50, args.batch_size)]:  # Limit IK batch size for speed
+            T = forward_kinematics(model, q, return_end=True)
+            target_poses.append(T)
+        target_poses = np.array(target_poses)
+        q0_batch = np.zeros((len(target_poses), model.num_chain_dof))
+
+        # NumPy IK
+        beauty_print("NumPy (Batch Interface)")
+        result_ik_np = benchmark_ik_batch(model, target_poses, q0_batch, 'numpy', method='dls')
+        beauty_print(f"  Total time: {result_ik_np['total_time']:.4f} s")
+        beauty_print(f"  Avg time: {result_ik_np['avg_time']*1000:.4f} ms/sample")
+        beauty_print(f"  Throughput: {result_ik_np['throughput']:.2f} samples/s")
+        beauty_print(f"  Success rate: {result_ik_np['success_rate']*100:.1f}%")
+
+        # PyTorch IK
+        if _HAS_TORCH and 'torch-cpu' in args.backends:
+            beauty_print("PyTorch CPU (Batch)")
+            result_ik_torch = benchmark_ik_batch(model, target_poses, q0_batch, 'torch', 'cpu', method='dls')
+            beauty_print(f"  Total time: {result_ik_torch['total_time']:.4f} s")
+            beauty_print(f"  Avg time: {result_ik_torch['avg_time']*1000:.4f} ms/sample")
+            beauty_print(f"  Throughput: {result_ik_torch['throughput']:.2f} samples/s")
+            beauty_print(f"  Success rate: {result_ik_torch['success_rate']*100:.1f}%")
+            speedup = result_ik_np['total_time'] / result_ik_torch['total_time']
+            beauty_print(f"  Speedup over NumPy: {speedup:.2f}x", type="success" if speedup > 1 else "info")
+
+    # ========== Jacobian ==========
+    if args.include_jacobian:
+        beauty_print("Jacobian", type="module", centered=True)
+
+        # NumPy Jacobian
+        beauty_print("NumPy (Batch Interface)")
+        result_jac_np = benchmark_jacobian_batch(model, q_batch, 'numpy', method='analytic')
+        beauty_print(f"  Total time: {result_jac_np['total_time']:.4f} s")
+        beauty_print(f"  Avg time: {result_jac_np['avg_time']*1000:.4f} ms/sample")
+        beauty_print(f"  Throughput: {result_jac_np['throughput']:.2f} samples/s")
+
+        # PyTorch Jacobian
+        if _HAS_TORCH and 'torch-cpu' in args.backends:
+            beauty_print("PyTorch CPU (Batch)")
+            result_jac_torch = benchmark_jacobian_batch(model, q_batch, 'torch', 'cpu', method='analytic')
+            beauty_print(f"  Total time: {result_jac_torch['total_time']:.4f} s")
+            beauty_print(f"  Avg time: {result_jac_torch['avg_time']*1000:.4f} ms/sample")
+            beauty_print(f"  Throughput: {result_jac_torch['throughput']:.2f} samples/s")
+            speedup = result_jac_np['total_time'] / result_jac_torch['total_time']
+            beauty_print(f"  Speedup over NumPy: {speedup:.2f}x", type="success" if speedup > 1 else "info")
+
     beauty_print("✓ Parallel benchmark complete", type="success")
 
 
@@ -351,6 +485,8 @@ def main(args):
             ori_tol = 1e-4
             torch_dtype = None
             batch_size = 1000
+            include_ik = True
+            include_jacobian = True
         
         default_args = DefaultArgs()
         default_args.seed = args.seed
@@ -413,8 +549,12 @@ if __name__ == '__main__':
     parser_par = subparsers.add_parser('parallel', help='Parallel/batch processing benchmark')
     parser_par.add_argument('--batch-size', type=int, default=100,
                             help='Batch size for parallel processing')
-    parser_par.add_argument('--backends', nargs='+', default=['numpy', 'torch-cuda'],
+    parser_par.add_argument('--backends', nargs='+', default=['numpy', 'torch-cpu'],
                             help='Backends to test (numpy, torch-cpu, torch-cuda)')
+    parser_par.add_argument('--include-ik', action='store_true',
+                            help='Include IK batch benchmark')
+    parser_par.add_argument('--include-jacobian', action='store_true',
+                            help='Include Jacobian batch benchmark')
 
     # Subcommand: all
     parser_all = subparsers.add_parser('all', help='Run all benchmarks')

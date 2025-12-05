@@ -33,20 +33,20 @@ _backend_manager = None
 class BackendManager:
     """
     Global backend manager for numpy/torch switching.
-    
+
     Supports:
     - Backend selection: 'numpy' or 'torch'
     - Device selection: 'cpu', 'cuda', 'cuda:0', etc.
     - Dtype management: float32, float64
     - Automatic device placement for torch tensors
     """
-    
+
     def __init__(self):
         self._backend: Literal['numpy', 'torch'] = 'numpy'
         self._device: str = 'cpu'
         self._dtype = np.float64
         self._torch_available = False
-        
+
         # Try to import torch
         try:
             import torch as _torch
@@ -54,25 +54,25 @@ class BackendManager:
             self._torch_available = True
         except ImportError:
             self._torch = None
-    
+
     def set_backend(
-        self, 
+        self,
         backend: Literal['numpy', 'torch'] = 'numpy',
         device: Any = 'cpu',
         dtype: Optional[Any] = None
     ):
         """
         Set the global backend.
-        
+
         :param backend: 'numpy' or 'torch'
         :param device: 'cpu', 'cuda', 'cuda:0', etc. or torch.device object (only for torch)
         :param dtype: numpy.float32/float64 or torch.float32/float64
         """
         if backend == 'torch' and not self._torch_available:
             raise RuntimeError("Torch is not available. Install pytorch first.")
-        
+
         self._backend = backend
-        
+
         if backend == 'torch':
             # Convert torch.device object to string if needed
             if self._torch_available and isinstance(device, self._torch.device):
@@ -83,7 +83,7 @@ class BackendManager:
                 if not self._torch.cuda.is_available():
                     raise RuntimeError("CUDA is not available")
             self._device = device
-            
+
             # Set dtype - convert to torch dtype if needed
             if dtype is None:
                 self._dtype = self._torch.float64
@@ -115,23 +115,22 @@ class BackendManager:
 
         beauty_print(f"Backend set to {backend} on device {self._device} with dtype {self._dtype}")
 
-    
     def get_backend(self) -> str:
         """Get current backend name."""
         return self._backend
-    
+
     def get_device(self) -> str:
         """Get current device."""
         return self._device
-    
+
     def get_dtype(self):
         """Get current dtype."""
         return self._dtype
-    
+
     def ensure_array(self, data):
         """
         Convert input to appropriate array type based on current backend.
-        
+
         :param data: Input data (list, numpy array, or torch tensor)
         :return: Array in the current backend format
         """
@@ -154,11 +153,11 @@ class BackendManager:
                 return self._torch.tensor(
                     data, device=self._device, dtype=self._dtype
                 )
-    
+
     def array(self, data, dtype=None):
         """
         Create array with explicit dtype.
-        
+
         :param data: Input data
         :param dtype: Override dtype (optional)
         :return: Array in current backend format
@@ -167,11 +166,11 @@ class BackendManager:
             return np.array(data, dtype=dtype if dtype is not None else self._dtype)
         else:
             return self._torch.tensor(data, device=self._device, dtype=dtype if dtype is not None else self._dtype)
-    
+
     def zeros(self, shape, dtype=None):
         """
         Create zeros array.
-        
+
         :param shape: Array shape
         :param dtype: Override dtype (optional)
         :return: Zeros array
@@ -180,11 +179,11 @@ class BackendManager:
             return np.zeros(shape, dtype=dtype if dtype is not None else self._dtype)
         else:
             return self._torch.zeros(shape, device=self._device, dtype=dtype if dtype is not None else self._dtype)
-    
+
     def ones(self, shape, dtype=None):
         """
         Create ones array.
-        
+
         :param shape: Array shape
         :param dtype: Override dtype (optional)
         :return: Ones array
@@ -193,11 +192,11 @@ class BackendManager:
             return np.ones(shape, dtype=dtype if dtype is not None else self._dtype)
         else:
             return self._torch.ones(shape, device=self._device, dtype=dtype if dtype is not None else self._dtype)
-    
+
     def eye(self, n, dtype=None):
         """
         Create identity matrix.
-        
+
         :param n: Matrix size
         :param dtype: Override dtype (optional)
         :return: Identity matrix
@@ -206,19 +205,19 @@ class BackendManager:
             return np.eye(n, dtype=dtype if dtype is not None else self._dtype)
         else:
             return self._torch.eye(n, device=self._device, dtype=dtype if dtype is not None else self._dtype)
-    
+
     @property
     def module(self):
         """Get the underlying module (numpy or torch)."""
         if self._backend == 'torch':
             return self._torch
         return np
-    
+
     @property
     def is_torch(self) -> bool:
         """Check if current backend is torch."""
         return self._backend == 'torch'
-    
+
     @property
     def is_numpy(self) -> bool:
         """Check if current backend is numpy."""
@@ -228,7 +227,7 @@ class BackendManager:
 def get_backend_manager() -> BackendManager:
     """
     Get the global backend manager instance (thread-safe singleton).
-    
+
     :return: Global BackendManager instance
     """
     global _backend_manager
@@ -247,7 +246,7 @@ def set_backend(
 ):
     """
     Set the global backend.
-    
+
     :param backend: 'numpy' or 'torch'
     :param device: 'cpu', 'cuda', 'cuda:0', etc. or torch.device object
     :param dtype: Data type for arrays
@@ -258,7 +257,7 @@ def set_backend(
 def get_backend() -> str:
     """
     Get current backend name.
-    
+
     :return: 'numpy' or 'torch'
     """
     return get_backend_manager().get_backend()
@@ -267,8 +266,31 @@ def get_backend() -> str:
 def ensure_array(data):
     """
     Convert data to current backend format.
-    
+
     :param data: Input data
     :return: Array in current backend format
     """
     return get_backend_manager().ensure_array(data)
+
+
+def to_numpy(x: Any) -> np.ndarray:
+    """
+    Convert torch tensor to numpy array.
+
+    :param x: Input data
+    :return: Numpy array
+    """
+    import torch
+    if isinstance(x, torch.Tensor):
+        return x.cpu().numpy()
+    elif isinstance(x, np.ndarray):
+        return x
+    elif isinstance(x, list):
+        return np.array(x)
+    elif isinstance(x, tuple):
+        return np.array(x)
+    elif isinstance(x, dict):
+        return np.array(x)
+    elif isinstance(x, str):
+        return x
+    return np.array(x)

@@ -343,6 +343,76 @@ class IKSolverNumPy:
             "ori_err": float(best_ori_err),
         }
 
+    def solve_batch(
+        self,
+        target_poses_batch: np.ndarray,
+        q0_batch: np.ndarray,
+        method: str = "dls",
+        use_analytic_jacobian: bool = True,
+        target_link: str | None = None,
+        row_mask: Sequence[int | bool] | None = None,
+        nullspace_gain: float = 0.0,
+        joint_centering: bool = True,
+        joint_center_gain: float = 0.2,
+        joint_center_weights: Sequence[float] | None = None,
+        **kwargs
+    ) -> Dict[str, List]:
+        """Solve IK for batch of configurations.
+        
+        :param target_poses_batch: target poses [B, 4, 4]
+        :param q0_batch: initial configurations [B, n]
+        :param method: IK method ('dls', 'pinv', 'transpose')
+        :return: dict with batch results (each field is a list of length B)
+        """
+        target_poses_batch = np.asarray(target_poses_batch, dtype=np.float64)
+        q0_batch = np.asarray(q0_batch, dtype=np.float64)
+        
+        if target_poses_batch.ndim != 3 or target_poses_batch.shape[1:] != (4, 4):
+            raise ValueError(f"Expected target_poses_batch with shape [B, 4, 4], got {target_poses_batch.shape}")
+        if q0_batch.ndim != 2:
+            raise ValueError(f"Expected q0_batch with shape [B, n], got {q0_batch.shape}")
+        
+        batch_size = target_poses_batch.shape[0]
+        if q0_batch.shape[0] != batch_size:
+            raise ValueError(f"Batch size mismatch: target_poses_batch {batch_size} vs q0_batch {q0_batch.shape[0]}")
+        
+        # Process each configuration
+        results = {
+            'q': [],
+            'success': [],
+            'iters': [],
+            'err_norm': [],
+            'method': [],
+            'jacobian': [],
+            'pos_err': [],
+            'ori_err': [],
+        }
+        
+        for i in range(batch_size):
+            res = self.solve(
+                target_poses_batch[i],
+                q0_batch[i],
+                method=method,
+                use_analytic_jacobian=use_analytic_jacobian,
+                target_link=target_link,
+                row_mask=row_mask,
+                nullspace_gain=nullspace_gain,
+                joint_centering=joint_centering,
+                joint_center_gain=joint_center_gain,
+                joint_center_weights=joint_center_weights,
+                **kwargs
+            )
+            results['q'].append(res['q'])
+            results['success'].append(res['success'])
+            results['iters'].append(res['iters'])
+            results['err_norm'].append(res['err_norm'])
+            results['method'].append(res['method'])
+            results['jacobian'].append(res.get('jacobian', 'analytic'))
+            results['pos_err'].append(res.get('pos_err', 0.0))
+            results['ori_err'].append(res.get('ori_err', 0.0))
+        
+        return results
+
     def _solve_dls(self, J: np.ndarray, err: np.ndarray, damping: float) -> np.ndarray:
         """Solve damped least squares: dq = J^T (J J^T + λ²I)^{-1} err.
 

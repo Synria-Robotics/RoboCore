@@ -79,8 +79,55 @@ class JacobianSolverNumPy:
         else:
             raise ValueError(f"Unknown method '{method}', expected 'analytic' or 'numeric'")
     
+    def solve_batch(
+        self,
+        q_batch: np.ndarray,
+        method: Literal["analytic", "numeric"] = "analytic",
+        epsilon: float = 5e-5,
+        use_central_diff: bool = True,
+        target_link: str | None = None,
+    ) -> np.ndarray:
+        """Compute Jacobian matrices for batch of configurations.
+        
+        :param q_batch: joint configurations [B, n]
+        :param method: 'analytic' for geometric or 'numeric' for finite-difference
+        :param epsilon: finite difference step size (numeric only)
+        :param use_central_diff: use central difference if True (numeric only)
+        :param target_link: target link name
+        :return: Jacobian matrices [B, 6, n]
+        """
+        q_batch = np.asarray(q_batch, dtype=np.float64)
+        
+        if q_batch.ndim != 2:
+            raise ValueError(f"Expected 2D array [B, n], got {q_batch.ndim}D array with shape {q_batch.shape}")
+        
+        batch_size = q_batch.shape[0]
+        
+        # Process each configuration
+        results = []
+        for i in range(batch_size):
+            J = self.solve(
+                q_batch[i],
+                method=method,
+                epsilon=epsilon,
+                use_central_diff=use_central_diff,
+                target_link=target_link,
+            )
+            results.append(J)
+        
+        # Stack into [B, 6, n] array
+        return np.stack(results, axis=0)
+    
     def _solve_analytic(self, q: np.ndarray, target_link: str | None = None) -> np.ndarray:
         """Compute analytic (geometric) Jacobian.
+        
+        Coordinate frame convention:
+        - Linear velocity Jacobian (rows 0-2): expressed in WORLD frame
+        - Angular velocity Jacobian (rows 3-5): expressed in WORLD frame
+        
+        This convention matches pytorch_kinematics and is consistent with
+        standard robotics practice where both linear and angular velocities
+        are expressed in the base/world frame.
         
         For each actuated joint i (in world frame):
           Revolute:
@@ -89,8 +136,6 @@ class JacobianSolverNumPy:
           Prismatic:
             Jv_i = z_i
             Jw_i = 0
-        
-        The angular part is then transformed to end-effector frame.
         """
         q = np.asarray(q, dtype=np.float64)
         if q.shape[0] != self.n:
@@ -170,11 +215,9 @@ class JacobianSolverNumPy:
             elif js.joint_type == "prismatic":
                 J_geo[:3, i] = z_i
 
-        # Transform angular part to end-effector frame
-        R_end = end_T[:3, :3]
-        J = J_geo.copy()
-        J[3:6, :] = R_end.T @ J_geo[3:6, :]
-        return J
+        # Angular velocity Jacobian is in world frame (consistent with pytorch_kinematics)
+        # No coordinate transformation needed
+        return J_geo
     
     def _solve_numeric(
         self, 
@@ -240,9 +283,13 @@ class JacobianSolverNumPy:
                 J[:3, i] = (p_pos - p_neg) / (2 * epsilon)
                 
                 # Orientation derivative
-                err_pos = rotation_error(R_ref, R_pos)
-                err_neg = rotation_error(R_ref, R_neg)
-                J[3:6, i] = (err_pos - err_neg) / (2 * epsilon)
+                # Rotation error in end-effector frame
+                err_pos_ee = rotation_error(R_ref, R_pos)
+                err_neg_ee = rotation_error(R_ref, R_neg)
+                # Convert to world frame: e_world = R_ref @ e_ee
+                err_pos_world = R_ref @ err_pos_ee
+                err_neg_world = R_ref @ err_neg_ee
+                J[3:6, i] = (err_pos_world - err_neg_world) / (2 * epsilon)
         else:
             # Forward difference - use standalone FK to avoid circular dependency
             if target_link is None:
@@ -279,8 +326,11 @@ class JacobianSolverNumPy:
                 )
                 
                 J[:3, i] = (p_pert - p_ref) / epsilon
-                err = rotation_error(R_ref, R_pert)
-                J[3:6, i] = err / epsilon
+                # Rotation error in end-effector frame
+                err_ee = rotation_error(R_ref, R_pert)
+                # Convert to world frame: e_world = R_ref @ e_ee
+                err_world = R_ref @ err_ee
+                J[3:6, i] = err_world / epsilon
         
         return J
 

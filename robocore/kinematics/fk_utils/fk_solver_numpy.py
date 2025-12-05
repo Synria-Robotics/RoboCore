@@ -134,6 +134,35 @@ class FKSolverNumPy:
 
         return poses
 
+    def solve_batch(
+        self,
+        q_batch: np.ndarray
+    ) -> np.ndarray:
+        """Compute forward kinematics for batch of configurations.
+        
+        :param q_batch: joint configurations [B, n]
+        :return: end-effector poses [B, 4, 4]
+        """
+        q_batch = np.asarray(q_batch, dtype=np.float64)
+        
+        if q_batch.ndim != 2:
+            raise ValueError(f"Expected 2D array [B, n], got {q_batch.ndim}D array with shape {q_batch.shape}")
+        
+        batch_size = q_batch.shape[0]
+        n_joints = q_batch.shape[1]
+        
+        if n_joints != self.n:
+            raise ValueError(f"Expected {self.n} joints, got {n_joints}")
+        
+        # Process each configuration (vectorized where possible)
+        results = []
+        for i in range(batch_size):
+            poses = self.solve(q_batch[i], return_end_only=True)
+            results.append(poses['end'])
+        
+        # Stack into [B, 4, 4] array
+        return np.stack(results, axis=0)
+
     def solve_multi_chain(
         self,
         q: Sequence[float],

@@ -419,11 +419,10 @@ class IKSolverTorch:
                             centers = []
                             for js in self.model._chain_actuated:  # type: ignore[attr-defined]
                                 lo, hi = -1.0, 1.0
-                                if js.limit:
-                                    if js.limit[0] is not None:
-                                        lo = js.limit[0]
-                                    if js.limit[1] is not None:
-                                        hi = js.limit[1]
+                                if js.limit_lower is not None:
+                                    lo = js.limit_lower
+                                if js.limit_upper is not None:
+                                    hi = js.limit_upper
                                 centers.append(0.5 * (lo + hi))
                             centers_t = torch.tensor(centers, dtype=self.dtype, device=self.device)
                             delta_center = centers_t - q
@@ -712,11 +711,9 @@ class IKSolverTorch:
                 else:  # fixed
                     pass
 
-            # Transform angular rows into end-effector frame (match single-mode Jacobian convention)
-            # J_ang_body = R_end^T * J_ang_world
-            R_end_T = R_end.transpose(1, 2)  # [Ba,3,3]
+            # Angular velocity Jacobian is in world frame (consistent with pytorch_kinematics)
+            # No coordinate transformation needed
             J = J_geo.clone()
-            J[:, 3:6, :] = torch.bmm(R_end_T, J_geo[:, 3:6, :])  # [Ba,3,n]
 
             # Apply position & dynamic orientation weights to Jacobian rows
             if pos_weight != 1.0:
@@ -840,13 +837,11 @@ class IKSolverTorch:
             q_new = q_sub + dq
             # apply joint limits vectorized
             for js in self.model._chain_actuated:  # type: ignore[attr-defined]
-                if js.limit is not None:
-                    lo, hi = js.limit
-                    j = js.index
-                    if lo is not None:
-                        q_new[:, j] = torch.clamp(q_new[:, j], min=float(lo))
-                    if hi is not None:
-                        q_new[:, j] = torch.clamp(q_new[:, j], max=float(hi))
+                j = js.index
+                if js.limit_lower is not None:
+                    q_new[:, j] = torch.clamp(q_new[:, j], min=float(js.limit_lower))
+                if js.limit_upper is not None:
+                    q_new[:, j] = torch.clamp(q_new[:, j], max=float(js.limit_upper))
             q[act_idx] = q_new
 
         # For samples never converged, record iterations

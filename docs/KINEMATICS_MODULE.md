@@ -137,13 +137,23 @@ T = T_base @ T_1(q1) @ T_2(q2) @ ... @ T_n(qn)
 ```python
 from robocore.kinematics import forward_kinematics
 from robocore.modeling import RobotModel
+import numpy as np
 
 robot = RobotModel("path/to/robot.urdf")
 
-# 单链模式：只计算末端执行器
+# 单链模式：只计算末端执行器（单个配置）
 q = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 T_end = forward_kinematics(robot, q, return_end=True)
 # 返回: 4x4 位姿矩阵
+
+# 批处理模式：多个配置并行计算
+q_batch = np.array([
+    [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+    [0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+    [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+])
+T_batch = forward_kinematics(robot, q_batch, return_end=True)
+# 返回: [3, 4, 4] 数组，包含3个配置的末端执行器位姿
 
 # 单链模式：返回所有链路的位姿
 poses = forward_kinematics(robot, q, return_end=False)
@@ -203,7 +213,7 @@ selected_poses = forward_kinematics(
 from robocore.kinematics import inverse_kinematics
 import numpy as np
 
-# 基本使用
+# 基本使用（单个目标位姿）
 target_pose = np.array([
     [1, 0, 0, 0.5],
     [0, 1, 0, 0.3],
@@ -220,7 +230,22 @@ result = inverse_kinematics(
 # result['q']: 求解得到的关节配置
 # result['err_norm']: 误差范数
 
-# 多起点求解（提高成功率）
+# 批处理模式：多个目标位姿并行求解
+target_poses = np.array([
+    [[1, 0, 0, 0.5], [0, 1, 0, 0.3], [0, 0, 1, 0.2], [0, 0, 0, 1]],
+    [[1, 0, 0, 0.6], [0, 1, 0, 0.4], [0, 0, 1, 0.3], [0, 0, 0, 1]],
+    [[1, 0, 0, 0.4], [0, 1, 0, 0.2], [0, 0, 1, 0.1], [0, 0, 0, 1]]
+])  # [3, 4, 4]
+q0_batch = np.zeros((3, 6))  # [3, 6]
+
+results = inverse_kinematics(
+    robot, target_poses, q0_batch,
+    method='dls'
+)
+# 返回: 包含3个结果的列表
+# results[0]['success'], results[0]['q'], ...
+
+# 多起点求解（提高成功率，仅单目标模式）
 result = inverse_kinematics(
     robot, target_pose, q0,
     method='dls',
@@ -288,10 +313,19 @@ result = inverse_kinematics(
 from robocore.kinematics import jacobian
 import numpy as np
 
-# 基本使用：计算完整雅可比矩阵
+# 基本使用：计算完整雅可比矩阵（单个配置）
 q = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 J = jacobian(robot, q, method='analytic')
 # 返回: 6×n 雅可比矩阵
+
+# 批处理模式：多个配置并行计算
+q_batch = np.array([
+    [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+    [0.2, 0.3, 0.4, 0.5, 0.6, 0.7],
+    [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+])  # [3, 6]
+J_batch = jacobian(robot, q_batch, method='analytic')
+# 返回: [3, 6, 6] 数组，包含3个配置的雅可比矩阵
 
 # 部分雅可比：只计算位置（前3行）
 J_pos = jacobian(
@@ -321,6 +355,15 @@ J_numeric = jacobian(
 - 奇异性分析
 - 可操作性分析
 - 力控制（雅可比转置）
+
+**重要说明：坐标系约定**
+
+RoboCore的雅可比矩阵采用以下坐标系约定（与`pytorch_kinematics`一致）：
+
+- **位置雅可比（前3行）**：在世界坐标系（基坐标系）中表达
+- **角速度雅可比（后3行）**：在世界坐标系（基坐标系）中表达
+
+这种约定符合标准机器人学实践，其中线速度和角速度都在基坐标系中表达，便于与速度控制、力控制等应用直接对接。
 
 ---
 
@@ -584,6 +627,7 @@ from robocore.kinematics import (
     jacobian
 )
 from robocore.modeling import RobotModel
+import numpy as np
 ```
 
 2. **创建机器人模型**
@@ -593,23 +637,53 @@ robot = RobotModel("path/to/robot.urdf")
 
 3. **正向运动学**
 ```python
+# 单个配置
 q = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 T = forward_kinematics(robot, q, return_end=True)
+
+# 批处理（自动检测）
+q_batch = np.array([[0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+                    [0.2, 0.3, 0.4, 0.5, 0.6, 0.7]])
+T_batch = forward_kinematics(robot, q_batch, return_end=True)  # [2, 4, 4]
 ```
 
 4. **逆向运动学**
 ```python
+# 单个目标
 target_pose = np.array([...])  # 4x4矩阵
 q0 = [0.0] * 6
 result = inverse_kinematics(robot, target_pose, q0)
 if result['success']:
     q_solution = result['q']
+
+# 批处理
+target_poses = np.array([...])  # [B, 4, 4]
+q0_batch = np.zeros((B, 6))  # [B, 6]
+results = inverse_kinematics(robot, target_poses, q0_batch)  # 返回列表
 ```
 
 5. **雅可比矩阵**
 ```python
+# 单个配置
 J = jacobian(robot, q, method='analytic')
+
+# 批处理
+q_batch = np.array([...])  # [B, n]
+J_batch = jacobian(robot, q_batch, method='analytic')  # [B, 6, n]
 ```
+
+### 批处理功能
+
+所有运动学函数（`forward_kinematics`、`inverse_kinematics`、`jacobian`）都支持批处理模式：
+
+- **自动检测**：输入为 1D 数组时自动包装为 batch=1，2D 数组时直接批处理
+- **统一接口**：单个配置和批处理使用相同的函数调用
+- **性能优化**：使用 PyTorch 后端时，批处理可以充分利用 GPU 并行计算
+- **向后兼容**：现有单配置代码无需修改即可工作
+
+**批处理性能优势**：
+- PyTorch 后端：真正的并行计算，显著加速
+- NumPy 后端：接口统一，但使用循环实现（仍比多次调用更高效）
 
 ### 高级功能
 
