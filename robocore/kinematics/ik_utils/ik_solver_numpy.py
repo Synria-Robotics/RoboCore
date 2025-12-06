@@ -26,6 +26,7 @@ import numpy as np
 from ..jacobian_utils.jacobian_solver_numpy import JacobianSolverNumPy
 from robocore.transform import rotation_error
 from robocore.kinematics.fk import forward_kinematics
+from robocore.kinematics.utils import ensure_batch, restore_single
 
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
@@ -85,32 +86,188 @@ class IKSolverNumPy:
         use_analytic_jacobian: bool = False,
         method: str = "dls",
         transpose_gain: float | None = None,
-        max_step_norm: float = 0.5,  # Increased from 0.3 for better workspace boundary handling
+        max_step_norm: float = 0.5,
         refine: bool = False,
         refine_iters: int = 10,
         refine_pos_tol: float | None = None,
         refine_ori_tol: float | None = None,
-        # Local task extension
         target_link: str | None = None,
         row_mask: Sequence[int | bool] | None = None,
-        # Redundancy control
         nullspace_gain: float = 0.0,
         joint_centering: bool = True,
         joint_center_gain: float = 0.2,
         joint_center_weights: Sequence[float] | None = None,
-    ) -> Dict[str, object]:
-        """Solve IK with selectable method.
+    ) -> Dict[str, object] | Dict[str, list]:
+        """Solve IK with selectable method (supports both single and batch).
 
         Supported methods:
           - dls: damped least squares (JJ^T regularization)
           - pinv: SVD pseudoinverse with Tikhonov damping
           - transpose: J^T * error with adaptive gain
+        
+        :param target_pose: target pose(s) [4, 4] or [B, 4, 4]
+        :param q0: initial configuration(s) [n] or [B, n]
+        :return: IK result dict (single) or dict with batch results (batch)
         """
         method = method.lower()
         if method not in ("dls", "pinv", "transpose"):
             raise ValueError(f"Unknown IK method '{method}'")
-        q0 = np.asarray(q0, dtype=np.float64)
+
         target_pose = np.asarray(target_pose, dtype=np.float64)
+        q0 = np.asarray(q0, dtype=np.float64)
+
+        # Handle batch mode - normalize target_pose shape first
+        if target_pose.ndim == 2:
+            # Single 4x4 matrix -> reshape to [1, 4, 4]
+            target_pose = target_pose.reshape(1, 4, 4)
+        elif target_pose.ndim == 3:
+            # Already batch format [B, 4, 4]
+            pass
+        else:
+            raise ValueError(f"Expected target_pose with shape [4, 4] or [B, 4, 4], got {target_pose.shape}")
+
+        # Now ensure batch format
+        was_single_t = target_pose.shape[0] == 1
+        q0, was_single_q = ensure_batch(q0)
+        was_single = was_single_t and was_single_q
+
+        if q0.shape[1] != self.n:
+            raise ValueError(f"Expected q0 with {self.n} elements, got {q0.shape[1]}")
+
+        if target_pose.shape[0] != q0.shape[0]:
+            raise ValueError(f"Batch size mismatch: target_pose {target_pose.shape[0]} vs q0 {q0.shape[0]}")
+
+        result = self._solve_batch(
+            target_pose, q0,
+            pos_weight=pos_weight,
+            ori_weight=ori_weight,
+            adaptive_damping=adaptive_damping,
+            adaptive_step=adaptive_step,
+            use_central_diff=use_central_diff,
+            use_analytic_jacobian=use_analytic_jacobian,
+            method=method,
+            transpose_gain=transpose_gain,
+            max_step_norm=max_step_norm,
+            refine=refine,
+            refine_iters=refine_iters,
+            refine_pos_tol=refine_pos_tol,
+            refine_ori_tol=refine_ori_tol,
+            target_link=target_link,
+            row_mask=row_mask,
+            nullspace_gain=nullspace_gain,
+            joint_centering=joint_centering,
+            joint_center_gain=joint_center_gain,
+            joint_center_weights=joint_center_weights,
+        )
+
+        return restore_single(result, was_single)
+
+    def _solve_batch(
+        self,
+        target_poses_batch: np.ndarray,
+        q0_batch: np.ndarray,
+        pos_weight: float = 1.0,
+        ori_weight: float = 1.0,
+        adaptive_damping: bool = True,
+        adaptive_step: bool = True,
+        use_central_diff: bool = True,
+        use_analytic_jacobian: bool = False,
+        method: str = "dls",
+        transpose_gain: float | None = None,
+        max_step_norm: float = 0.5,
+        refine: bool = False,
+        refine_iters: int = 10,
+        refine_pos_tol: float | None = None,
+        refine_ori_tol: float | None = None,
+        target_link: str | None = None,
+        row_mask: Sequence[int | bool] | None = None,
+        nullspace_gain: float = 0.0,
+        joint_centering: bool = True,
+        joint_center_gain: float = 0.2,
+        joint_center_weights: Sequence[float] | None = None,
+    ) -> Dict[str, list]:
+        """Solve IK for batch of configurations.
+        
+        :param target_poses_batch: target poses [B, 4, 4]
+        :param q0_batch: initial configurations [B, n]
+        :return: dict with batch results (each field is a list of length B)
+        """
+        batch_size = target_poses_batch.shape[0]
+        results = {
+            'q': [],
+            'success': [],
+            'iters': [],
+            'err_norm': [],
+            'method': [],
+            'jacobian': [],
+            'pos_err': [],
+            'ori_err': [],
+        }
+
+        # Process each configuration (can be optimized with true vectorization later)
+        for i in range(batch_size):
+            res = self._solve_single(
+                target_poses_batch[i],
+                q0_batch[i],
+                pos_weight=pos_weight,
+                ori_weight=ori_weight,
+                adaptive_damping=adaptive_damping,
+                adaptive_step=adaptive_step,
+                use_central_diff=use_central_diff,
+                use_analytic_jacobian=use_analytic_jacobian,
+                method=method,
+                transpose_gain=transpose_gain,
+                max_step_norm=max_step_norm,
+                refine=refine,
+                refine_iters=refine_iters,
+                refine_pos_tol=refine_pos_tol,
+                refine_ori_tol=refine_ori_tol,
+                target_link=target_link,
+                row_mask=row_mask,
+                nullspace_gain=nullspace_gain,
+                joint_centering=joint_centering,
+                joint_center_gain=joint_center_gain,
+                joint_center_weights=joint_center_weights,
+            )
+            results['q'].append(res['q'])
+            results['success'].append(res['success'])
+            results['iters'].append(res['iters'])
+            results['err_norm'].append(res['err_norm'])
+            results['method'].append(res['method'])
+            results['jacobian'].append(res.get('jacobian', 'analytic'))
+            results['pos_err'].append(res.get('pos_err', 0.0))
+            results['ori_err'].append(res.get('ori_err', 0.0))
+
+        return results
+
+    def _solve_single(
+        self,
+        target_pose: np.ndarray,
+        q0: np.ndarray,
+        pos_weight: float = 1.0,
+        ori_weight: float = 1.0,
+        adaptive_damping: bool = True,
+        adaptive_step: bool = True,
+        use_central_diff: bool = True,
+        use_analytic_jacobian: bool = False,
+        method: str = "dls",
+        transpose_gain: float | None = None,
+        max_step_norm: float = 0.5,
+        refine: bool = False,
+        refine_iters: int = 10,
+        refine_pos_tol: float | None = None,
+        refine_ori_tol: float | None = None,
+        target_link: str | None = None,
+        row_mask: Sequence[int | bool] | None = None,
+        nullspace_gain: float = 0.0,
+        joint_centering: bool = True,
+        joint_center_gain: float = 0.2,
+        joint_center_weights: Sequence[float] | None = None,
+    ) -> Dict[str, object]:
+        """Solve IK for single configuration (original implementation)."""
+        method = method.lower()
+        if method not in ("dls", "pinv", "transpose"):
+            raise ValueError(f"Unknown IK method '{method}'")
         
         if q0.shape[0] != self.n:
             raise ValueError(f"Expected q0 with {self.n} elements, got {q0.shape[0]}")
@@ -347,75 +504,6 @@ class IKSolverNumPy:
             "ori_err": float(best_ori_err),
         }
 
-    def solve_batch(
-        self,
-        target_poses_batch: np.ndarray,
-        q0_batch: np.ndarray,
-        method: str = "dls",
-        use_analytic_jacobian: bool = True,
-        target_link: str | None = None,
-        row_mask: Sequence[int | bool] | None = None,
-        nullspace_gain: float = 0.0,
-        joint_centering: bool = True,
-        joint_center_gain: float = 0.2,
-        joint_center_weights: Sequence[float] | None = None,
-        **kwargs
-    ) -> Dict[str, List]:
-        """Solve IK for batch of configurations.
-        
-        :param target_poses_batch: target poses [B, 4, 4]
-        :param q0_batch: initial configurations [B, n]
-        :param method: IK method ('dls', 'pinv', 'transpose')
-        :return: dict with batch results (each field is a list of length B)
-        """
-        target_poses_batch = np.asarray(target_poses_batch, dtype=np.float64)
-        q0_batch = np.asarray(q0_batch, dtype=np.float64)
-        
-        if target_poses_batch.ndim != 3 or target_poses_batch.shape[1:] != (4, 4):
-            raise ValueError(f"Expected target_poses_batch with shape [B, 4, 4], got {target_poses_batch.shape}")
-        if q0_batch.ndim != 2:
-            raise ValueError(f"Expected q0_batch with shape [B, n], got {q0_batch.shape}")
-        
-        batch_size = target_poses_batch.shape[0]
-        if q0_batch.shape[0] != batch_size:
-            raise ValueError(f"Batch size mismatch: target_poses_batch {batch_size} vs q0_batch {q0_batch.shape[0]}")
-        
-        # Process each configuration
-        results = {
-            'q': [],
-            'success': [],
-            'iters': [],
-            'err_norm': [],
-            'method': [],
-            'jacobian': [],
-            'pos_err': [],
-            'ori_err': [],
-        }
-        
-        for i in range(batch_size):
-            res = self.solve(
-                target_poses_batch[i],
-                q0_batch[i],
-                method=method,
-                use_analytic_jacobian=use_analytic_jacobian,
-                target_link=target_link,
-                row_mask=row_mask,
-                nullspace_gain=nullspace_gain,
-                joint_centering=joint_centering,
-                joint_center_gain=joint_center_gain,
-                joint_center_weights=joint_center_weights,
-                **kwargs
-            )
-            results['q'].append(res['q'])
-            results['success'].append(res['success'])
-            results['iters'].append(res['iters'])
-            results['err_norm'].append(res['err_norm'])
-            results['method'].append(res['method'])
-            results['jacobian'].append(res.get('jacobian', 'analytic'))
-            results['pos_err'].append(res.get('pos_err', 0.0))
-            results['ori_err'].append(res.get('ori_err', 0.0))
-        
-        return results
 
     def _solve_dls(self, J: np.ndarray, err: np.ndarray, damping: float) -> np.ndarray:
         """Solve damped least squares: dq = J^T (J J^T + λ²I)^{-1} err.

@@ -29,42 +29,6 @@ from robocore.kinematics.ik_utils.ik_solver_numpy import IKSolverNumPy
 from robocore.utils.backend import get_backend
 
 
-def _normalize_ik_input(target_pose: Any, q0: Any) -> tuple[Any, Any, bool]:
-    """Normalize IK input for batch processing.
-    
-    :param target_pose: Target pose(s) - 4x4 matrix or [B, 4, 4] array
-    :param q0: Initial configuration(s) - [n] or [B, n] array
-    :return: Tuple of (normalized_target_pose, normalized_q0, is_batch)
-    """
-    target_arr = np.asarray(target_pose)
-    q0_arr = np.asarray(q0)
-
-    # Check if batch mode
-    is_batch = target_arr.ndim == 3 and target_arr.shape[1:] == (4, 4)
-
-    if is_batch:
-        # Batch mode: [B, 4, 4] and [B, n]
-        if q0_arr.ndim == 1:
-            # q0 is single, broadcast to batch
-            batch_size = target_arr.shape[0]
-            q0_arr = np.tile(q0_arr, (batch_size, 1))
-        elif q0_arr.ndim != 2:
-            raise ValueError(f"Expected q0 with shape [n] or [B, n], got {q0_arr.shape}")
-    else:
-        # Single mode: ensure 2D for target_pose
-        if target_arr.ndim == 2:
-            target_arr = target_arr.reshape(1, 4, 4)
-        elif target_arr.ndim != 3 or target_arr.shape != (1, 4, 4):
-            raise ValueError(f"Expected target_pose with shape [4, 4] or [1, 4, 4], got {target_arr.shape}")
-        # q0 should be 1D
-        if q0_arr.ndim == 1:
-            q0_arr = q0_arr.reshape(1, -1)
-        else:
-            raise ValueError(f"Expected q0 with shape [n], got {q0_arr.shape}")
-
-    return target_arr, q0_arr, is_batch
-
-
 def inverse_kinematics(
     model,
     target_pose: Sequence[Sequence[float]] | np.ndarray,
@@ -112,227 +76,215 @@ def inverse_kinematics(
     """
     b = get_backend()
 
-    # Normalize input for batch processing
-    target_normalized, q0_normalized, is_batch = _normalize_ik_input(target_pose, q0)
+    # Check if batch mode for multi_start validation
+    target_arr = np.asarray(target_pose)
+    is_batch = target_arr.ndim == 3 and target_arr.shape[1:] == (4, 4)
 
     # Batch mode: multi_start not supported
     if is_batch and multi_start > 0:
         raise ValueError("multi_start is not supported in batch mode")
 
-    if is_batch:
-        # Batch processing
-        batch_size = target_normalized.shape[0]
+    # Direct solver call - solver handles batch automatically
+    if b == 'numpy':
+        # Extract solver initialization parameters
+        solver_init_kwargs = {}
+        if 'min_damping' in solver_kwargs:
+            solver_init_kwargs['min_damping'] = solver_kwargs['min_damping']
+        if 'max_damping' in solver_kwargs:
+            solver_init_kwargs['max_damping'] = solver_kwargs['max_damping']
+        if 'base_step' in solver_kwargs:
+            solver_init_kwargs['base_step'] = solver_kwargs['base_step']
 
-        if b == 'numpy':
-            # Extract solver initialization parameters
-            solver_init_kwargs = {}
-            if 'min_damping' in solver_kwargs:
-                solver_init_kwargs['min_damping'] = solver_kwargs['min_damping']
-            if 'max_damping' in solver_kwargs:
-                solver_init_kwargs['max_damping'] = solver_kwargs['max_damping']
-            if 'base_step' in solver_kwargs:
-                solver_init_kwargs['base_step'] = solver_kwargs['base_step']
+        solver = IKSolverNumPy(
+            model,
+            max_iters=solver_kwargs.get('max_iters', 120),
+            pos_tol=solver_kwargs.get('pos_tol', 1e-4),
+            ori_tol=solver_kwargs.get('ori_tol', 1e-4),
+            **solver_init_kwargs,
+        )
 
-            solver = IKSolverNumPy(
-                model,
-                max_iters=solver_kwargs.get('max_iters', 120),
-                pos_tol=solver_kwargs.get('pos_tol', 1e-4),
-                ori_tol=solver_kwargs.get('ori_tol', 1e-4),
-                **solver_init_kwargs,
-            )
-            results_dict = solver.solve_batch(
-                target_normalized,
-                q0_normalized,
-                method=method,
-                use_analytic_jacobian=solver_kwargs.get('use_analytic_jacobian', True),
-                target_link=target_link,
-                row_mask=row_mask,
-                nullspace_gain=nullspace_gain,
-                joint_centering=joint_centering,
-                joint_center_gain=joint_center_gain,
-                joint_center_weights=joint_center_weights,
-                **{k: v for k, v in solver_kwargs.items() if k not in ['max_iters', 'pos_tol', 'ori_tol', 'use_analytic_jacobian', 'min_damping', 'max_damping', 'base_step']},
-            )
-            # Convert from dict of lists to list of dicts
-            results = []
-            for i in range(batch_size):
-                results.append({
-                    'q': results_dict['q'][i],
-                    'success': results_dict['success'][i],
-                    'iters': results_dict['iters'][i],
-                    'err_norm': results_dict['err_norm'][i],
-                    'method': results_dict['method'][i],
-                    'jacobian': results_dict.get('jacobian', ['analytic'] * batch_size)[i] if isinstance(results_dict.get('jacobian'), list) else results_dict.get('jacobian', 'analytic'),
-                    'pos_err': results_dict.get('pos_err', [0.0] * batch_size)[i] if isinstance(results_dict.get('pos_err'), list) else results_dict.get('pos_err', 0.0),
-                    'ori_err': results_dict.get('ori_err', [0.0] * batch_size)[i] if isinstance(results_dict.get('ori_err'), list) else results_dict.get('ori_err', 0.0),
-                    'backend': 'numpy',
-                })
-            return results
-        elif b == 'torch':
-            import torch
-            from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
+        # Handle single mode with multi_start/q0_retries
+        if not is_batch:
+            rng = np.random.default_rng(random_seed) if random_seed is not None else None
 
-            dev = torch_device if torch_device is not None else 'cpu'
-            solver = IKSolverTorch(
-                model,
-                max_iters=solver_kwargs.get('max_iters', 120),
-                pos_tol=solver_kwargs.get('pos_tol', 1e-4),
-                ori_tol=solver_kwargs.get('ori_tol', 1e-4),
-                device=dev,
-                dtype=torch_dtype,
-            )
+            def _run_once(q_init):
+                # Filter out solver initialization parameters
+                solve_kwargs = {}
+                for k, v in solver_kwargs.items():
+                    if k not in ['max_iters', 'pos_tol', 'ori_tol', 'min_damping', 'max_damping', 'base_step']:
+                        solve_kwargs[k] = v
 
-            # Convert to torch tensors
-            target_torch = torch.from_numpy(target_normalized).to(dtype=torch_dtype or torch.float64, device=dev)
-            q0_torch = torch.from_numpy(q0_normalized).to(dtype=torch_dtype or torch.float64, device=dev)
+                res = solver.solve(
+                    target_pose,
+                    np.asarray(q_init),
+                    method=method,
+                    use_analytic_jacobian=solve_kwargs.pop('use_analytic_jacobian', True),
+                    target_link=target_link,
+                    row_mask=row_mask,
+                    nullspace_gain=nullspace_gain,
+                    joint_centering=joint_centering,
+                    joint_center_gain=joint_center_gain,
+                    joint_center_weights=joint_center_weights,
+                    **solve_kwargs,
+                )
+                # Ensure result is a dict (not list)
+                if isinstance(res, dict):
+                    res['backend'] = 'numpy'
+                return res
 
-            # Use batch solver
-            result_batch = solver._solve_batch(
-                target_torch,
-                q0_torch,
-                method=method,
-                pos_weight=solver_kwargs.get('pos_weight', 1.0),
-                ori_weight=solver_kwargs.get('ori_weight', 1.0),
-                max_step_norm=solver_kwargs.get('max_step_norm', 0.5),
-                damping=solver_kwargs.get('damping', None),
-            )
+            # Handle multiple initial guesses
+            if q0_retries is not None:
+                q0_retries_arr = np.asarray(q0_retries)
+                if q0_retries_arr.ndim != 2:
+                    raise ValueError(f"q0_retries must be 2D array [R, n], got shape {q0_retries_arr.shape}")
+                if q0_retries_arr.shape[1] != len(q0):
+                    raise ValueError(f"q0_retries DOF mismatch: expected {len(q0)}, got {q0_retries_arr.shape[1]}")
 
-            # Convert to list of dicts
-            results = []
-            for i in range(batch_size):
-                results.append({
-                    'q': result_batch['q'][i].detach().cpu().numpy(),
-                    'success': bool(result_batch['success'][i].item()),
-                    'iterations': int(result_batch['iterations'][i].item()),
-                    'method': method,
-                    'pos_err': float(result_batch['pos_err'][i].item()) if 'pos_err' in result_batch else 0.0,
-                    'ori_err': float(result_batch['ori_err'][i].item()) if 'ori_err' in result_batch else 0.0,
-                    'backend': 'torch',
-                })
-            return results
+                candidates: List[Dict[str, Any]] = []
+                for q_retry in q0_retries_arr:
+                    candidates.append(_run_once(q_retry))
+
+                successes = [c for c in candidates if c.get('success')]
+                if successes:
+                    successes.sort(key=lambda c: c.get('err_norm', float('inf')))
+                    return successes[0]
+                candidates.sort(key=lambda c: c.get('err_norm', float('inf')))
+                return candidates[0] if not return_all else candidates
+
+            # Original multi_start logic
+            base_res = _run_once(q0)
+            if base_res.get('success') or multi_start <= 0:
+                return base_res
+
+            candidates: List[Dict[str, Any]] = [base_res]
+            for _ in range(multi_start):
+                noise = (rng.normal(size=len(q0)) * multi_noise) if rng else (np.random.randn(len(q0)) * multi_noise)
+                q_pert = np.asarray(q0) + noise
+                candidates.append(_run_once(q_pert))
+
+            successes = [c for c in candidates if c.get('success')]
+            if successes:
+                successes.sort(key=lambda c: c.get('err_norm', float('inf')))
+                return successes[0]
+            candidates.sort(key=lambda c: c.get('err_norm', float('inf')))
+
+            if return_all:
+                return candidates
+            else:
+                return candidates[0]
         else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+            # Batch mode - direct call
+            # Filter out solver initialization parameters
+            solve_kwargs = {}
+            for k, v in solver_kwargs.items():
+                if k not in ['max_iters', 'pos_tol', 'ori_tol', 'min_damping', 'max_damping', 'base_step']:
+                    solve_kwargs[k] = v
 
-    # Single mode (backward compatible)
-    target_single = target_normalized[0]
-    q0_single = q0_normalized[0]
-
-    rng = np.random.default_rng(random_seed) if random_seed is not None else None
-
-    def _run_once(q_init):
-        # Create a fresh copy for each call to avoid modifying the original
-        solver_kwargs_local = solver_kwargs.copy()
-
-        if b == 'numpy':
-            # Extract solver initialization parameters
-            solver_init_kwargs = {}
-            if 'min_damping' in solver_kwargs_local:
-                solver_init_kwargs['min_damping'] = solver_kwargs_local.pop('min_damping')
-            if 'max_damping' in solver_kwargs_local:
-                solver_init_kwargs['max_damping'] = solver_kwargs_local.pop('max_damping')
-            if 'base_step' in solver_kwargs_local:
-                solver_init_kwargs['base_step'] = solver_kwargs_local.pop('base_step')
-
-            solver = IKSolverNumPy(
-                model,
-                max_iters=solver_kwargs_local.pop('max_iters', 120),
-                pos_tol=solver_kwargs_local.pop('pos_tol', 1e-4),
-                ori_tol=solver_kwargs_local.pop('ori_tol', 1e-4),
-                **solver_init_kwargs,
-            )
-            res = solver.solve(
-                target_single,
-                np.asarray(q_init),
+            result = solver.solve(
+                target_pose,
+                q0,
                 method=method,
-                use_analytic_jacobian=solver_kwargs_local.pop('use_analytic_jacobian', True),
+                use_analytic_jacobian=solve_kwargs.pop('use_analytic_jacobian', True),
                 target_link=target_link,
                 row_mask=row_mask,
                 nullspace_gain=nullspace_gain,
                 joint_centering=joint_centering,
                 joint_center_gain=joint_center_gain,
                 joint_center_weights=joint_center_weights,
-                **solver_kwargs_local,
+                **solve_kwargs,
             )
-            res['backend'] = 'numpy'
-            return res
-        elif b == 'torch':
-            import torch
-            from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
+            # Convert from dict of lists to list of dicts for batch
+            if isinstance(result, dict) and 'q' in result and isinstance(result['q'], list):
+                batch_size = len(result['q'])
+                results = []
+                for i in range(batch_size):
+                    results.append({
+                        'q': result['q'][i],
+                        'success': result['success'][i],
+                        'iters': result['iters'][i],
+                        'err_norm': result['err_norm'][i],
+                        'method': result['method'][i],
+                        'jacobian': result.get('jacobian', ['analytic'] * batch_size)[i] if isinstance(result.get('jacobian'), list) else result.get('jacobian', 'analytic'),
+                        'pos_err': result.get('pos_err', [0.0] * batch_size)[i] if isinstance(result.get('pos_err'), list) else result.get('pos_err', 0.0),
+                        'ori_err': result.get('ori_err', [0.0] * batch_size)[i] if isinstance(result.get('ori_err'), list) else result.get('ori_err', 0.0),
+                        'backend': 'numpy',
+                    })
+                return results
+            return result
+    elif b == 'torch':
+        import torch
+        from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
 
-            dev = torch_device if torch_device is not None else 'cpu'
-            # Extract solver initialization parameters
-            solver_kwargs_init = {}
-            if 'min_damping' in solver_kwargs_local:
-                solver_kwargs_init['min_damping'] = solver_kwargs_local.pop('min_damping')
-            if 'max_damping' in solver_kwargs_local:
-                solver_kwargs_init['max_damping'] = solver_kwargs_local.pop('max_damping')
-            if 'base_step' in solver_kwargs_local:
-                solver_kwargs_init['base_step'] = solver_kwargs_local.pop('base_step')
-            solver = IKSolverTorch(
-                model,
-                max_iters=solver_kwargs_local.pop('max_iters', 120),
-                pos_tol=solver_kwargs_local.pop('pos_tol', 1e-4),
-                ori_tol=solver_kwargs_local.pop('ori_tol', 1e-4),
-                device=dev,
-                dtype=torch_dtype,
-                **solver_kwargs_init,
-            )
-            res = solver.solve(
-                target_single,
-                q_init,
-                method=method,
-                target_link=target_link,
-                row_mask=row_mask,
-                nullspace_gain=nullspace_gain,
-                joint_centering=joint_centering,
-                joint_center_gain=joint_center_gain,
-                joint_center_weights=joint_center_weights,
-                **solver_kwargs_local,
-            )
-            res['backend'] = 'torch'
-            return res
+        dev = torch_device if torch_device is not None else 'cpu'
+        solver_kwargs_init = {}
+        if 'min_damping' in solver_kwargs:
+            solver_kwargs_init['min_damping'] = solver_kwargs.pop('min_damping')
+        if 'max_damping' in solver_kwargs:
+            solver_kwargs_init['max_damping'] = solver_kwargs.pop('max_damping')
+        if 'base_step' in solver_kwargs:
+            solver_kwargs_init['base_step'] = solver_kwargs.pop('base_step')
+
+        solver = IKSolverTorch(
+            model,
+            max_iters=solver_kwargs.pop('max_iters', 120),
+            pos_tol=solver_kwargs.pop('pos_tol', 1e-4),
+            ori_tol=solver_kwargs.pop('ori_tol', 1e-4),
+            device=dev,
+            dtype=torch_dtype,
+            **solver_kwargs_init,
+        )
+
+        # Convert to torch tensors if needed
+        if isinstance(target_pose, np.ndarray):
+            target_torch = torch.from_numpy(target_pose).to(dtype=torch_dtype or torch.float64, device=dev)
         else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+            target_torch = target_pose
+        if isinstance(q0, np.ndarray):
+            q0_torch = torch.from_numpy(q0).to(dtype=torch_dtype or torch.float64, device=dev)
+        else:
+            q0_torch = q0
 
-    # Handle multiple initial guesses
-    if q0_retries is not None:
-        # Use provided retries
-        q0_retries_arr = np.asarray(q0_retries)
-        if q0_retries_arr.ndim != 2:
-            raise ValueError(f"q0_retries must be 2D array [R, n], got shape {q0_retries_arr.shape}")
-        if q0_retries_arr.shape[1] != len(q0_single):
-            raise ValueError(f"q0_retries DOF mismatch: expected {len(q0_single)}, got {q0_retries_arr.shape[1]}")
+        result = solver.solve(
+            target_torch,
+            q0_torch,
+            method=method,
+            target_link=target_link,
+            row_mask=row_mask,
+            nullspace_gain=nullspace_gain,
+            joint_centering=joint_centering,
+            joint_center_gain=joint_center_gain,
+            joint_center_weights=joint_center_weights,
+            **solver_kwargs,
+        )
 
-        candidates: List[Dict[str, Any]] = []
-        for q_retry in q0_retries_arr:
-            candidates.append(_run_once(q_retry))
-
-        # Select best: first successful, or best error if none successful
-        successes = [c for c in candidates if c.get('success')]
-        if successes:
-            successes.sort(key=lambda c: c.get('err_norm', float('inf')))
-            return successes[0]
-        candidates.sort(key=lambda c: c.get('err_norm', float('inf')))
-        return candidates[0] if not return_all else candidates
-
-    # Original multi_start logic (backward compatible)
-    base_res = _run_once(q0_single)
-    if base_res.get('success') or multi_start <= 0:
-        return base_res
-
-    candidates: List[Dict[str, Any]] = [base_res]
-    for _ in range(multi_start):
-        noise = (rng.normal(size=len(q0_single)) * multi_noise) if rng else (np.random.randn(len(q0_single)) * multi_noise)
-        q_pert = np.asarray(q0_single) + noise
-        candidates.append(_run_once(q_pert))
-
-    successes = [c for c in candidates if c.get('success')]
-    if successes:
-        successes.sort(key=lambda c: c.get('err_norm', float('inf')))
-        return successes[0]
-    candidates.sort(key=lambda c: c.get('err_norm', float('inf')))
-
-    if return_all:
-        return candidates
+        # Convert to numpy and handle batch format
+        if isinstance(result, dict):
+            # Check if batch result: 'q' is tensor with ndim==2
+            if 'q' in result and isinstance(result['q'], torch.Tensor) and result['q'].ndim == 2:
+                # Batch result
+                batch_size = result['q'].shape[0]
+                results = []
+                for i in range(batch_size):
+                    results.append({
+                        'q': result['q'][i].detach().cpu().numpy(),
+                        'success': bool(result['success'][i].item()) if isinstance(result['success'], torch.Tensor) else result['success'][i],
+                        'iters': int(result['iters'][i].item() if isinstance(result['iters'], torch.Tensor) else result['iters'][i]),
+                        'method': method,
+                        'pos_err': float(result['pos_err'][i].item()) if isinstance(result['pos_err'], torch.Tensor) else result['pos_err'][i],
+                        'ori_err': float(result['ori_err'][i].item()) if isinstance(result['ori_err'], torch.Tensor) else result['ori_err'][i],
+                        'backend': 'torch',
+                    })
+                return results
+            else:
+                # Single result
+                result_np = {}
+                for k, v in result.items():
+                    if isinstance(v, torch.Tensor):
+                        result_np[k] = v.detach().cpu().numpy() if v.numel() == 1 else v.detach().cpu().tolist()
+                    else:
+                        result_np[k] = v
+                result_np['backend'] = 'torch'
+                return result_np
+        return result
     else:
-        return candidates[0]
+        raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")

@@ -104,3 +104,22 @@ if __name__ == "__main__":
     # Target joint angles: [0.1, 0.2, -0.3, 0.0, 0.5, -0.2]
     args = parser.parse_args()
     main(args)
+
+    """_results_
+    [RoboCore:INFO] Initial Guess (radians):
+    q_init = [+0.86066, -0.19202, +1.12657, +0.62005, -1.27493, +1.49421]
+    [RoboCore:INFO] IK Solution:
+    Success: True
+    Iterations: 18
+    Position Error: 3.010354e-05 m
+    Orientation Error: 6.817040e-05 rad
+    Total Error: 7.452132e-05
+    [RoboCore:INFO] Solved Joint Angles (radians):
+    q_ik = [+0.09976, +0.20009, -0.30001, +0.00037, +0.49988, -0.20021]
+    [RoboCore:INFO] Solved Joint Angles (degrees):
+    q_ik = [+5.71575, +11.46419, -17.18912, +0.02108, +28.64096, -11.47100]
+    [RoboCore:INFO] Verification (FK of IK solution):
+    Position: [+0.17006, +0.01701, +0.20533]
+    Position Error: 3.010354e-05 m
+    [RoboCore:INFO] RoboCore IK Computation Time:  0.008662 seconds
+    """

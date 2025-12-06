@@ -32,6 +32,7 @@ except ImportError as e:  # pragma: no cover
 from ..jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
 from ..fk_utils.fk_solver_torch import FKSolverTorch
 from robocore.transform import rotation_error, rpy_to_matrix, axis_angle_to_matrix
+from robocore.kinematics.utils import ensure_batch, restore_single
 try:  # 可能存在设备选择工具
     from ...utils.torch_utils import select_device  # type: ignore
 except Exception:  # pragma: no cover
@@ -149,23 +150,26 @@ class IKSolverTorch:
             # NumPy: use_analytic_jacobian=True → analytic; here that means NOT numeric
             use_numeric_jacobian = not bool(use_analytic_jacobian)
         
-        # Detect batch mode
-        is_batch = target_pose.ndim == 3  # [B, 4, 4]
+        # Handle batch mode - detect before ensure_batch
+        target_ndim_orig = target_pose.ndim
+        q0_ndim_orig = q0.ndim
         
-        if is_batch:
-            # Batch mode
-            return self._solve_batch(
-                target_pose, q0,
-                method=method,
-                pos_weight=pos_weight,
-                ori_weight=ori_weight,
-                max_step_norm=max_step_norm,
-                verbose=verbose
-            )
-        else:
-            # Single mode - existing implementation
-            return self._solve_single(
-                target_pose, q0,
+        # Normalize to batch format for processing
+        if target_pose.ndim == 2:
+            target_pose = target_pose.unsqueeze(0)  # [4, 4] -> [1, 4, 4]
+        if q0.ndim == 1:
+            q0 = q0.unsqueeze(0)  # [n] -> [1, n]
+
+        # Track if original was single
+        was_single = (target_ndim_orig == 2) and (q0_ndim_orig == 1)
+
+        if target_pose.shape[0] != q0.shape[0]:
+            raise ValueError(f"Batch size mismatch: target_pose {target_pose.shape[0]} vs q0 {q0.shape[0]}")
+
+        if was_single:
+            # Single mode - use existing implementation
+            result = self._solve_single(
+                target_pose[0], q0[0],
                 method=method,
                 pos_weight=pos_weight,
                 ori_weight=ori_weight,
@@ -190,6 +194,19 @@ class IKSolverTorch:
                 restart_noise=restart_noise,
                 random_seed=random_seed
             )
+            return result
+        else:
+            # Batch mode
+            result = self._solve_batch(
+                target_pose, q0,
+                method=method,
+                pos_weight=pos_weight,
+                ori_weight=ori_weight,
+                max_step_norm=max_step_norm,
+                verbose=verbose
+            )
+            # For batch mode, don't use restore_single - return batch result as-is
+            return result
     
     def _solve_single(
         self,
@@ -257,7 +274,12 @@ class IKSolverTorch:
 
             for it in range(1, self.max_iters + 1):
                 if target_link is None:
-                    T_cur = self.fk_solver.solve(q, return_end_only=True, device=self.device, dtype=self.dtype)["end"]
+                    T_cur_result = self.fk_solver.solve(q, return_end_only=True, device=self.device, dtype=self.dtype)
+                    # Handle both dict and tensor returns
+                    if isinstance(T_cur_result, dict):
+                        T_cur = T_cur_result["end"]
+                    else:
+                        T_cur = T_cur_result
                 else:
                     T_cur = self._fk_until_torch(q, target_link)
                 R_cur = T_cur[:3, :3]
@@ -627,13 +649,13 @@ class IKSolverTorch:
         verbose: bool = False,
         damping: float | None = None,
     ) -> Dict:
-        """Vectorized batch IK using Damped Least Squares (TRUE BATCH).
+        """Vectorized batch IK (TRUE BATCH).
 
         The entire batch advances per-iteration without Python per-sample loops.
 
         :param target_poses_batch: [B,4,4]
         :param q_init_batch: [B,n]
-        :param method: only 'dls' supported
+        :param method: 'dls', 'pinv', or 'transpose'
         :param pos_weight: position error weight
         :param ori_weight: orientation error weight
         :param max_step_norm: max ||dq|| per-iteration (per sample)
@@ -641,8 +663,9 @@ class IKSolverTorch:
         :param damping: override damping (λ). If None auto = geometric mean(min,max)
         :return: dict with fields: q, success, iterations, method, pos_err, ori_err
         """
-        if method != "dls":
-            raise NotImplementedError("Batch mode currently supports only 'dls'")
+        method = method.lower()
+        if method not in ("dls", "pinv", "transpose"):
+            raise ValueError(f"Unknown IK method '{method}'")
 
         B, n = q_init_batch.shape
         if n != self.n:
@@ -800,37 +823,85 @@ class IKSolverTorch:
             lam_vec = torch.where(plateau_sub >= 4, torch.clamp(lam_vec * 2.0, max=self.max_damping*2), lam_vec)
             lam_vec = torch.where(plateau_sub >= 8, torch.clamp(lam_vec * 1.5, max=self.max_damping*4), lam_vec)
 
-            # DLS solve: per-sample damping
-            JJt = torch.bmm(J, J.transpose(1, 2))  # [Ba',6,6]
-            lam_sq = (lam_vec ** 2).view(-1, 1, 1)
-            JJt_damped = JJt + lam_sq * eye6
-            try:
-                y = torch.linalg.solve(JJt_damped, e.unsqueeze(2)).squeeze(2)  # [Ba',6]
-            except RuntimeError:
-                # fallback per-sample solve
-                y = torch.zeros_like(e)
-                for k in range(J.shape[0]):
-                    try:
-                        y[k] = torch.linalg.solve(JJt_damped[k], e[k])
-                    except RuntimeError:
-                        Jk = J[k]
-                        alt = (Jk @ Jk.transpose(0, 1) + (lam_vec[k]**2)*torch.eye(6,
-                               device=self.device, dtype=self.dtype)).pinverse() @ e[k]
-                        y[k] = alt
-            dq = torch.bmm(J.transpose(1, 2), y.unsqueeze(2)).squeeze(2)  # [Ba',n]
+            # Solve per method
+            if method == "dls":
+                # DLS solve: per-sample damping
+                JJt = torch.bmm(J, J.transpose(1, 2))  # [Ba',6,6]
+                lam_sq = (lam_vec ** 2).view(-1, 1, 1)
+                JJt_damped = JJt + lam_sq * eye6
+                try:
+                    y = torch.linalg.solve(JJt_damped, e.unsqueeze(2)).squeeze(2)  # [Ba',6]
+                except RuntimeError:
+                    # fallback per-sample solve
+                    y = torch.zeros_like(e)
+                    for k in range(J.shape[0]):
+                        try:
+                            y[k] = torch.linalg.solve(JJt_damped[k], e[k])
+                        except RuntimeError:
+                            Jk = J[k]
+                            alt = (Jk @ Jk.transpose(0, 1) + (lam_vec[k]**2)*torch.eye(6,
+                                   device=self.device, dtype=self.dtype)).pinverse() @ e[k]
+                            y[k] = alt
+                dq = torch.bmm(J.transpose(1, 2), y.unsqueeze(2)).squeeze(2)  # [Ba',n]
+            elif method == "pinv":
+                # SVD pseudoinverse with Tikhonov damping
+                try:
+                    U, S, Vh = torch.linalg.svd(J, full_matrices=False)  # U: [Ba',6,min(6,n)], S: [Ba',min(6,n)], Vh: [Ba',min(6,n),n]
+                    # Apply damping: S_damped = S / (S^2 + lambda^2)
+                    lam_vec_expanded = lam_vec.view(-1, 1)  # [Ba',1]
+                    S_damped = S / (S * S + lam_vec_expanded * lam_vec_expanded)  # [Ba',min(6,n)]
+                    # Compute pseudoinverse: Vh^T @ diag(S_damped) @ U^T
+                    # dq = Vh^T @ (S_damped * (U^T @ e))
+                    Ut_e = torch.bmm(U.transpose(1, 2), e.unsqueeze(2)).squeeze(2)  # [Ba',min(6,n)]
+                    S_damped_Ut_e = S_damped * Ut_e  # [Ba',min(6,n)]
+                    dq = torch.bmm(Vh.transpose(1, 2), S_damped_Ut_e.unsqueeze(2)).squeeze(2)  # [Ba',n]
+                except RuntimeError:
+                    # Fallback: per-sample SVD
+                    dq = torch.zeros(Ba, n, device=self.device, dtype=self.dtype)
+                    for k in range(J.shape[0]):
+                        try:
+                            Uk, Sk, Vhk = torch.linalg.svd(J[k], full_matrices=False)
+                            Sk_damped = Sk / (Sk * Sk + lam_vec[k] * lam_vec[k])
+                            Jk_pinv = (Vhk.transpose(0, 1) * Sk_damped) @ Uk.transpose(0, 1)
+                            dq[k] = Jk_pinv @ e[k]
+                        except RuntimeError:
+                            # Ultimate fallback: DLS
+                            Jk = J[k]
+                            JJtk = Jk @ Jk.transpose(0, 1) + (lam_vec[k]**2) * torch.eye(6, device=self.device, dtype=self.dtype)
+                            yk = torch.linalg.solve(JJtk, e[k])
+                            dq[k] = Jk.transpose(0, 1) @ yk
+            else:  # transpose
+                # Jacobian Transpose with adaptive gain
+                J_err = torch.bmm(J.transpose(1, 2), e.unsqueeze(2)).squeeze(2)  # [Ba',n]
+                JJt_err = torch.bmm(J, J_err.unsqueeze(2)).squeeze(2)  # [Ba',6]
+                err_norm_sq = torch.sum(e * e, dim=1)  # [Ba']
+                JJt_err_norm_sq = torch.sum(JJt_err * JJt_err, dim=1)  # [Ba']
+                # Adaptive gain: alpha = ||err||² / ||J @ J.T @ err||²
+                alpha_raw = torch.where(
+                    JJt_err_norm_sq > 1e-12,
+                    err_norm_sq / JJt_err_norm_sq,
+                    torch.full_like(err_norm_sq, 0.01)
+                )
+                alpha = torch.clamp(alpha_raw, 0.001, 0.5)  # [Ba']
+                dq = (alpha.unsqueeze(1) * J_err)  # [Ba',n]
 
             # Adaptive step (vectorized similar to single-mode)
-            norm_pos = pos_norm_sub / 0.01
-            norm_ori = ori_norm_sub / 0.087
-            m = torch.maximum(norm_pos, norm_ori)
-            step = torch.full_like(m, self.base_step)
-            step = torch.where(m > 2.0, self.base_step * 0.6, step)
-            step = torch.where((m <= 2.0) & (m > 1.0), self.base_step * 1.0, step)
-            step = torch.where((m <= 1.0) & (m > 0.5), self.base_step * 1.2, step)
-            step = torch.where(m <= 0.5, self.base_step * 0.6, step)
-            # Plateau slowdown
-            step = torch.where(plateau_sub >= 8, step * 0.5, step)
-            dq = dq * step.unsqueeze(1)
+            # transpose method's alpha is already optimal step, skip adaptive step
+            if method != "transpose":
+                norm_pos = pos_norm_sub / 0.01
+                norm_ori = ori_norm_sub / 0.087
+                m = torch.maximum(norm_pos, norm_ori)
+                step = torch.full_like(m, self.base_step)
+                step = torch.where(m > 2.0, self.base_step * 0.6, step)
+                step = torch.where((m <= 2.0) & (m > 1.0), self.base_step * 1.0, step)
+                step = torch.where((m <= 1.0) & (m > 0.5), self.base_step * 1.2, step)
+                step = torch.where(m <= 0.5, self.base_step * 0.6, step)
+                # Plateau slowdown
+                step = torch.where(plateau_sub >= 8, step * 0.5, step)
+                dq = dq * step.unsqueeze(1)
+            else:
+                # For transpose, step is already in alpha
+                pass
 
             # Step norm clipping
             dq_norm = torch.linalg.norm(dq, dim=1, keepdim=True)
@@ -860,12 +931,12 @@ class IKSolverTorch:
 
         if verbose:
             sr = success.float().mean().item() * 100.0
-            print(f"Batch IK DLS success={sr:.1f}% avg_iter={(iters[success].float().mean().item() if success.any() else 0):.1f}")
+            print(f"Batch IK {method.upper()} success={sr:.1f}% avg_iter={(iters[success].float().mean().item() if success.any() else 0):.1f}")
 
         return {
             "q": q,
             "success": success,
-            "iterations": iters,
+            "iters": iters,
             "method": method,
             "pos_err": p_err_final,
             "ori_err": ori_err_final,

@@ -23,6 +23,12 @@ from __future__ import annotations
 import numpy as np
 from robocore.transform.conversions import matrix_to_axis_angle
 
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+
 
 def relative_pose_error(T_left: np.ndarray, T_right: np.ndarray, T_rel_desired: np.ndarray) -> np.ndarray:
     """Compute 6D error for relative pose constraint.
@@ -121,4 +127,54 @@ def relative_jacobian(left_model, right_model, q_left, q_right) -> np.ndarray:
     return J_rel
 
 
-__all__ = ["relative_pose_error", "relative_jacobian"]
+def ensure_batch(q):
+    """Convert 1D to 2D batch=1, return (q_batch, was_single).
+    
+    :param q: joint configuration(s), numpy array or torch tensor
+    :return: tuple of (q_batch, was_single) where was_single indicates if input was 1D
+    """
+    was_single = q.ndim == 1
+    if was_single:
+        if isinstance(q, np.ndarray):
+            q = q[np.newaxis, :]
+        elif HAS_TORCH and isinstance(q, torch.Tensor):
+            q = q.unsqueeze(0)
+        else:
+            # Fallback for other array-like types
+            q = np.asarray(q)[np.newaxis, :]
+    return q, was_single
+
+
+def restore_single(result, was_single):
+    """Restore single format if input was single.
+    
+    :param result: result from batch computation
+    :param was_single: whether original input was single (1D)
+    :return: result in original format (single if was_single, batch otherwise)
+    """
+    if was_single:
+        if isinstance(result, (list, tuple)):
+            return result[0] if len(result) > 0 else result
+        elif hasattr(result, 'ndim') and result.ndim > 2:
+            return result[0]
+        elif isinstance(result, dict) and 'q' in result:
+            # IK result dict - keep as dict but extract single from batch
+            result_single = {}
+            for k, v in result.items():
+                if isinstance(v, list) and len(v) > 0:
+                    # NumPy IK batch result: dict with lists
+                    result_single[k] = v[0]
+                elif hasattr(v, 'ndim') and v.ndim > 0:
+                    if isinstance(v, np.ndarray) and v.ndim > 1:
+                        result_single[k] = v[0]
+                    elif HAS_TORCH and isinstance(v, torch.Tensor) and v.ndim > 1:
+                        result_single[k] = v[0]
+                    else:
+                        result_single[k] = v
+                else:
+                    result_single[k] = v
+            return result_single
+    return result
+
+
+__all__ = ["relative_pose_error", "relative_jacobian", "ensure_batch", "restore_single"]

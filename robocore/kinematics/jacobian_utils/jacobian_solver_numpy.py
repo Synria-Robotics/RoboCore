@@ -26,6 +26,7 @@ import numpy as np
 import math
 from robocore.transform import rotation_error
 from robocore.kinematics.fk import forward_kinematics
+from robocore.kinematics.utils import ensure_batch, restore_single
 
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
@@ -59,64 +60,71 @@ class JacobianSolverNumPy:
         use_central_diff: bool = True,
         target_link: str | None = None,
     ) -> np.ndarray:
-        """Compute 6×n Jacobian matrix.
+        """Compute 6×n Jacobian matrix (supports both single and batch).
         
-        :param q: joint configuration (n,).
+        :param q: joint configuration(s) (n,) or (B, n).
         :param method: 'analytic' for geometric or 'numeric' for finite-difference.
         :param epsilon: finite difference step size (numeric only).
         :param use_central_diff: use central difference if True (numeric only).
-        :return: 6×n Jacobian matrix (top 3 rows: linear, bottom 3 rows: angular).
+        :param target_link: target link name
+        :return: 
+            - Single mode: 6×n Jacobian matrix
+            - Batch mode: [B, 6, n] Jacobian array
         """
-        # Backend should already be set correctly by caller
+        q = np.asarray(q, dtype=np.float64)
+        q, was_single = ensure_batch(q)
+
+        if q.shape[1] != self.n:
+            raise ValueError(f"Expected q with {self.n} elements, got {q.shape[1]}")
+
         if method == "analytic":
-            return self._solve_analytic(q, target_link=target_link)
+            result = self._solve_analytic_batch(q, target_link=target_link)
         elif method == "numeric":
-            if target_link is not None:
-                # For now numeric local Jacobian uses full end Jacobian then slice rows belonging to target link
-                # Simpler: recompute by truncating chain to target_link
-                return self._solve_numeric(q, epsilon, use_central_diff, target_link=target_link)
-            return self._solve_numeric(q, epsilon, use_central_diff, target_link=None)
+            result = self._solve_numeric_batch(q, epsilon, use_central_diff, target_link=target_link)
         else:
             raise ValueError(f"Unknown method '{method}', expected 'analytic' or 'numeric'")
-    
-    def solve_batch(
-        self,
-        q_batch: np.ndarray,
-        method: Literal["analytic", "numeric"] = "analytic",
-        epsilon: float = 5e-5,
-        use_central_diff: bool = True,
-        target_link: str | None = None,
-    ) -> np.ndarray:
-        """Compute Jacobian matrices for batch of configurations.
+
+        return restore_single(result, was_single)
+
+    def _solve_analytic_batch(self, q_batch: np.ndarray, target_link: str | None = None) -> np.ndarray:
+        """Compute analytic Jacobian for batch of configurations (vectorized).
         
         :param q_batch: joint configurations [B, n]
-        :param method: 'analytic' for geometric or 'numeric' for finite-difference
-        :param epsilon: finite difference step size (numeric only)
-        :param use_central_diff: use central difference if True (numeric only)
         :param target_link: target link name
         :return: Jacobian matrices [B, 6, n]
         """
-        q_batch = np.asarray(q_batch, dtype=np.float64)
-        
-        if q_batch.ndim != 2:
-            raise ValueError(f"Expected 2D array [B, n], got {q_batch.ndim}D array with shape {q_batch.shape}")
-        
         batch_size = q_batch.shape[0]
-        
-        # Process each configuration
-        results = []
+        J_batch = np.zeros((batch_size, 6, self.n), dtype=np.float64)
+
+        # Process each configuration (can be optimized with true vectorization later)
         for i in range(batch_size):
-            J = self.solve(
-                q_batch[i],
-                method=method,
-                epsilon=epsilon,
-                use_central_diff=use_central_diff,
-                target_link=target_link,
-            )
-            results.append(J)
+            J_batch[i] = self._solve_analytic(q_batch[i], target_link=target_link)
+
+        return J_batch
+
+    def _solve_numeric_batch(
+        self,
+        q_batch: np.ndarray,
+        epsilon: float,
+        use_central_diff: bool,
+        target_link: str | None = None,
+    ) -> np.ndarray:
+        """Compute numeric Jacobian for batch of configurations (vectorized).
         
-        # Stack into [B, 6, n] array
-        return np.stack(results, axis=0)
+        :param q_batch: joint configurations [B, n]
+        :param epsilon: finite difference step size
+        :param use_central_diff: use central difference if True
+        :param target_link: target link name
+        :return: Jacobian matrices [B, 6, n]
+        """
+        batch_size = q_batch.shape[0]
+        J_batch = np.zeros((batch_size, 6, self.n), dtype=np.float64)
+        
+        # Process each configuration (can be optimized with true vectorization later)
+        for i in range(batch_size):
+            J_batch[i] = self._solve_numeric(q_batch[i], epsilon, use_central_diff, target_link=target_link)
+        
+        return J_batch
     
     def _solve_analytic(self, q: np.ndarray, target_link: str | None = None) -> np.ndarray:
         """Compute analytic (geometric) Jacobian.
@@ -283,12 +291,9 @@ class JacobianSolverNumPy:
                 J[:3, i] = (p_pos - p_neg) / (2 * epsilon)
                 
                 # Orientation derivative
-                # Rotation error in end-effector frame
-                err_pos_ee = rotation_error(R_ref, R_pos)
-                err_neg_ee = rotation_error(R_ref, R_neg)
-                # Convert to world frame: e_world = R_ref @ e_ee
-                err_pos_world = R_ref @ err_pos_ee
-                err_neg_world = R_ref @ err_neg_ee
+                # rotation_error returns error in world frame (consistent with analytic Jacobian)
+                err_pos_world = rotation_error(R_ref, R_pos)
+                err_neg_world = rotation_error(R_ref, R_neg)
                 J[3:6, i] = (err_pos_world - err_neg_world) / (2 * epsilon)
         else:
             # Forward difference - use standalone FK to avoid circular dependency
@@ -326,10 +331,8 @@ class JacobianSolverNumPy:
                 )
                 
                 J[:3, i] = (p_pert - p_ref) / epsilon
-                # Rotation error in end-effector frame
-                err_ee = rotation_error(R_ref, R_pert)
-                # Convert to world frame: e_world = R_ref @ e_ee
-                err_world = R_ref @ err_ee
+                # rotation_error returns error in world frame (consistent with analytic Jacobian)
+                err_world = rotation_error(R_ref, R_pert)
                 J[3:6, i] = err_world / epsilon
         
         return J

@@ -28,24 +28,6 @@ from robocore.kinematics.jacobian_utils.jacobian_solver_numpy import JacobianSol
 from robocore.utils.backend import get_backend
 
 
-def _normalize_q_input(q: Any) -> tuple[Any, bool]:
-    """Normalize joint configuration input for batch processing.
-    
-    :param q: Joint configuration (1D array, 2D array)
-    :return: Tuple of (normalized_q, is_batch)
-    """
-    q_arr = np.asarray(q)
-    
-    if q_arr.ndim == 1:
-        # Single configuration: [n]
-        return q_arr, False
-    elif q_arr.ndim == 2:
-        # Batch configuration: [B, n]
-        return q_arr, True
-    else:
-        raise ValueError(f"Expected 1D or 2D array, got {q_arr.ndim}D array with shape {q_arr.shape}")
-
-
 def jacobian(
     model: Any,
     q: Sequence[float] | Any,
@@ -85,56 +67,41 @@ def jacobian(
     b = get_backend()
     method = method.lower()
 
-    # Normalize input for batch processing
-    q_normalized, is_batch = _normalize_q_input(q)
-
     if b == 'numpy':
         # NumPy backend
         solver = JacobianSolverNumPy(model)
-        if method in ('analytic', 'numeric'):
-            if is_batch:
-                # Batch mode
-                J_batch = solver.solve_batch(
-                    q_normalized,
-                    method=method,
-                    epsilon=epsilon,
-                    use_central_diff=use_central_diff,
-                    target_link=target_link,
-                )
+        if method not in ('analytic', 'numeric'):
+            if method == 'autograd':
+                raise ValueError("Autograd method requires torch backend")
             else:
-                # Single mode
-                J_batch = solver.solve(
-                    q_normalized,
-                    method=method,
-                    epsilon=epsilon,
-                    use_central_diff=use_central_diff,
-                    target_link=target_link,
-                )
-                J_batch = J_batch[np.newaxis, :, :]  # Add batch dimension
-            
-            # Apply row mask (rows) if provided
-            if row_mask is not None:
-                mask_bool: List[bool] = [bool(m) for m in row_mask]
-                if len(mask_bool) != 6:
-                    raise ValueError("row_mask must have length 6 (for 6 twist components)")
-                J_batch = J_batch[:, mask_bool, :] if is_batch else J_batch[mask_bool, :]
-            
-            # Apply joint (column) selection if provided
-            if joint_indices is not None:
-                if is_batch:
-                    J_batch = J_batch[:, :, list(joint_indices)]
-                else:
-                    J_batch = J_batch[:, list(joint_indices)]
-            
-            # Remove batch dimension for single mode
-            if not is_batch:
-                J_batch = J_batch[0]
-            
-            return J_batch
-        elif method == 'autograd':
-            raise ValueError("Autograd method requires torch backend")
-        else:
-            raise ValueError(f"Unknown method '{method}' for numpy backend. Use 'analytic' or 'numeric'.")
+                raise ValueError(f"Unknown method '{method}' for numpy backend. Use 'analytic' or 'numeric'.")
+
+        J = solver.solve(
+            q,
+            method=method,
+            epsilon=epsilon,
+            use_central_diff=use_central_diff,
+            target_link=target_link,
+        )
+
+        # Apply row mask (rows) if provided
+        if row_mask is not None:
+            mask_bool: List[bool] = [bool(m) for m in row_mask]
+            if len(mask_bool) != 6:
+                raise ValueError("row_mask must have length 6 (for 6 twist components)")
+            if J.ndim == 3:
+                J = J[:, mask_bool, :]
+            else:
+                J = J[mask_bool, :]
+
+        # Apply joint (column) selection if provided
+        if joint_indices is not None:
+            if J.ndim == 3:
+                J = J[:, :, list(joint_indices)]
+            else:
+                J = J[:, list(joint_indices)]
+
+        return J
     elif b == 'torch':
         import torch
         from robocore.kinematics.jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
@@ -145,47 +112,47 @@ def jacobian(
             dtype = torch.float64
 
         # Convert numpy to torch if needed
-        if isinstance(q_normalized, np.ndarray):
-            q_torch = torch.from_numpy(q_normalized).to(dtype=dtype, device=device)
+        if isinstance(q, np.ndarray):
+            q_torch = torch.from_numpy(q).to(dtype=dtype, device=device)
         else:
-            q_torch = q_normalized
+            q_torch = q
 
-        if method in ('analytic', 'numeric', 'autograd'):
-            J = solver.solve(
-                q_torch,
-                method=method,
-                epsilon=epsilon,
-                use_central_diff=use_central_diff,
-                device=device,
-                dtype=dtype,
-                target_link=target_link,
-            )
-            
-            # Apply row mask (rows) if provided
-            if row_mask is not None:
-                mask_bool: List[bool] = [bool(m) for m in row_mask]
-                if len(mask_bool) != 6:
-                    raise ValueError("row_mask must have length 6")
-                if is_batch:
-                    J = J[:, mask_bool, :]
-                else:
-                    J = J[mask_bool, :]
-            
-            # Apply joint (column) selection if provided
-            if joint_indices is not None:
-                joint_tensor = torch.tensor(list(joint_indices), dtype=torch.long)
-                if is_batch:
-                    J = J[:, :, joint_tensor]
-                else:
-                    J = J[:, joint_tensor]
-            
-            # Convert to numpy for consistency
-            if isinstance(J, torch.Tensor):
-                J = J.detach().cpu().numpy()
-            
-            return J
-        else:
+        if method not in ('analytic', 'numeric', 'autograd'):
             raise ValueError(f"Unknown method '{method}'. Use 'analytic', 'numeric', or 'autograd'.")
+
+        J = solver.solve(
+            q_torch,
+            method=method,
+            epsilon=epsilon,
+            use_central_diff=use_central_diff,
+            device=device,
+            dtype=dtype,
+            target_link=target_link,
+        )
+
+        # Apply row mask (rows) if provided
+        if row_mask is not None:
+            mask_bool: List[bool] = [bool(m) for m in row_mask]
+            if len(mask_bool) != 6:
+                raise ValueError("row_mask must have length 6")
+            if J.ndim == 3:
+                J = J[:, mask_bool, :]
+            else:
+                J = J[mask_bool, :]
+
+        # Apply joint (column) selection if provided
+        if joint_indices is not None:
+            joint_tensor = torch.tensor(list(joint_indices), dtype=torch.long)
+            if J.ndim == 3:
+                J = J[:, :, joint_tensor]
+            else:
+                J = J[:, joint_tensor]
+
+        # Convert to numpy for consistency
+        if isinstance(J, torch.Tensor):
+            J = J.detach().cpu().numpy()
+
+        return J
     else:
         raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
 

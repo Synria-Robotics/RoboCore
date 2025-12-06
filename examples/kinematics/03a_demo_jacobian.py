@@ -182,3 +182,45 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     main(args)
+
+    """_results_
+    ================================================================================
+            Jacobian Validation: Alicia_D_v5_6_gripper_100mm.urdf (10 DOF)         
+    ================================================================================
+    [RoboCore:INFO] Backend set to numpy on device cpu with dtype <class 'numpy.float64'>
+    [RoboCore:MODULE] [1] Analytic vs Numeric Jacobian (NumPy)
+    [RoboCore:INFO] Joint configuration (rad):
+    q = [+0.00000, +0.00000, +0.00000, +0.00000, +0.00000, +0.00000]
+    [RoboCore:INFO] Jacobian shape: (6, 6)
+    [RoboCore:INFO] Condition number: 6.76e+02
+    [RoboCore:INFO] Jacobian Matrix (Analytic):
+    [
+    [+0.000102  -0.027725  +0.195946  -0.000347  +0.037936  +0.000000]
+    [+0.220999  +0.000044  -0.000312  +0.003851  -0.000060  +0.000000]
+    [-0.000000  +0.220999  +0.198407  -0.000354  +0.043381  -0.000000]
+    [+0.000000  -0.001593  -0.001593  -0.707106  -0.001593  -0.707106]
+    [+0.000000  -0.999999  -0.999999  +0.001126  -0.999999  +0.001126]
+    [+1.000000  -0.000000  -0.000000  +0.707107  -0.000000  +0.707107]
+    ]
+    [RoboCore:INFO] Jacobian Matrix (Numeric):
+    [
+    [+0.000102  -0.027725  +0.195946  -0.000347  +0.037936  +0.000000]
+    [+0.220999  +0.000044  -0.000312  +0.003851  -0.000060  +0.000000]
+    [+0.000000  +0.220999  +0.198407  -0.000354  +0.043381  +0.000000]
+    [+0.000000  -0.001593  -0.001593  -0.707106  -0.001593  -0.707106]
+    [+0.000000  -0.999999  -0.999999  +0.001126  -0.999999  +0.001126]
+    [+1.000000  +0.000000  -0.000000  +0.707107  -0.000000  +0.707107]
+    ]
+    [RoboCore:INFO] Analytic vs Numeric:
+    [RoboCore:INFO]   Max difference:        4.147e-08
+    [RoboCore:INFO]   Frobenius norm:        8.305e-08
+    [RoboCore:MODULE] [2] Performance comparison
+    [RoboCore:INFO] Analytic   0.1212 ms
+    [RoboCore:INFO] Numeric    2.0630 ms
+    [RoboCore:MODULE] [3] Condition number across 10 random configurations
+    [RoboCore:INFO] Condition number statistics:
+    [RoboCore:INFO]   Mean:   1.02e+02
+    [RoboCore:INFO]   Median: 5.21e+01
+    [RoboCore:INFO]   Max:    3.73e+02
+    [RoboCore:INFO]   Min:    2.11e+01
+    """

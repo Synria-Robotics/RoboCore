@@ -92,3 +92,31 @@ if __name__ == "__main__":
                         help='Backend to use for computation (default: numpy)')
     args = parser.parse_args()
     main(args)
+    
+    
+    """_results_
+    [RoboCore:INFO] End-Effector Position (m):
+    p = [+0.17006, +0.01704, +0.20533]
+    [RoboCore:INFO] End-Effector Orientation (Euler XYZ, radians):
+    rpy = [+2.68621, +1.13891, +2.74547]
+    [RoboCore:INFO] End-Effector Orientation (Euler XYZ, degrees):
+    rpy = [+153.90843, +65.25471, +157.30364]
+    [RoboCore:INFO] End-Effector Orientation (Quaternion xyzw):
+    quat = [+0.042114, +0.828366, +0.083037, +0.552396]
+    Note: q and -q represent the same rotation
+    -quat = [-0.042114, -0.828366, -0.083037, -0.552396] (equivalent)
+    [RoboCore:INFO] Rotation Matrix:
+    [
+    [-0.386171  -0.021966  +0.922166]
+    [+0.161510  +0.982663  +0.091042]
+    [-0.908178  +0.184097  -0.375928]
+    ]
+    [RoboCore:INFO] Homogeneous Transformation Matrix:
+    [
+    [-0.386171  -0.021966  +0.922166  +0.170060]
+    [+0.161510  +0.982663  +0.091042  +0.017041]
+    [-0.908178  +0.184097  -0.375928  +0.205325]
+    [+0.000000  +0.000000  +0.000000  +1.000000]
+    ]
+    [RoboCore:INFO] Computation Time:  0.002994 seconds
+    """

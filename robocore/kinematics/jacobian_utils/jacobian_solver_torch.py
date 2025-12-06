@@ -40,6 +40,7 @@ except Exception:
         return torch.device("cpu")
 
 from robocore.transform import rotation_error
+from robocore.kinematics.utils import ensure_batch, restore_single
 
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
@@ -102,32 +103,29 @@ class JacobianSolverTorch:
         else:
             q = q.to(dtype=dtype, device=device)
         
-        # Detect batch mode
-        is_batch = q.ndim == 2
+        q, was_single = ensure_batch(q)
         
-        if is_batch:
-            # Batch mode: q is [B, n]
-            if method == "analytic":
-                if target_link is not None:
-                    # For batch + partial target, fall back to per-sample analytic computation
-                    J_list = []
-                    for qb in q:
-                        J_list.append(self._solve_analytic(qb, device, dtype, target_link=target_link))
-                    return torch.stack(J_list, dim=0)
-                return self._solve_analytic_batch(q, device, dtype)
+        if q.shape[1] != self.n:
+            raise ValueError(f"Expected q with {self.n} elements, got {q.shape[1]}")
+
+        if method == "analytic":
+            if target_link is not None:
+                # For batch + partial target, fall back to per-sample analytic computation
+                J_list = []
+                for qb in q:
+                    J_list.append(self._solve_analytic(qb, device, dtype, target_link=target_link))
+                result = torch.stack(J_list, dim=0)
             else:
-                raise NotImplementedError(f"Batch mode only supports 'analytic' method, got '{method}'")
+                result = self._solve_analytic_batch(q, device, dtype)
+        elif method == "numeric":
+            result = self._solve_numeric_batch(q, epsilon, use_central_diff, device, dtype)
+        elif method == "autograd":
+            result = self._solve_autograd_batch(q, device, dtype)
         else:
-            # Single mode: q is (n,)
-            if method == "analytic":
-                return self._solve_analytic(q, device, dtype, target_link=target_link)
-            elif method == "numeric":
-                return self._solve_numeric(q, epsilon, use_central_diff, device, dtype)
-            elif method == "autograd":
-                return self._solve_autograd(q, device, dtype)
-            else:
-                raise ValueError(f"Unknown method '{method}', expected 'analytic', 'numeric', or 'autograd'")
-    
+            raise ValueError(f"Unknown method '{method}', expected 'analytic', 'numeric', or 'autograd'")
+
+        return restore_single(result, was_single)
+
     def _solve_analytic(self, q, device, dtype, target_link: str | None = None) -> Tensor:
         """Compute analytic (geometric) Jacobian.
 
@@ -272,17 +270,14 @@ class JacobianSolverTorch:
 
                 J[:3, i] = (p_pos - p_neg) / (2 * epsilon)
 
-                # Rotation error in end-effector frame
-                err_pos_ee = rotation_error(R_ref, R_pos)
-                err_neg_ee = rotation_error(R_ref, R_neg)
+                # rotation_error returns error in world frame (consistent with analytic Jacobian)
+                err_pos_world = rotation_error(R_ref, R_pos)
+                err_neg_world = rotation_error(R_ref, R_neg)
                 # Ensure err_pos and err_neg are torch tensors
-                if not torch.is_tensor(err_pos_ee):
-                    err_pos_ee = torch.tensor(err_pos_ee, dtype=dtype, device=device)
-                if not torch.is_tensor(err_neg_ee):
-                    err_neg_ee = torch.tensor(err_neg_ee, dtype=dtype, device=device)
-                # Convert to world frame: e_world = R_ref @ e_ee
-                err_pos_world = R_ref @ err_pos_ee
-                err_neg_world = R_ref @ err_neg_ee
+                if not torch.is_tensor(err_pos_world):
+                    err_pos_world = torch.tensor(err_pos_world, dtype=dtype, device=device)
+                if not torch.is_tensor(err_neg_world):
+                    err_neg_world = torch.tensor(err_neg_world, dtype=dtype, device=device)
                 J[3:6, i] = (err_pos_world - err_neg_world) / (2 * epsilon)
         else:
             T_ref = fk_solver.solve(q, return_end_only=True, device=device, dtype=dtype)["end"]
@@ -297,13 +292,11 @@ class JacobianSolverTorch:
                 R_pos = T_pos[:3, :3]
 
                 J[:3, i] = (p_pos - p_ref) / epsilon
-                # Rotation error in end-effector frame
-                err_ee = rotation_error(R_ref, R_pos)
+                # rotation_error returns error in world frame (consistent with analytic Jacobian)
+                err_world = rotation_error(R_ref, R_pos)
                 # Ensure err is torch tensor
-                if not torch.is_tensor(err_ee):
-                    err_ee = torch.tensor(err_ee, dtype=dtype, device=device)
-                # Convert to world frame: e_world = R_ref @ e_ee
-                err_world = R_ref @ err_ee
+                if not torch.is_tensor(err_world):
+                    err_world = torch.tensor(err_world, dtype=dtype, device=device)
                 J[3:6, i] = err_world / epsilon
         
         return J
@@ -353,6 +346,49 @@ class JacobianSolverTorch:
         
         return J.detach()
     
+    def _solve_numeric_batch(
+        self,
+        q_batch: Tensor,
+        epsilon: float,
+        use_central_diff: bool,
+        device,
+        dtype
+    ) -> Tensor:
+        """Compute numeric Jacobian for batch of configurations.
+        
+        :param q_batch: joint configurations [B, n]
+        :param epsilon: finite difference step size
+        :param use_central_diff: use central difference if True
+        :param device: torch device
+        :param dtype: torch dtype
+        :return: Jacobian matrices [B, 6, n]
+        """
+        batch_size = q_batch.shape[0]
+        J_batch = torch.zeros((batch_size, 6, self.n), dtype=dtype, device=device)
+
+        # Process each configuration (can be optimized with true vectorization later)
+        for i in range(batch_size):
+            J_batch[i] = self._solve_numeric(q_batch[i], epsilon, use_central_diff, device, dtype)
+
+        return J_batch
+
+    def _solve_autograd_batch(self, q_batch: Tensor, device, dtype) -> Tensor:
+        """Compute Jacobian using PyTorch autograd for batch of configurations.
+        
+        :param q_batch: joint configurations [B, n]
+        :param device: torch device
+        :param dtype: torch dtype
+        :return: Jacobian matrices [B, 6, n]
+        """
+        batch_size = q_batch.shape[0]
+        J_batch = torch.zeros((batch_size, 6, self.n), dtype=dtype, device=device)
+
+        # Process each configuration (autograd doesn't easily vectorize)
+        for i in range(batch_size):
+            J_batch[i] = self._solve_autograd(q_batch[i], device, dtype)
+
+        return J_batch
+
     def _solve_analytic_batch(self, q_batch: Tensor, device, dtype) -> Tensor:
         """Compute batch geometric Jacobian for multiple configurations in parallel.
         
@@ -374,7 +410,10 @@ class JacobianSolverTorch:
         
         # Get end-effector position for all samples [B, 4, 4]
         fk_solver = FKSolverTorch(self.model)
-        T_ee_batch = fk_solver.solve(q_batch, device=device, dtype=dtype)  # auto-detects batch mode
+        T_ee_batch = fk_solver.solve(q_batch, return_end_only=True, device=device, dtype=dtype)  # auto-detects batch mode
+        # Ensure T_ee_batch is a tensor, not dict
+        if isinstance(T_ee_batch, dict):
+            T_ee_batch = T_ee_batch['end']
         p_ee_batch = T_ee_batch[:, :3, 3]  # [B, 3]
         
         # Process each joint

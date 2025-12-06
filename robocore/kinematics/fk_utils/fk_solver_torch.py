@@ -41,6 +41,7 @@ from robocore.transform import (
     axis_angle_to_matrix,
     make_transform,
 )
+from robocore.kinematics.utils import ensure_batch, restore_single
 
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
@@ -90,14 +91,14 @@ class FKSolverTorch:
         """Compute forward kinematics (supports both single and batch).
         
         :param q: joint configuration(s).
-            - Single: shape (n,) → returns dict {link_name: 4x4 tensor}
+            - Single: shape (n,) → returns dict {link_name: 4x4 tensor} or 4x4 tensor
             - Batch: shape (B, n) → returns tensor [B, 4, 4] (end-effector only)
         :param return_end_only: if True, only return end-effector pose.
-    :param device: torch device ('cpu', 'cuda', or None for auto; MPS removed).
+        :param device: torch device ('cpu', 'cuda', or None for auto; MPS removed).
         :param dtype: torch dtype (default: torch.float64).
         :return: 
-            - Single mode: dict of link names to 4x4 pose matrices
-            - Batch mode: tensor [B, 4, 4] of end-effector poses
+            - Single mode: dict of link names to 4x4 pose matrices (if return_end_only=False) or 4x4 tensor (if return_end_only=True)
+            - Batch mode: tensor [B, 4, 4] of end-effector poses (if return_end_only=True)
         """
         device = select_device(device)
         
@@ -106,86 +107,68 @@ class FKSolverTorch:
         else:
             q = q.to(dtype=dtype, device=device)
         
-        # Detect batch mode
-        is_batch = q.ndim == 2
+        q, was_single = ensure_batch(q)
         
-        if is_batch:
-            # Batch mode: q shape [B, n]
-            return self._solve_batch(q, device, dtype)
-        else:
-            # Single mode: q shape [n]
-            return self._solve_single(q, return_end_only, device, dtype)
-    
-    def _solve_single(
-        self,
-        q: Tensor,
-        return_end_only: bool,
-        device,
-        dtype
-    ) -> Dict[str, torch.Tensor]:
-        """Solve FK for single configuration."""
-        if q.shape[0] != self.n:
-            raise ValueError(f"Expected q with {self.n} elements, got {q.shape[0]}")
-    def _solve_single(
-        self,
-        q: Tensor,
-        return_end_only: bool,
-        device,
-        dtype
-    ) -> Dict[str, torch.Tensor]:
-        """Solve FK for single configuration."""
-        if q.shape[0] != self.n:
-            raise ValueError(f"Expected q with {self.n} elements, got {q.shape[0]}")
-        
-        q_map = {j.name: q[j.index] for j in self.actuated_joints}
-        
-        # Determine root link (first joint's parent, which may be 'world' if world_to_base_joint exists)
-        root_link = self.joint_chain[0].parent if len(self.joint_chain) > 0 else self.base_link
-        
-        poses: Dict[str, torch.Tensor] = {
-            root_link: torch.eye(4, dtype=dtype, device=q.device)
-        }
-        
-        # Backend should already be set correctly by caller
-        for joint in self.joint_chain:
-                # Ensure parent pose exists (for cases where parent is not base_link)
-                if joint.parent not in poses:
-                    poses[joint.parent] = torch.eye(4, dtype=dtype, device=q.device)
-                parent_pose = poses[joint.parent]
-                
-                # origin 变换
-                R_o = rpy_to_matrix(
-                    torch.tensor(joint.origin_rpy[0], dtype=dtype, device=q.device),
-                    torch.tensor(joint.origin_rpy[1], dtype=dtype, device=q.device),
-                    torch.tensor(joint.origin_rpy[2], dtype=dtype, device=q.device),
-                )
-                t_o = torch.tensor(joint.origin_xyz, dtype=dtype, device=q.device)
-                T_origin = make_transform(R_o, t_o)
-                
-                if joint.joint_type == "revolute":
-                    R_m = axis_angle_to_matrix(
-                        torch.tensor(joint.axis, dtype=dtype, device=q.device),
-                        q_map.get(joint.name, torch.tensor(0.0, dtype=dtype, device=q.device))
-                    )
-                    t_m = torch.zeros(3, dtype=dtype, device=q.device)
-                elif joint.joint_type == "prismatic":
-                    R_m = torch.eye(3, dtype=dtype, device=q.device)
-                    axis_vec = torch.tensor(joint.axis, dtype=dtype, device=q.device)
-                    t_m = axis_vec * q_map.get(joint.name, torch.tensor(0.0, dtype=dtype, device=q.device))
-                else:
-                    R_m = torch.eye(3, dtype=dtype, device=q.device)
-                    t_m = torch.zeros(3, dtype=dtype, device=q.device)
-                
-                T_motion = make_transform(R_m, t_m)
-                child_pose = parent_pose @ T_origin @ T_motion
-                poses[joint.child] = child_pose
-        
-        poses["end"] = poses.get(self.end_link, list(poses.values())[-1])
-        
+        if q.shape[1] != self.n:
+            raise ValueError(f"Expected q with {self.n} elements, got {q.shape[1]}")
+
         if return_end_only:
-            return {"end": poses["end"]}
-        
-        return poses
+            result = self._solve_batch(q, device, dtype)
+            return restore_single(result, was_single)
+        else:
+            # For non-end mode, process each sample
+            batch_size = q.shape[0]
+            if batch_size == 1:
+                # Single sample - use original logic
+                q_single = q[0]
+                q_map = {j.name: q_single[j.index] for j in self.actuated_joints}
+                root_link = self.joint_chain[0].parent if len(self.joint_chain) > 0 else self.base_link
+                poses: Dict[str, torch.Tensor] = {root_link: torch.eye(4, dtype=dtype, device=device)}
+
+                for joint in self.joint_chain:
+                    if joint.parent not in poses:
+                        poses[joint.parent] = torch.eye(4, dtype=dtype, device=device)
+                    parent_pose = poses[joint.parent]
+
+                    R_o = rpy_to_matrix(
+                        torch.tensor(joint.origin_rpy[0], dtype=dtype, device=device),
+                        torch.tensor(joint.origin_rpy[1], dtype=dtype, device=device),
+                        torch.tensor(joint.origin_rpy[2], dtype=dtype, device=device),
+                    )
+                    t_o = torch.tensor(joint.origin_xyz, dtype=dtype, device=device)
+                    T_origin = make_transform(R_o, t_o)
+
+                    if joint.joint_type == "revolute":
+                        R_m = axis_angle_to_matrix(
+                            torch.tensor(joint.axis, dtype=dtype, device=device),
+                            q_map.get(joint.name, torch.tensor(0.0, dtype=dtype, device=device))
+                        )
+                        t_m = torch.zeros(3, dtype=dtype, device=device)
+                    elif joint.joint_type == "prismatic":
+                        R_m = torch.eye(3, dtype=dtype, device=device)
+                        axis_vec = torch.tensor(joint.axis, dtype=dtype, device=device)
+                        t_m = axis_vec * q_map.get(joint.name, torch.tensor(0.0, dtype=dtype, device=device))
+                    else:
+                        R_m = torch.eye(3, dtype=dtype, device=device)
+                        t_m = torch.zeros(3, dtype=dtype, device=device)
+
+                    T_motion = make_transform(R_m, t_m)
+                    child_pose = parent_pose @ T_origin @ T_motion
+                    poses[joint.child] = child_pose
+
+                poses["end"] = poses.get(self.end_link, list(poses.values())[-1])
+                return poses
+            else:
+                # Batch mode - return dict with batch arrays
+                results = {}
+                for i in range(batch_size):
+                    poses = self.solve(q[i], return_end_only=False, device=device, dtype=dtype)
+                    if i == 0:
+                        for link_name in poses.keys():
+                            results[link_name] = []
+                    for link_name, T in poses.items():
+                        results[link_name].append(T)
+                return {link_name: torch.stack(arrays, dim=0) for link_name, arrays in results.items()}
     
     def _solve_batch(
         self,
@@ -207,20 +190,24 @@ class FKSolverTorch:
         # Initialize batch of identity matrices [B, 4, 4]
         T_batch = torch.eye(4, device=device, dtype=dtype).unsqueeze(0).repeat(batch_size, 1, 1)
         
-        # Get robot kinematic chain
-        joint_specs = self.actuated_joints
-        
-        # Backend should already be set correctly by caller
-        # Process each joint in the chain
-        for js in joint_specs:
-            # Get joint angle for this joint across all samples [B]
-            theta = q_batch[:, js.index]
+        # Build q_map for joint values (map joint name -> [B] tensor of values)
+        q_map = {}
+        for js in self.actuated_joints:
+            q_map[js.name] = q_batch[:, js.index]  # [B]
+
+        # Process each joint in the chain (includes all joints, not just actuated)
+        for urdf_joint in self.joint_chain:
+            # Get joint value if actuated, otherwise 0
+            if urdf_joint.name in q_map:
+                joint_value = q_map[urdf_joint.name]  # [B]
+            else:
+                joint_value = torch.zeros(batch_size, device=device, dtype=dtype)  # [B]
 
             # 1. Translation from origin
-            origin_xyz = torch.tensor(js.origin_xyz, device=device, dtype=dtype)  # [3]
+            origin_xyz = torch.tensor(urdf_joint.origin_xyz, device=device, dtype=dtype)  # [3]
 
-            # 2. Rotation from origin (roll-pitch-yaw) using new transform API
-            origin_rpy = torch.tensor(js.origin_rpy, device=device, dtype=dtype)  # [3]
+            # 2. Rotation from origin (roll-pitch-yaw)
+            origin_rpy = torch.tensor(urdf_joint.origin_rpy, device=device, dtype=dtype)  # [3]
             origin_rpy_batch = origin_rpy.unsqueeze(0).repeat(batch_size, 1)  # [B, 3]
             R_origin = rpy_to_matrix(
                 origin_rpy_batch[:, 0],
@@ -228,17 +215,36 @@ class FKSolverTorch:
                 origin_rpy_batch[:, 2]
             )  # [B, 3, 3]
 
-            # 3. Joint rotation (revolute around axis)
-            axis = torch.tensor(js.axis, device=device, dtype=dtype)  # [3]
-            R_joint = self._axis_angle_to_rotation_matrix_batch(axis, theta, device, dtype)  # [B, 3, 3]
+            # 3. Joint motion transform
+            if urdf_joint.joint_type == "revolute":
+                axis = torch.tensor(urdf_joint.axis, device=device, dtype=dtype)  # [3]
+                R_joint = self._axis_angle_to_rotation_matrix_batch(axis, joint_value, device, dtype)  # [B, 3, 3]
+                t_joint = torch.zeros(batch_size, 3, device=device, dtype=dtype)  # [B, 3]
+            elif urdf_joint.joint_type == "prismatic":
+                R_joint = torch.eye(3, device=device, dtype=dtype).unsqueeze(0).repeat(batch_size, 1, 1)  # [B, 3, 3]
+                axis = torch.tensor(urdf_joint.axis, device=device, dtype=dtype)  # [3]
+                axis_norm = torch.linalg.norm(axis)
+                if axis_norm > 1e-10:
+                    axis = axis / axis_norm
+                t_joint = axis.unsqueeze(0) * joint_value.unsqueeze(1)  # [B, 3]
+            else:  # fixed
+                R_joint = torch.eye(3, device=device, dtype=dtype).unsqueeze(0).repeat(batch_size, 1, 1)  # [B, 3, 3]
+                t_joint = torch.zeros(batch_size, 3, device=device, dtype=dtype)  # [B, 3]
 
-            # Combine rotations: R_total = R_origin @ R_joint
-            R_total = torch.matmul(R_origin, R_joint)  # [B, 3, 3]
+            # Build T_origin: [R_origin | t_origin] for each sample
+            # R_origin is [B, 3, 3], origin_xyz is [3]
+            T_origin = torch.eye(4, device=device, dtype=dtype).unsqueeze(0).repeat(batch_size, 1, 1)
+            T_origin[:, :3, :3] = R_origin  # [B, 3, 3]
+            T_origin[:, :3, 3] = origin_xyz.unsqueeze(0)  # [B, 3]
 
-            # Build 4x4 transformation matrix for each sample
-            T_joint = torch.eye(4, device=device, dtype=dtype).unsqueeze(0).repeat(batch_size, 1, 1)
-            T_joint[:, :3, :3] = R_total
-            T_joint[:, :3, 3] = origin_xyz  # Same translation for all samples
+            # Build T_motion: [R_joint | t_joint] for each sample
+            T_motion = torch.eye(4, device=device, dtype=dtype).unsqueeze(0).repeat(batch_size, 1, 1)
+            T_motion[:, :3, :3] = R_joint  # [B, 3, 3]
+            T_motion[:, :3, 3] = t_joint  # [B, 3]
+
+            # Combine: T_joint = T_origin @ T_motion (batch matmul)
+            # Both are [B, 4, 4], result is [B, 4, 4]
+            T_joint = torch.matmul(T_origin, T_motion)  # [B, 4, 4]
 
             # Accumulate transformation: T_batch = T_batch @ T_joint (batch matmul)
             T_batch = torch.matmul(T_batch, T_joint)
