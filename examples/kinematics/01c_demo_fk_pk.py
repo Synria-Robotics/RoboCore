@@ -42,11 +42,11 @@ def main(args):
     # PyTorch Kinematics
     with open(model_path, 'rb') as f:
         urdf_bytes = f.read()
-    chain = pk.build_serial_chain_from_urdf(urdf_bytes, end_link, root_link_name='base_link')
+    chain = pk.build_serial_chain_from_urdf(urdf_bytes, end_link, root_link_name=args.base_link)
     n_dof = len(chain.get_joint_parameter_names())
     
     # RoboCore
-    rc_model = RobotModel(model_path, end_link=end_link)
+    rc_model = RobotModel(model_path, base_link=args.base_link, end_link=end_link)
     rc.set_backend('torch', device=args.device)
     
     beauty_print(f"Forward Kinematics Comparison: PyTorch Kinematics vs RoboCore ({n_dof} DOF)", type="module")
@@ -64,6 +64,10 @@ def main(args):
     print(f"  q = {beauty_print_array(q.cpu().numpy())}")
     
     # Compute FK with PyTorch Kinematics
+    # Note: pytorch_kinematics always applies root link's origin transform (including world2base
+    # rotation) in forward kinematics, regardless of base_link setting. This means when base_link
+    # is set to a non-root link (e.g., base_link instead of world), the world2base transform is
+    # still included in the result.
     q_tensor = q.unsqueeze(0)
     ret_pk = chain.forward_kinematics(q_tensor, end_only=False)
     tg_pk = ret_pk[end_link]
@@ -73,6 +77,9 @@ def main(args):
     rot_pk = T_pk[:3, :3]
     
     # Compute FK with RoboCore
+    # Note: RoboCore does not apply root link's origin transform. When base_link == end_link,
+    # it returns identity matrix. For other cases, it computes relative transform from base_link
+    # to end_link without including world2base rotation.
     T_rc = forward_kinematics(rc_model, q, return_end=True, device=device)
     T_rc_np = to_numpy(T_rc)
     pos_rc = T_rc_np[:3, 3]
@@ -86,9 +93,9 @@ def main(args):
     # Convert to quaternion for display
     quat_pk = matrix_to_quaternion(rot_pk)
     quat_rc = matrix_to_quaternion(rot_rc)
-    beauty_print(f"Quaternion (PyTorch Kinematics):")
+    beauty_print(f"Quaternion xyzw (PyTorch Kinematics):")
     print(f"  quat = {beauty_print_array(quat_pk, precision=6)}")
-    beauty_print(f"Quaternion (RoboCore):")
+    beauty_print(f"Quaternion xyzw (RoboCore):")
     print(f"  quat = {beauty_print_array(quat_rc, precision=6)}")
     
     # Position comparison
@@ -174,6 +181,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Forward Kinematics validation with Pytorch Kinematics")
     parser.add_argument('--model-path', type=str, default=model_path,
                         help='Path to URDF file (default: Alicia-D)')
+    parser.add_argument('--base-link', type=str, default='world', help='Base link name')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
     parser.add_argument('--joint-angles', type=float, nargs='+', default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2],
                         help='Joint angles in radians')

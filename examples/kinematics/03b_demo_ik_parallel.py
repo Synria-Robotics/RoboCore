@@ -39,33 +39,38 @@ def main(args):
     rc.set_backend(backend)
 
     # Load robot model
-    robot_model = RobotModel(str(args.model_path), end_link=args.end_link)
+    robot_model = RobotModel(str(args.model_path), base_link=args.base_link, end_link=args.end_link)
     if args.verbose:
         robot_model.summary(show_chain=True)
         robot_model.print_tree(show_fixed=True)
 
-    # Generate target poses from joint configurations
-    joint_configs = args.joint_angles
-    if isinstance(joint_configs[0], list):
-        pass
-    else:
-        joint_configs = [joint_configs]
+    # Generate random joint configurations
+    num_configs = args.num_configs
+    beauty_print("Generating Random Joint Configurations", type="module", centered=True)
+    joint_configs = robot_model.random_q_batch(num_configs, seed=args.seed, scale=args.scale)
+    beauty_print(f"Generated {num_configs} random joint configuration(s)")
 
-    beauty_print("Generating Target Poses", type="module", centered=True)
-    target_poses = []
-    for q in joint_configs:
-        T = forward_kinematics(robot_model, q, return_end=True)
-        target_poses.append(T)
-    target_poses = np.array(target_poses)
-    beauty_print(f"Generated {len(target_poses)} target pose(s)")
+    # Generate target poses from joint configurations using FK
+    beauty_print("Computing Forward Kinematics", type="module", centered=True)
+    target_poses = forward_kinematics(robot_model, joint_configs, return_end=True)
+    # Ensure target_poses is 3D: [batch_size, 4, 4]
+    if target_poses.ndim == 2:
+        target_poses = target_poses[np.newaxis, ...]
+    beauty_print(f"Computed {target_poses.shape[0]} target pose(s) from FK")
 
     # Single IK example
     beauty_print("Single IK Example", type="module", centered=True)
     target_single = target_poses[0]
-    q0_single = np.zeros(robot_model.num_chain_dof)
     
     start_time = time.time()
-    result_single = inverse_kinematics(robot_model, target_single, q0_single, method=args.method)
+    result_single = inverse_kinematics(
+        robot_model, target_single,
+        method=args.method,
+        num_initial_guesses=args.num_inits,
+        initial_guess_strategy=args.init_strategy,
+        initial_guess_scale=args.init_scale,
+        random_seed=args.seed,
+    )
     single_time = time.time() - start_time
     
     beauty_print(f"Single IK time: {single_time:.6f} seconds")
@@ -77,17 +82,23 @@ def main(args):
 
     # Batch IK example
     beauty_print("Batch IK Example", type="module", centered=True)
-    q0_batch = np.zeros((len(target_poses), robot_model.num_chain_dof))
     
     start_time = time.time()
-    results_batch = inverse_kinematics(robot_model, target_poses, q0_batch, method=args.method)
+    results_batch = inverse_kinematics(
+        robot_model, target_poses,
+        method=args.method,
+        num_initial_guesses=args.num_inits,
+        initial_guess_strategy=args.init_strategy,
+        initial_guess_scale=args.init_scale,
+        random_seed=args.seed,
+    )
     batch_time = time.time() - start_time
     
     beauty_print(f"Batch IK time: {batch_time:.6f} seconds")
-    beauty_print(f"Average time per configuration: {batch_time/len(target_poses):.6f} seconds")
+    beauty_print(f"Average time per configuration: {batch_time/num_configs:.6f} seconds")
     
-    if len(target_poses) > 1:
-        speedup = (single_time * len(target_poses)) / batch_time
+    if num_configs > 1:
+        speedup = (single_time * num_configs) / batch_time
         beauty_print(f"Effective speedup: {speedup:.2f}x")
     
     # Display results
@@ -111,32 +122,25 @@ if __name__ == "__main__":
     
     model_path = get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="urdf")
 
-    parser = argparse.ArgumentParser(
-        description="Inverse Kinematics Parallel Demo - Batch IK processing",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Use default configurations
-  python 01d_demo_ik_parallel.py
-
-  # Use torch backend for better batch performance
-  python 01d_demo_ik_parallel.py --backend torch
-
-  # Show detailed results
-  python 01d_demo_ik_parallel.py --show-details
-        """
-    )
+    parser = argparse.ArgumentParser(description="Inverse Kinematics Parallel Demo - Batch IK processing with random joint configurations")
     parser.add_argument('--model-path', type=str,
                         default=model_path,
                         help='Path to URDF file (default: Alicia-D)')
+    parser.add_argument('--base-link', type=str, default='base_link', help='Base link name')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
-    parser.add_argument('--joint-angles', type=float, nargs='+', 
-                        default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2,
-                                 0.2, 0.3, -0.4, 0.1, 0.6, -0.3,
-                                 0.0, 0.1, -0.2, 0.0, 0.4, -0.1],
-                        help='Joint angles in radians (flattened list, will be reshaped)')
-    parser.add_argument('--num-joints', type=int, default=6,
-                        help='Number of joints per configuration (default: 6)')
+    parser.add_argument('--num-configs', type=int, default=1000,
+                        help='Number of random joint configurations to generate (default: 100)')
+    parser.add_argument('--seed', type=int, default=None,
+                        help='Random seed for reproducibility (default: None)')
+    parser.add_argument('--scale', type=float, default=0.8,
+                        help='Scaling factor for joint range sampling (0.0 to 1.0, default: 0.8)')
+    parser.add_argument('--num-inits', type=int, default=1,
+                        help='Number of initial guesses to try per target (default: 1)')
+    parser.add_argument('--init-strategy', type=str, default='random',
+                        choices=['zero', 'random', 'sobol', 'latin', 'center', 'uniform'],
+                        help='Strategy for generating initial guesses (default: random)')
+    parser.add_argument('--init-scale', type=float, default=1.0,
+                        help='Scale factor for joint limits when generating guesses (0.0 to 1.0, default: 1.0)')
     parser.add_argument('--backend', type=str, default='torch',
                         choices=['numpy', 'torch'],
                         help='Backend to use for computation (default: torch)')
@@ -148,16 +152,6 @@ Examples:
     parser.add_argument('--show-details', action='store_true',
                         help='Show detailed results for each configuration')
     args = parser.parse_args()
-    
-    # Reshape joint angles into list of configurations
-    num_joints = args.num_joints
-    joint_angles_flat = args.joint_angles
-    if len(joint_angles_flat) % num_joints != 0:
-        raise ValueError(f"Total number of joint angles ({len(joint_angles_flat)}) must be divisible by num-joints ({num_joints})")
-    
-    num_batch = len(joint_angles_flat) // num_joints
-    args.joint_angles = [joint_angles_flat[i*num_joints:(i+1)*num_joints] 
-                        for i in range(num_batch)]
-    
+
     main(args)
 

@@ -41,12 +41,12 @@ def main(args):
     # PyTorch Kinematics
     with open(model_path, 'rb') as f:
         urdf_bytes = f.read()
-    chain = pk.build_serial_chain_from_urdf(urdf_bytes, end_link, root_link_name='base_link')
+    chain = pk.build_serial_chain_from_urdf(urdf_bytes, end_link)
     n_dof = len(chain.get_joint_parameter_names())
     
     # RoboCore
-    rc_model = RobotModel(model_path, end_link=end_link)
-    rc.set_backend('torch', device=args.device)
+    rc_model = RobotModel(model_path, base_link=args.base_link, end_link=end_link)
+    rc.set_backend(args.backend)
     
     beauty_print(f"Jacobian Comparison: PyTorch Kinematics vs RoboCore ({n_dof} DOF)", type="module")
     beauty_print(f"PyTorch device: {args.device}", type="info")
@@ -158,7 +158,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Jacobian validation with Pytorch Kinematics")
     parser.add_argument('--model-path', type=str, default=model_path,
                         help='Path to URDF file (default: Alicia-D)')
-    parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')    
+    parser.add_argument('--base-link', type=str, default='world', help='Base link name')
+    parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name') 
+    parser.add_argument('--backend', type=str, default='torch', choices=['numpy', 'torch'],
+                        help='Backend to use for RoboCore (default: numpy)')
     parser.add_argument('--device', default='cpu', help='PyTorch device (cpu, cuda)')
     parser.add_argument('--samples', type=int, default=100, help='Number of test configurations')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')

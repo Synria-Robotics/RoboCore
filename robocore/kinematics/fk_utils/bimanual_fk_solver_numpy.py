@@ -1,4 +1,4 @@
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Sequence, Union
 import numpy as np
 
 from robocore.modeling.robot_model import RobotModel
@@ -10,12 +10,37 @@ class BiIndependentFKSolverNumpy:
         self.left_solver = FKSolverNumPy(left_model)
         self.right_solver = FKSolverNumPy(right_model)
 
-    def fk(self, q_left: Sequence[float], q_right: Sequence[float], *, return_end: bool = True) -> Dict[str, Any]:
+    def fk(self, q_left: Union[Sequence[float], np.ndarray],
+           q_right: Union[Sequence[float], np.ndarray],
+           *, return_end: bool = True) -> Dict[str, Any]:
+        """Compute bimanual forward kinematics.
+        
+        :param q_left: Left joint configuration(s) - [n] or [B, n]
+        :param q_right: Right joint configuration(s) - [n] or [B, n]
+        :param return_end: Return only end-effector poses
+        :return: {'left': T_left, 'right': T_right} or batch dict
+        """
+        q_left_arr = np.asarray(q_left)
+        q_right_arr = np.asarray(q_right)
+
+        # Detect batch mode
+        is_batch = q_left_arr.ndim == 2 and q_right_arr.ndim == 2
+        if is_batch:
+            batch_size = q_left_arr.shape[0]
+            if q_right_arr.shape[0] != batch_size:
+                raise ValueError(f"Batch size mismatch: left={batch_size}, right={q_right_arr.shape[0]}")
+
         poses_l = self.left_solver.solve(q_left, return_end_only=return_end)
         poses_r = self.right_solver.solve(q_right, return_end_only=return_end)
 
-        T_l = poses_l['end'] if return_end else np.array(poses_l['end'])
-        T_r = poses_r['end'] if return_end else np.array(poses_r['end'])
+        # Handle return format: if return_end=True, solve returns array directly, otherwise dict
+        if return_end:
+            T_l = poses_l if isinstance(poses_l, np.ndarray) else poses_l['end']
+            T_r = poses_r if isinstance(poses_r, np.ndarray) else poses_r['end']
+        else:
+            T_l = poses_l['end'] if isinstance(poses_l, dict) else poses_l
+            T_r = poses_r['end'] if isinstance(poses_r, dict) else poses_r
+
         # Ensure arrays
         T_l = np.array(T_l)
         T_r = np.array(T_r)

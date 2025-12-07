@@ -20,13 +20,30 @@ class BiIndependentIKSolverTorch:
               q0_left: Optional[Sequence[float]] = None,
               q0_right: Optional[Sequence[float]] = None,
               **ik_kwargs) -> Dict[str, Any]:
-        if q0_left is None:
-            q0_left = [0.0] * self.left.num_dof
-        if q0_right is None:
-            q0_right = [0.0] * self.right.num_dof
+        """Solve bimanual IK independently.
+        
+        :param target_left: Left target pose(s) - 4x4 or [B, 4, 4]
+        :param target_right: Right target pose(s) - 4x4 or [B, 4, 4]
+        :param q0_left: Initial left configuration (optional, used as base for strategies)
+        :param q0_right: Initial right configuration (optional, used as base for strategies)
+        :param ik_kwargs: IK solver parameters (including num_initial_guesses, initial_guess_strategy, etc.)
+        :return: Result dict with q_left, q_right, success_left, success_right, etc.
+        """
+        # q0 is optional now - inverse_kinematics will generate initial guesses if not provided
+        res_left = {'q': q0_left if q0_left is not None else [0.0] * self.left.num_chain_dof,
+                    'success': True, 'pos_err': 0.0, 'ori_err': 0.0, 'iters': 0}
+        res_right = {'q': q0_right if q0_right is not None else [0.0] * self.right.num_chain_dof,
+                     'success': True, 'pos_err': 0.0, 'ori_err': 0.0, 'iters': 0}
 
-        res_left = {'q': q0_left, 'success': True, 'pos_err': 0.0, 'ori_err': 0.0, 'iters': 0}
-        res_right = {'q': q0_right, 'success': True, 'pos_err': 0.0, 'ori_err': 0.0, 'iters': 0}
+        # Check if batch mode
+        import numpy as np
+        is_batch = False
+        if target_left is not None:
+            tgt_left_arr = np.asarray(target_left)
+            is_batch = tgt_left_arr.ndim == 3 and tgt_left_arr.shape[1:] == (4, 4)
+        elif target_right is not None:
+            tgt_right_arr = np.asarray(target_right)
+            is_batch = tgt_right_arr.ndim == 3 and tgt_right_arr.shape[1:] == (4, 4)
 
         if target_left is not None:
             tgt_left = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
@@ -36,11 +53,27 @@ class BiIndependentIKSolverTorch:
             tgt_right = target_right.tolist() if hasattr(target_right, 'tolist') else target_right
             res_right = inverse_kinematics(self.right, tgt_right, q0_right, **ik_kwargs)
 
+        # Handle batch mode (returns list of dicts)
+        if is_batch and isinstance(res_left, list) and isinstance(res_right, list):
+            # Return list of combined results
+            results = []
+            for r_l, r_r in zip(res_left, res_right):
+                results.append({
+                    'q_left': r_l.get('q', q0_left if q0_left is not None else [0.0] * self.left.num_chain_dof),
+                    'q_right': r_r.get('q', q0_right if q0_right is not None else [0.0] * self.right.num_chain_dof),
+                    'success_left': bool(r_l.get('success', False)),
+                    'success_right': bool(r_r.get('success', False)),
+                    'res_left': r_l,
+                    'res_right': r_r,
+                })
+            return results
+
+        # Single mode (returns dict)
         return {
-            'q_left': res_left.get('q', q0_left),
-            'q_right': res_right.get('q', q0_right),
-            'success_left': bool(res_left.get('success', False)),
-            'success_right': bool(res_right.get('success', False)),
+            'q_left': res_left.get('q', q0_left) if isinstance(res_left, dict) else (res_left[0].get('q', q0_left) if isinstance(res_left, list) and len(res_left) > 0 else [0.0] * self.left.num_chain_dof),
+            'q_right': res_right.get('q', q0_right) if isinstance(res_right, dict) else (res_right[0].get('q', q0_right) if isinstance(res_right, list) and len(res_right) > 0 else [0.0] * self.right.num_chain_dof),
+            'success_left': bool(res_left.get('success', False) if isinstance(res_left, dict) else (res_left[0].get('success', False) if isinstance(res_left, list) and len(res_left) > 0 else False)),
+            'success_right': bool(res_right.get('success', False) if isinstance(res_right, dict) else (res_right[0].get('success', False) if isinstance(res_right, list) and len(res_right) > 0 else False)),
             'res_left': res_left,
             'res_right': res_right,
         }
@@ -76,9 +109,9 @@ class BiRelativeIKSolverTorch(BiIndependentIKSolverTorch):
         if tgt_left is not None:
             res_left = inverse_kinematics(self.left, tgt_left, q0_left, **ik_kwargs)
         else:
-            res_left = {'q': q0_left, 'success': True}
+            res_left = {'q': q0_left if q0_left is not None else [0.0] * self.left.num_chain_dof, 'success': True}
 
-        q_left = res_left.get('q', q0_left)
+        q_left = res_left.get('q', q0_left if q0_left is not None else [0.0] * self.left.num_chain_dof)
 
         # Compute constrained right target using left FK and T_rel_grasp
         T_left_current = self.left.fk(q_left)['end']
@@ -88,7 +121,7 @@ class BiRelativeIKSolverTorch(BiIndependentIKSolverTorch):
         if T_right_constrained is not None:
             res_right = inverse_kinematics(self.right, T_right_constrained, q0_right, **ik_kwargs)
         else:
-            res_right = {'q': q0_right, 'success': True}
+            res_right = {'q': q0_right if q0_right is not None else [0.0] * self.right.num_chain_dof, 'success': True}
 
         return {
             'q_left': q_left,

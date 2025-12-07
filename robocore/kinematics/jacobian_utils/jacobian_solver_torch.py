@@ -163,10 +163,12 @@ class JacobianSolverTorch:
         
         reached_target = False
         for urdf_joint in self.model._chain_joints:
-            R_origin = self._rpy_matrix_torch(
-                torch.tensor(urdf_joint.origin_rpy[0], dtype=dtype, device=device),
-                torch.tensor(urdf_joint.origin_rpy[1], dtype=dtype, device=device),
-                torch.tensor(urdf_joint.origin_rpy[2], dtype=dtype, device=device),
+            # Compute RPY rotation matrix (matching numpy implementation)
+            r, p, y = urdf_joint.origin_rpy[0], urdf_joint.origin_rpy[1], urdf_joint.origin_rpy[2]
+            R_origin = JacobianSolverTorch._rpy_matrix_torch(
+                torch.tensor(r, dtype=dtype, device=device),
+                torch.tensor(p, dtype=dtype, device=device),
+                torch.tensor(y, dtype=dtype, device=device),
             )
             t_origin = torch.tensor(urdf_joint.origin_xyz, dtype=dtype, device=device)
             
@@ -174,15 +176,18 @@ class JacobianSolverTorch:
             T_origin[:3, :3] = R_origin
             T_origin[:3, 3] = t_origin
             T_joint_origin = T_parent @ T_origin
-            
+
+            # Compute joint axis and position BEFORE applying joint motion
+            # This matches numpy implementation and is correct for geometric Jacobian
             if urdf_joint.joint_type in ("revolute", "prismatic"):
                 js = next(js for js in self.model._chain_actuated if js.name == urdf_joint.name)
                 axis_local = torch.tensor(urdf_joint.axis, dtype=dtype, device=device)
                 axis_norm = torch.linalg.norm(axis_local)
                 if axis_norm > 1e-10:
                     axis_local = axis_local / axis_norm
+                # Joint axis direction in world frame (before joint motion)
                 z_i = T_joint_origin[:3, :3] @ axis_local
-                p_i = T_joint_origin[:3, 3].clone()
+                p_i = T_joint_origin[:3, 3].clone()  # Joint origin position
                 p_list[js.index] = p_i
                 z_list[js.index] = z_i
             
@@ -191,13 +196,13 @@ class JacobianSolverTorch:
             
             if urdf_joint.joint_type == "revolute":
                 theta = q_map.get(urdf_joint.name, torch.tensor(0.0, dtype=dtype, device=device))
-                R_motion = self._axis_rotation_torch(
+                R_motion = JacobianSolverTorch._axis_rotation_torch(
                     torch.tensor(urdf_joint.axis, dtype=dtype, device=device),
                     theta
                 )
             elif urdf_joint.joint_type == "prismatic":
                 d = q_map.get(urdf_joint.name, torch.tensor(0.0, dtype=dtype, device=device))
-                t_motion = self._axis_translation_torch(
+                t_motion = JacobianSolverTorch._axis_translation_torch(
                     torch.tensor(urdf_joint.axis, dtype=dtype, device=device),
                     d
                 )
@@ -252,19 +257,19 @@ class JacobianSolverTorch:
         
         # Backend should already be set correctly by caller
         if use_central_diff:
-            T_ref = fk_solver.solve(q, return_end_only=True, device=device, dtype=dtype)["end"]
+            T_ref = fk_solver.solve(q, return_end_only=True, device=device, dtype=dtype)
             R_ref = T_ref[:3, :3].clone()
 
             for i in range(self.n):
                 qp = q.clone()
                 qp[i] += epsilon
-                T_pos = fk_solver.solve(qp, return_end_only=True, device=device, dtype=dtype)["end"]
+                T_pos = fk_solver.solve(qp, return_end_only=True, device=device, dtype=dtype)
                 p_pos = T_pos[:3, 3]
                 R_pos = T_pos[:3, :3]
 
                 qn = q.clone()
                 qn[i] -= epsilon
-                T_neg = fk_solver.solve(qn, return_end_only=True, device=device, dtype=dtype)["end"]
+                T_neg = fk_solver.solve(qn, return_end_only=True, device=device, dtype=dtype)
                 p_neg = T_neg[:3, 3]
                 R_neg = T_neg[:3, :3]
 
@@ -280,14 +285,14 @@ class JacobianSolverTorch:
                     err_neg_world = torch.tensor(err_neg_world, dtype=dtype, device=device)
                 J[3:6, i] = (err_pos_world - err_neg_world) / (2 * epsilon)
         else:
-            T_ref = fk_solver.solve(q, return_end_only=True, device=device, dtype=dtype)["end"]
+            T_ref = fk_solver.solve(q, return_end_only=True, device=device, dtype=dtype)
             R_ref = T_ref[:3, :3]
             p_ref = T_ref[:3, 3]
 
             for i in range(self.n):
                 qp = q.clone()
                 qp[i] += epsilon
-                T_pos = fk_solver.solve(qp, return_end_only=True, device=device, dtype=dtype)["end"]
+                T_pos = fk_solver.solve(qp, return_end_only=True, device=device, dtype=dtype)
                 p_pos = T_pos[:3, 3]
                 R_pos = T_pos[:3, :3]
 
@@ -314,7 +319,7 @@ class JacobianSolverTorch:
         fk_solver = FKSolverTorch(self.model)
         
         def pose_vec(q_):
-            T = fk_solver.solve(q_, return_end_only=True, device=device, dtype=dtype)["end"]
+            T = fk_solver.solve(q_, return_end_only=True, device=device, dtype=dtype)
             p = T[:3, 3]
             R = T[:3, :3].reshape(-1)
             return torch.cat([p, R])  # (12,)
@@ -326,7 +331,7 @@ class JacobianSolverTorch:
         R_flat_J = J_big[3:, :]  # (9,n)
         
         # Current pose
-        T_ref = fk_solver.solve(q, return_end_only=True, device=device, dtype=dtype)["end"]
+        T_ref = fk_solver.solve(q, return_end_only=True, device=device, dtype=dtype)
         R = T_ref[:3, :3]
         
         J = torch.zeros((6, self.n), dtype=dtype, device=device)
@@ -392,6 +397,8 @@ class JacobianSolverTorch:
     def _solve_analytic_batch(self, q_batch: Tensor, device, dtype) -> Tensor:
         """Compute batch geometric Jacobian for multiple configurations in parallel.
         
+        Optimized version that pre-computes constants and minimizes tensor operations.
+        
         :param q_batch: batch of joint configurations [B, n]
         :param device: torch device
         :param dtype: torch dtype
@@ -405,48 +412,114 @@ class JacobianSolverTorch:
         if n_joints != self.n:
             raise ValueError(f"Expected {self.n} joints, got {n_joints}")
         
+        # For single sample, use optimized single-sample path (avoid batch overhead)
+        if batch_size == 1:
+            J_single = self._solve_analytic(q_batch[0], device, dtype)
+            return J_single.unsqueeze(0)
+
         # Initialize Jacobian [B, 6, N]
         J_batch = torch.zeros(batch_size, 6, n_joints, device=device, dtype=dtype)
         
         # Get end-effector position for all samples [B, 4, 4]
         fk_solver = FKSolverTorch(self.model)
-        T_ee_batch = fk_solver.solve(q_batch, return_end_only=True, device=device, dtype=dtype)  # auto-detects batch mode
-        # Ensure T_ee_batch is a tensor, not dict
+        T_ee_batch = fk_solver.solve(q_batch, return_end_only=True, device=device, dtype=dtype)
         if isinstance(T_ee_batch, dict):
             T_ee_batch = T_ee_batch['end']
         p_ee_batch = T_ee_batch[:, :3, 3]  # [B, 3]
         
-        # Process each joint
-        for js in self.model._chain_actuated:
-            joint_idx = js.index
+        # Pre-compute all constant transforms and axes (avoid repeated tensor creation)
+        # Storage for joint origins and axes [B, 3] for each joint
+        p_list = [None] * self.n
+        z_list = [None] * self.n
+
+        # Pre-allocate batch identity matrix (reused)
+        eye_4_batch = torch.eye(4, device=device, dtype=dtype).unsqueeze(0).expand(batch_size, -1, -1)  # [B, 4, 4]
+        eye_3 = torch.eye(3, device=device, dtype=dtype)  # [3, 3]
+
+        T_parent_batch = eye_4_batch.clone()  # [B, 4, 4]
+
+        for urdf_joint in self.model._chain_joints:
+            # Pre-compute RPY rotation matrix once (not in loop)
+            r, p, y = urdf_joint.origin_rpy[0], urdf_joint.origin_rpy[1], urdf_joint.origin_rpy[2]
+            r_t = torch.tensor(r, dtype=dtype, device=device)
+            p_t = torch.tensor(p, dtype=dtype, device=device)
+            y_t = torch.tensor(y, dtype=dtype, device=device)
+            R_origin = self._rpy_matrix_torch(r_t, p_t, y_t)  # [3, 3]
+            t_origin = torch.tensor(urdf_joint.origin_xyz, dtype=dtype, device=device)  # [3]
+
+            # Build T_origin efficiently (avoid unsqueeze/repeat in loop)
+            # T_origin is same for all batches, so compute once and expand
+            T_origin_single = torch.eye(4, device=device, dtype=dtype)  # [4, 4]
+            T_origin_single[:3, :3] = R_origin
+            T_origin_single[:3, 3] = t_origin
+            # Expand to batch (more efficient than repeat)
+            T_origin = T_origin_single.unsqueeze(0).expand(batch_size, -1, -1)  # [B, 4, 4]
+
+            T_joint_origin_batch = torch.bmm(T_parent_batch, T_origin)  # [B, 4, 4] (bmm is faster for batch)
+
+            # Compute joint axis and position BEFORE applying joint motion
+            if urdf_joint.joint_type in ("revolute", "prismatic"):
+                js = next(js for js in self.model._chain_actuated if js.name == urdf_joint.name)
+                axis_local = torch.tensor(urdf_joint.axis, dtype=dtype, device=device)  # [3]
+                axis_norm = torch.linalg.norm(axis_local)
+                if axis_norm > 1e-10:
+                    axis_local = axis_local / axis_norm
+                # Joint axis direction in world frame (before joint motion) [B, 3]
+                # More efficient: matmul with expanded axis
+                axis_local_expanded = axis_local.unsqueeze(0).expand(batch_size, -1)  # [B, 3]
+                z_i_batch = torch.bmm(
+                    T_joint_origin_batch[:, :3, :3],
+                    axis_local_expanded.unsqueeze(-1)
+                ).squeeze(-1)  # [B, 3]
+                p_i_batch = T_joint_origin_batch[:, :3, 3]  # [B, 3]
+                p_list[js.index] = p_i_batch
+                z_list[js.index] = z_i_batch
             
-            # Compute FK up to this joint for all samples
-            T_joint_batch = self._forward_kinematics_to_joint_batch(
-                q_batch, joint_idx, device, dtype
-            )
+            # Apply joint motion
+            if urdf_joint.joint_type == "revolute":
+                theta_batch = q_batch[:, js.index]  # [B]
+                R_motion_batch = self._axis_angle_to_rotation_matrix_batch(
+                    torch.tensor(urdf_joint.axis, dtype=dtype, device=device),
+                    theta_batch, device, dtype
+                )  # [B, 3, 3]
+                t_motion_batch = torch.zeros(batch_size, 3, device=device, dtype=dtype)  # [B, 3]
+            elif urdf_joint.joint_type == "prismatic":
+                d_batch = q_batch[:, js.index]  # [B]
+                axis_vec = torch.tensor(urdf_joint.axis, dtype=dtype, device=device)  # [3]
+                axis_norm = torch.linalg.norm(axis_vec)
+                if axis_norm > 1e-10:
+                    axis_vec = axis_vec / axis_norm
+                t_motion_batch = axis_vec.unsqueeze(0) * d_batch.unsqueeze(1)  # [B, 3]
+                R_motion_batch = eye_3.unsqueeze(0).expand(batch_size, -1, -1)  # [B, 3, 3]
+            else:
+                R_motion_batch = eye_3.unsqueeze(0).expand(batch_size, -1, -1)  # [B, 3, 3]
+                t_motion_batch = torch.zeros(batch_size, 3, device=device, dtype=dtype)  # [B, 3]
             
-            # Extract position and z-axis
-            p_joint_batch = T_joint_batch[:, :3, 3]  # [B, 3]
-            z_axis_batch = T_joint_batch[:, :3, 2]  # [B, 3] - third column of rotation matrix
+            # Build T_motion efficiently
+            T_motion_batch = eye_4_batch.clone()  # [B, 4, 4]
+            T_motion_batch[:, :3, :3] = R_motion_batch
+            T_motion_batch[:, :3, 3] = t_motion_batch
             
-            # For revolute joint:
-            # J_v[i] = z[i] × (p_ee - p[i])  (linear velocity contribution)
-            # J_ω[i] = z[i]                  (angular velocity contribution)
-            
+            T_child_batch = torch.bmm(T_joint_origin_batch, T_motion_batch)  # [B, 4, 4]
+            T_parent_batch = T_child_batch
+
+        # Assemble Jacobian for each sample (vectorized)
+        for i in range(self.n):
+            z_i_batch = z_list[i]  # [B, 3]
+            p_i_batch = p_list[i]  # [B, 3]
+            if z_i_batch is None or p_i_batch is None:
+                raise RuntimeError("Internal error: missing joint axis or origin position")
+
+            js = self.model._chain_actuated[i]
             if js.joint_type == "revolute":
-                # Linear part: cross product z × (p_ee - p_joint)
-                r = p_ee_batch - p_joint_batch  # [B, 3]
-                J_linear = torch.cross(z_axis_batch, r, dim=1)  # [B, 3]
-                
-                # Angular part: just the z-axis
-                J_angular = z_axis_batch  # [B, 3]
-                
-                # Assemble into Jacobian
-                J_batch[:, :3, joint_idx] = J_linear
-                J_batch[:, 3:6, joint_idx] = J_angular
+                # Linear part: z × (p_ee - p_i) [B, 3]
+                r_batch = p_ee_batch - p_i_batch  # [B, 3]
+                J_batch[:, :3, i] = torch.cross(z_i_batch, r_batch, dim=1)  # [B, 3]
+                # Angular part: z_i [B, 3]
+                J_batch[:, 3:6, i] = z_i_batch  # [B, 3]
             elif js.joint_type == "prismatic":
                 # Prismatic: only linear motion along axis
-                J_batch[:, :3, joint_idx] = z_axis_batch
+                J_batch[:, :3, i] = z_i_batch  # [B, 3]
         
         return J_batch
     

@@ -27,53 +27,88 @@ import robocore as rc
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.fk import forward_kinematics
 from robocore.utils.beauty_logger import beauty_print_array, beauty_print
+from robocore.utils.backend import to_numpy
 from robocore.transform.conversions import *
 
 
-def main(args):
-    backend = args.backend
+def compute_fk(robot_model, backend, joint_angles):
+    """Compute forward kinematics for given backend.
+    
+    :param robot_model: RobotModel instance
+    :param backend: Backend name ('numpy' or 'torch')
+    :param joint_angles: Joint angles in radians
+    :return: Dictionary with results and computation time
+    """
     rc.set_backend(backend)
-
     start_time = time.time()
 
-    robot_model = RobotModel(str(args.model_path), end_link=args.end_link)
+    T_fk = forward_kinematics(robot_model, joint_angles, return_end=True)
+    position_fk = T_fk[:3, 3]
+    rotation_fk = T_fk[:3, :3]
+    euler_fk = matrix_to_euler(rotation_fk, seq='XYZ')
+    quat_fk = matrix_to_quaternion(rotation_fk)
+
+    elapsed_time = time.time() - start_time
+
+    return {
+        'position': position_fk,
+        'euler': euler_fk,
+        'quat': quat_fk,
+        'rotation': rotation_fk,
+        'transform': T_fk,
+        'time': elapsed_time
+    }
+
+
+def main(args):
+    robot_model = RobotModel(str(args.model_path), base_link=args.base_link, end_link=args.end_link)
     robot_model.summary(show_chain=True)
     robot_model.print_tree(show_fixed=True)
 
-    T_fk = forward_kinematics(robot_model, args.joint_angles, return_end=True)
-    position_fk = T_fk[:3, 3]
-    rotation_fk = T_fk[:3, :3]
+    # Compute with both backends
+    results_np = compute_fk(robot_model, 'numpy', args.joint_angles)
+    results_torch = compute_fk(robot_model, 'torch', args.joint_angles)
 
-    results = {}
-    euler_fk = matrix_to_euler(rotation_fk, seq='xyz')
-    quat_fk = matrix_to_quaternion(rotation_fk)
+    # Convert to numpy for comparison
+    pos_np = to_numpy(results_np['position'])
+    pos_torch = to_numpy(results_torch['position'])
+    euler_np = to_numpy(results_np['euler'])
+    euler_torch = to_numpy(results_torch['euler'])
+    quat_np = to_numpy(results_np['quat'])
+    quat_torch = to_numpy(results_torch['quat'])
 
-    results['fk'] = {
-        'transform': T_fk,
-        'position': position_fk,
-        'rotation': rotation_fk,
-        'euler_xyz': euler_fk,
-        'quaternion_xyzw': quat_fk  # Quaternion in xyzw order
-        }
-
+    # Display results
     beauty_print(f"End-Effector Position (m):")
-    print(f"  p = {beauty_print_array(position_fk)}")
+    print(f"  NumPy:  {beauty_print_array(pos_np)}")
+    print(f"  Torch:  {beauty_print_array(pos_torch)}")
+    pos_diff = np.linalg.norm(pos_np - pos_torch)
+    print(f"  Diff:   {pos_diff:.6e}")
+
     beauty_print(f"End-Effector Orientation (Euler XYZ, radians):")
-    print(f"  rpy = {beauty_print_array(euler_fk)}")
+    print(f"  NumPy:  {beauty_print_array(euler_np)}")
+    print(f"  Torch:  {beauty_print_array(euler_torch)}")
+    euler_diff = np.linalg.norm(euler_np - euler_torch)
+    print(f"  Diff:   {euler_diff:.6e}")
+
     beauty_print(f"End-Effector Orientation (Euler XYZ, degrees):")
-    print(f"  rpy = {beauty_print_array(np.rad2deg(euler_fk))}")
+    print(f"  NumPy:  {beauty_print_array(np.rad2deg(euler_np))}")
+    print(f"  Torch:  {beauty_print_array(np.rad2deg(euler_torch))}")
+
     beauty_print(f"End-Effector Orientation (Quaternion xyzw):")
-    print(f"  quat = {beauty_print_array(quat_fk, precision=6)}")
-    # Add note about quaternion sign ambiguity
-    quat_neg = -quat_fk
-    print(f"  Note: q and -q represent the same rotation")
-    print(f"  -quat = {beauty_print_array(quat_neg, precision=6)} (equivalent)")
-    beauty_print(f"Rotation Matrix:")
-    print(beauty_print_array(rotation_fk, precision=6))
-    beauty_print(f"Homogeneous Transformation Matrix:")
-    print(beauty_print_array(T_fk, precision=6))
-    end_time = time.time()
-    beauty_print(f"Computation Time: {end_time - start_time: .6f} seconds")
+    print(f"  NumPy:  {beauty_print_array(quat_np, precision=6)}")
+    print(f"  Torch:  {beauty_print_array(quat_torch, precision=6)}")
+    quat_diff = np.linalg.norm(quat_np - quat_torch)
+    print(f"  Diff:   {quat_diff:.6e}")
+
+    beauty_print(f"Rotation Matrix (NumPy):")
+    print(beauty_print_array(to_numpy(results_np['rotation']), precision=6))
+    beauty_print(f"Homogeneous Transformation Matrix (NumPy):")
+    print(beauty_print_array(to_numpy(results_np['transform']), precision=6))
+
+    beauty_print(f"Computation Time:")
+    print(f"  NumPy:  {results_np['time']:.6f} seconds")
+    print(f"  Torch:  {results_torch['time']:.6f} seconds")
+    print(f"  Ratio:  {results_torch['time'] / results_np['time']:.2f}x")
 
 
 if __name__ == "__main__":
@@ -84,39 +119,38 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Forward Kinematics Demo")
     parser.add_argument('--model-path', type=str,
                         default=model_path,
-                        help='Path to URDF file (default: Alicia-D)')
+                        help='Path to robot model file (default: Alicia-D)')
+    parser.add_argument('--base-link', type=str, default='base_link', help='Base link name')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
     parser.add_argument('--joint-angles', type=float, nargs='+', default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2],
                         help='Joint angles in radians')
-    parser.add_argument('--backend', type=str, default='numpy',
-                        help='Backend to use for computation (default: numpy)')
     args = parser.parse_args()
     main(args)
     
     
     """_results_
     [RoboCore:INFO] End-Effector Position (m):
-    p = [+0.17006, +0.01704, +0.20533]
+    p = [-0.17003, -0.01731, +0.20533]
     [RoboCore:INFO] End-Effector Orientation (Euler XYZ, radians):
-    rpy = [+2.68621, +1.13891, +2.74547]
+    rpy = [+2.90030, -1.17327, -0.06082]
     [RoboCore:INFO] End-Effector Orientation (Euler XYZ, degrees):
-    rpy = [+153.90843, +65.25471, +157.30364]
+    rpy = [+166.17499, -67.22318, -3.48471]
     [RoboCore:INFO] End-Effector Orientation (Quaternion xyzw):
-    quat = [+0.042114, +0.828366, +0.083037, +0.552396]
+    quat = [+0.828399, -0.041455, -0.552330, +0.083476]
     Note: q and -q represent the same rotation
-    -quat = [-0.042114, -0.828366, -0.083037, -0.552396] (equivalent)
+    -quat = [-0.828399, +0.041455, +0.552330, -0.083476] (equivalent)
     [RoboCore:INFO] Rotation Matrix:
     [
-    [-0.386171  -0.021966  +0.922166]
-    [+0.161510  +0.982663  +0.091042]
-    [-0.908178  +0.184097  -0.375928]
+    [+0.386427  +0.023531  -0.922020]
+    [-0.160895  -0.982626  -0.092511]
+    [-0.908178  +0.184097  -0.375927]
     ]
     [RoboCore:INFO] Homogeneous Transformation Matrix:
     [
-    [-0.386171  -0.021966  +0.922166  +0.170060]
-    [+0.161510  +0.982663  +0.091042  +0.017041]
-    [-0.908178  +0.184097  -0.375928  +0.205325]
+    [+0.386427  +0.023531  -0.922020  -0.170033]
+    [-0.160895  -0.982626  -0.092511  -0.017311]
+    [-0.908178  +0.184097  -0.375927  +0.205325]
     [+0.000000  +0.000000  +0.000000  +1.000000]
     ]
-    [RoboCore:INFO] Computation Time:  0.002994 seconds
+    [RoboCore:INFO] Computation Time:  0.219255 seconds
     """

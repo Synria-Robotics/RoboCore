@@ -18,7 +18,14 @@ class BiIndependentJacobianSolverNumpy:
         self.left = left_model
         self.right = right_model
 
-    def compute(self, q_left: Sequence[float], q_right: Sequence[float]) -> np.ndarray:
+    def compute(self, q_left: Sequence[float] | np.ndarray,
+                q_right: Sequence[float] | np.ndarray) -> np.ndarray:
+        """Compute bimanual independent Jacobian.
+        
+        :param q_left: Left joint configuration(s) - [n] or [B, n]
+        :param q_right: Right joint configuration(s) - [n] or [B, n]
+        :return: Jacobian matrix - [12, nL+nR] or [B, 12, nL+nR]
+        """
         J_L = single_jacobian(self.left, q_left)
         J_R = single_jacobian(self.right, q_right)
 
@@ -31,11 +38,21 @@ class BiIndependentJacobianSolverNumpy:
         else:
             J_R = np.array(J_R)
 
-        nL = J_L.shape[1]
-        nR = J_R.shape[1]
-        J = np.zeros((12, nL + nR))
-        J[0:6, 0:nL] = J_L
-        J[6:12, nL:] = J_R
+        # Handle batch mode
+        is_batch = J_L.ndim == 3
+        if is_batch:
+            batch_size = J_L.shape[0]
+            nL = J_L.shape[2]
+            nR = J_R.shape[2]
+            J = np.zeros((batch_size, 12, nL + nR))
+            J[:, 0:6, 0:nL] = J_L
+            J[:, 6:12, nL:] = J_R
+        else:
+            nL = J_L.shape[1]
+            nR = J_R.shape[1]
+            J = np.zeros((12, nL + nR))
+            J[0:6, 0:nL] = J_L
+            J[6:12, nL:] = J_R
         return J
 
 
@@ -50,25 +67,53 @@ class BiRelativeJacobianSolverNumpy:
         self.left = left_model
         self.right = right_model
 
-    def compute(self, q_left: Sequence[float], q_right: Sequence[float], *, constraint_type: str = 'pose') -> np.ndarray:
-        """
-        :param q_left: Left joint configuration
-        :param q_right: Right joint configuration
+    def compute(self, q_left: Sequence[float] | np.ndarray, 
+                q_right: Sequence[float] | np.ndarray, 
+                *, constraint_type: str = 'pose') -> np.ndarray:
+        """Compute bimanual relative Jacobian.
+        
+        :param q_left: Left joint configuration(s) - [n] or [B, n]
+        :param q_right: Right joint configuration(s) - [n] or [B, n]
         :param constraint_type: 'pose'|'position'|'orientation'
-        :return: Relative constraint Jacobian
+        :return: Relative constraint Jacobian - [6, nL+nR] or [B, 6, nL+nR] (or [3, nL+nR] / [B, 3, nL+nR] for position/orientation)
         """
+        import numpy as np
+        q_left_arr = np.asarray(q_left)
+        q_right_arr = np.asarray(q_right)
+        
+        # Detect batch mode
+        is_batch = q_left_arr.ndim == 2 and q_right_arr.ndim == 2
+        if is_batch:
+            batch_size = q_left_arr.shape[0]
+            if q_right_arr.shape[0] != batch_size:
+                raise ValueError(f"Batch size mismatch: left={batch_size}, right={q_right_arr.shape[0]}")
+        
         # Use numerical relative Jacobian from utils (correct adjoint handling)
         from robocore.kinematics.utils import relative_jacobian
         
-        J_rel_full = relative_jacobian(self.left, self.right, q_left, q_right)
+        if is_batch:
+            # Process batch
+            J_rel_list = []
+            for i in range(batch_size):
+                J_rel = relative_jacobian(self.left, self.right, q_left_arr[i], q_right_arr[i])
+                J_rel_list.append(J_rel)
+            J_rel_full = np.stack(J_rel_list, axis=0)  # [B, 6, nL+nR]
+        else:
+            J_rel_full = relative_jacobian(self.left, self.right, q_left, q_right)  # [6, nL+nR]
         
         # Apply constraint type filtering
         if constraint_type == 'pose':
             return J_rel_full
         elif constraint_type == 'position':
-            return J_rel_full[:3, :]
+            if is_batch:
+                return J_rel_full[:, :3, :]  # [B, 3, nL+nR]
+            else:
+                return J_rel_full[:3, :]  # [3, nL+nR]
         elif constraint_type == 'orientation':
-            return J_rel_full[3:, :]
+            if is_batch:
+                return J_rel_full[:, 3:, :]  # [B, 3, nL+nR]
+            else:
+                return J_rel_full[3:, :]  # [3, nL+nR]
         else:
             raise ValueError("Unknown constraint_type")
 

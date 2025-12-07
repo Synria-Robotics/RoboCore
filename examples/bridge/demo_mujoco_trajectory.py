@@ -167,10 +167,11 @@ def plan_trajectory_simple(model, workspace_data, num_waypoints=4):
         
         result = inverse_kinematics(
             model, T_target, q_current,
-            , method='dls',
+            method='dls',
             max_iters=200, pos_tol=1e-4, ori_tol=1e-4,
-            multi_start=3,  # Multiple attempts
-            multi_noise=0.3
+            num_initial_guesses=4,  # Multiple attempts
+            initial_guess_strategy='random',
+            initial_guess_scale=1.0
         )
         
         if result['success']:
@@ -251,7 +252,8 @@ def main():
                                  '../robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
         dof = 6
     else:  # bessica
-        urdf_path = os.path.join(Path(__file__).parent.parent, '../robocore/assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
+        import synriard
+        urdf_path = synriard.get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="urdf")
         dof = 7
     
     model = RobotModel(str(urdf_path))

@@ -50,7 +50,7 @@ def main(args):
     beauty_print(f"Processing {num_batch} joint configuration(s) using {backend} backend")
 
     # Load robot model
-    robot_model = RobotModel(str(args.model_path), end_link=args.end_link)
+    robot_model = RobotModel(str(args.model_path), base_link=args.base_link, end_link=args.end_link)
     if args.verbose:
         robot_model.summary(show_chain=True)
         robot_model.print_tree(show_fixed=True)
@@ -134,6 +134,7 @@ if __name__ == "__main__":
     parser.add_argument('--model-path', type=str,
                         default=model_path,
                         help='Path to URDF file (default: Alicia-D)')
+    parser.add_argument('--base-link', type=str, default='base_link', help='Base link name')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
     parser.add_argument('--joint-angles', type=float, nargs='+', 
                         default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2,

@@ -1,0 +1,178 @@
+"""Bimanual Forward Kinematics Demo
+
+This demo demonstrates bimanual forward kinematics computation for dual-arm systems.
+It shows how to compute FK for both arms independently, with relative constraints, and mirror mode.
+
+Copyright (c) 2025 Synria Robotics Co., Ltd.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+Author: Synria Robotics Team
+Website: https://synriarobotics.ai
+"""
+
+import numpy as np
+import argparse
+import time
+
+import robocore as rc
+from robocore.modeling.robot_model import RobotModel
+from robocore.kinematics.bimanual import bimanual_forward_kinematics
+from robocore.utils.beauty_logger import beauty_print_array, beauty_print
+from robocore.utils.backend import to_numpy
+from robocore.transform.conversions import *
+
+
+def compute_bimanual_fk(left_model, right_model, backend, q_left, q_right, mode='indep'):
+    """Compute bimanual forward kinematics for given backend.
+    
+    :param left_model: Left arm RobotModel
+    :param right_model: Right arm RobotModel
+    :param backend: Backend name ('numpy' or 'torch')
+    :param q_left: Left joint angles in radians
+    :param q_right: Right joint angles in radians
+    :param mode: FK mode ('indep', 'relative', 'mirror')
+    :return: Dictionary with results and computation time
+    """
+    rc.set_backend(backend)
+    start_time = time.time()
+
+    result = bimanual_forward_kinematics(
+        left_model, right_model, q_left, q_right,
+        return_end=True, mode=mode
+    )
+
+    elapsed_time = time.time() - start_time
+
+    T_left = to_numpy(result['left'])
+    T_right = to_numpy(result['right'])
+
+    pos_left = T_left[:3, 3]
+    pos_right = T_right[:3, 3]
+    rot_left = T_left[:3, :3]
+    rot_right = T_right[:3, :3]
+
+    ret = {
+        'left': {
+            'position': pos_left,
+            'rotation': rot_left,
+            'transform': T_left,
+        },
+        'right': {
+            'position': pos_right,
+            'rotation': rot_right,
+            'transform': T_right,
+        },
+        'time': elapsed_time
+    }
+
+    if 'relative' in result:
+        T_rel = to_numpy(result['relative'])
+        ret['relative'] = {
+            'transform': T_rel,
+            'position': T_rel[:3, 3],
+            'rotation': T_rel[:3, :3],
+        }
+
+    if 'mirror' in result:
+        T_mirror = to_numpy(result['mirror'])
+        ret['mirror'] = {
+            'transform': T_mirror,
+            'position': T_mirror[:3, 3],
+            'rotation': T_mirror[:3, :3],
+        }
+
+    return ret
+
+
+def main(args):
+    # Load robot model (Bessica is a dual-arm robot, use same model with different base/end links)
+    left_model = RobotModel(str(args.model_path), base_link=args.left_base_link, end_link=args.left_end_link)
+    right_model = RobotModel(str(args.model_path), base_link=args.right_base_link, end_link=args.right_end_link)
+
+    if args.verbose:
+        beauty_print("Left Arm Model:", type="module")
+        left_model.summary(show_chain=True)
+        beauty_print("Right Arm Model:", type="module")
+        right_model.summary(show_chain=True)
+
+    # Compute with both backends
+    results_np = compute_bimanual_fk(left_model, right_model, 'numpy', 
+                                     args.q_left, args.q_right, mode=args.mode)
+    results_torch = compute_bimanual_fk(left_model, right_model, 'torch', 
+                                       args.q_left, args.q_right, mode=args.mode)
+
+    # Display results
+    beauty_print(f"Left Arm End-Effector Position (m):")
+    pos_left_np = results_np['left']['position']
+    pos_left_torch = results_torch['left']['position']
+    print(f"  NumPy:  {beauty_print_array(pos_left_np)}")
+    print(f"  Torch:  {beauty_print_array(pos_left_torch)}")
+    pos_diff = np.linalg.norm(pos_left_np - pos_left_torch)
+    print(f"  Diff:   {pos_diff:.6e}")
+
+    beauty_print(f"Right Arm End-Effector Position (m):")
+    pos_right_np = results_np['right']['position']
+    pos_right_torch = results_torch['right']['position']
+    print(f"  NumPy:  {beauty_print_array(pos_right_np)}")
+    print(f"  Torch:  {beauty_print_array(pos_right_torch)}")
+    pos_diff = np.linalg.norm(pos_right_np - pos_right_torch)
+    print(f"  Diff:   {pos_diff:.6e}")
+
+    if 'relative' in results_np:
+        beauty_print(f"Relative Transform Position (m):")
+        pos_rel_np = results_np['relative']['position']
+        pos_rel_torch = results_torch['relative']['position']
+        print(f"  NumPy:  {beauty_print_array(pos_rel_np)}")
+        print(f"  Torch:  {beauty_print_array(pos_rel_torch)}")
+        pos_diff = np.linalg.norm(pos_rel_np - pos_rel_torch)
+        print(f"  Diff:   {pos_diff:.6e}")
+
+    if 'mirror' in results_np:
+        beauty_print(f"Mirror Transform Position (m):")
+        pos_mirror_np = results_np['mirror']['position']
+        pos_mirror_torch = results_torch['mirror']['position']
+        print(f"  NumPy:  {beauty_print_array(pos_mirror_np)}")
+        print(f"  Torch:  {beauty_print_array(pos_mirror_torch)}")
+        pos_diff = np.linalg.norm(pos_mirror_np - pos_mirror_torch)
+        print(f"  Diff:   {pos_diff:.6e}")
+
+    beauty_print(f"Computation Time:")
+    print(f"  NumPy:  {results_np['time']*1000:.4f} ms")
+    print(f"  Torch:  {results_torch['time']*1000:.4f} ms")
+    print(f"  Ratio:  {results_torch['time'] / results_np['time']:.2f}x")
+
+
+if __name__ == "__main__":
+    from synriard import get_model_path
+
+    # Bessica is a dual-arm robot
+    model_path = get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="mjcf")
+
+    parser = argparse.ArgumentParser(description="Bimanual Forward Kinematics Demo")
+    parser.add_argument('--model-path', type=str, default=model_path,
+                        help='Path to robot model file (default: Bessica-D)')
+    parser.add_argument('--left-base-link', type=str, default='base_link', help='Left arm base link name')
+    parser.add_argument('--left-end-link', type=str, default='left_arm_link7', help='Left arm end-effector link name')
+    parser.add_argument('--right-base-link', type=str, default='base_link', help='Right arm base link name')
+    parser.add_argument('--right-end-link', type=str, default='right_arm_link7', help='Right arm end-effector link name')
+    parser.add_argument('--q-left', type=float, nargs='+', default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2, 0.1],
+                        help='Left joint angles in radians')
+    parser.add_argument('--q-right', type=float, nargs='+', default=[-0.1, -0.2, 0.3, 0.0, -0.5, 0.2, 0.1],
+                        help='Right joint angles in radians')
+    parser.add_argument('--mode', type=str, default='indep', choices=['indep', 'relative', 'mirror'],
+                        help='FK mode: indep (independent), relative (relative transform), mirror (mirror mode)')
+    parser.add_argument('--verbose', action='store_true', help='Show detailed model information')
+    args = parser.parse_args()
+    main(args)

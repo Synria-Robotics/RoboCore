@@ -263,7 +263,6 @@ class InteractiveDualArmIK:
             target_right=self._gripper_to_link7(self.T_right_target),
             q0_left=self.q_left,
             q0_right=self.q_right,
-,
             method='dls',
             coordination='indep',
             max_iters=15,
@@ -290,7 +289,6 @@ class InteractiveDualArmIK:
             target_right=None,  # right is constrained by T_rel_grasp
             q0_left=self.q_left,
             q0_right=self.q_right,
-,
             method='dls',
             coordination='relative_pose',
             T_rel_grasp=self.T_rel_grasp,
@@ -324,7 +322,6 @@ class InteractiveDualArmIK:
             target_right=T_right_link7,
             q0_left=self.q_left,
             q0_right=self.q_right,
-,
             method='dls',
             coordination='indep',
             max_iters=15,

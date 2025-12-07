@@ -52,15 +52,14 @@ def main(args):
     # PyTorch Kinematics
     with open(model_path, 'rb') as f:
         urdf_bytes = f.read()
-    chain = pk.build_serial_chain_from_urdf(urdf_bytes, end_link, root_link_name='base_link')
+    chain = pk.build_serial_chain_from_urdf(urdf_bytes, end_link)
     n_dof = len(chain.get_joint_parameter_names())
 
     # RoboCore
-    rc_model = RobotModel(model_path, end_link=end_link)
+    rc_model = RobotModel(model_path, base_link=args.base_link, end_link=end_link)
     rc.set_backend('torch', device=args.device)
 
     beauty_print(f"Inverse Kinematics Comparison: PyTorch Kinematics vs RoboCore ({n_dof} DOF)", type="module")
-    beauty_print(f"PyTorch device: {args.device}", type="info")
 
     rng = np.random.default_rng(args.seed)
     device = torch.device(args.device)
@@ -334,15 +333,19 @@ def main(args):
             'ori_err': sol_pk_rand.err_rot[0, best_retry_idx].item(),
         }
 
-        # RoboCore IK (with default adaptive parameters and multiple initial guesses)
-        q0_retries_np = [q.cpu().numpy() for q in retry_configs]  # Convert to list of numpy arrays
+        # RoboCore IK (with new initial guess system)
+        # Use zero as base, let the new system generate initial guesses
+        q0_base = np.zeros(n_dof)
         ik_rc_rand = inverse_kinematics(
-            rc_model, T_target_rand_np, q_init_rand_np,
+            rc_model, T_target_rand_np, q0_base,
             method='dls', max_iters=args.max_iters,
             pos_tol=args.pos_tol, ori_tol=args.ori_tol,
             torch_device=device, torch_dtype=dtype,
             use_analytic_jacobian=True,
-            q0_retries=q0_retries_np,  # Multiple initial guesses
+            num_initial_guesses=args.num_retries,
+            initial_guess_strategy='sobol' if HAS_SCIPY and args.num_retries > 1 else 'random',
+            initial_guess_scale=1.0,
+            random_seed=args.seed,
         )
 
         success_pk.append(ik_pk_rand['success'])
@@ -385,6 +388,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Inverse Kinematics validation with Pytorch Kinematics")
     parser.add_argument('--model-path', type=str, default=model_path,
                         help='Path to URDF file (default: Alicia-D)')
+    parser.add_argument('--base-link', type=str, default='world', help='Base link name')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
     parser.add_argument('--end-pose', type=float, nargs='+', 
                         default=[0.17006, 0.01704, 0.20533, 0.042114, 0.828366, 0.083037, 0.552396],

@@ -119,51 +119,88 @@ def compute_condition_statistics(model, rng, samples, method='analytic', device=
     beauty_print(f"  Min:    {np.min(condition_numbers):.2e}")
 
 
-def main(args):
-    model = RobotModel(args.model_path, end_link=args.end_link)
+def compute_jacobian_results(robot_model, backend, q, device=None):
+    """Compute Jacobian results for given backend.
+    
+    :param robot_model: RobotModel instance
+    :param backend: Backend name ('numpy' or 'torch')
+    :param q: Joint configuration
+    :param device: Device for torch backend
+    :return: Dictionary with Jacobian matrices and computation time
+    """
+    rc.set_backend(backend)
+    if backend == 'torch' and device is None:
+        import torch
+        device = torch.device('cpu')
+        rc.set_backend('torch', device=str(device))
 
-    beauty_print(f"Jacobian Validation: {model.name} ({model.num_dof} DOF)", type="module")
+    start_time = time.perf_counter()
+    Ja = jacobian(robot_model, q, method='analytic', device=device)
+    time_analytic = (time.perf_counter() - start_time) * 1000
+
+    start_time = time.perf_counter()
+    Jn = jacobian(robot_model, q, method='numeric', device=device)
+    time_numeric = (time.perf_counter() - start_time) * 1000
+
+    return {
+        'Ja': Ja,
+        'Jn': Jn,
+        'time_analytic': time_analytic,
+        'time_numeric': time_numeric
+    }
+
+
+def main(args):
+    robot_model = RobotModel(args.model_path, base_link=args.base_link, end_link=args.end_link)
+    beauty_print(f"Jacobian Validation: {robot_model.name} ({robot_model.num_dof} DOF)", type="module")
 
     rng = np.random.default_rng(args.seed)
+    q = np.zeros(robot_model.num_chain_dof)
 
-    # Setup backend
-    if args.backend == 'numpy':
-        rc.set_backend('numpy')
-        device = None
-        q = np.zeros(model.num_chain_dof)
-        methods = ['analytic', 'numeric']
-        title = "[1] Analytic vs Numeric Jacobian (NumPy)"
-        n_runs = 100
-    else:
-        import torch
-        device = torch.device(args.device)
-        rc.set_backend('torch', device=str(device))
-        q = torch.zeros(model.num_chain_dof, dtype=torch.float64, device=device)
-        methods = ['analytic', 'numeric', 'autograd']
-        title = "[1] Analytic vs Numeric vs Autograd Jacobian (PyTorch)"
-        n_runs = 100
-
-    beauty_print(title, type="module", centered=False)
-    
     beauty_print(f"Joint configuration (rad):")
-    q_display = q.cpu().numpy() if hasattr(q, 'cpu') else q
-    print(f"  q = {beauty_print_array(q_display)}")
+    print(f"  q = {beauty_print_array(q)}")
 
-    # Compute Jacobians
-    Ja = jacobian(model, q, method='analytic', device=device)
-    Jn = jacobian(model, q, method='numeric', device=device)
-    Jg = jacobian(model, q, method='autograd', device=device) if 'autograd' in methods else None
+    # Compute with both backends
+    results_np = compute_jacobian_results(robot_model, 'numpy', q)
+    import torch
+    device = torch.device(args.device)
+    q_torch = torch.zeros(robot_model.num_chain_dof, dtype=torch.float64, device=device)
+    results_torch = compute_jacobian_results(robot_model, 'torch', q_torch, device)
 
-    # Print comparison
-    print_jacobian_comparison(Ja, Jn, Jg)
+    # Convert to numpy for comparison
+    Ja_np_np = to_numpy(results_np['Ja'])
+    Jn_np_np = to_numpy(results_np['Jn'])
+    Ja_torch_np = to_numpy(results_torch['Ja'])
+    Jn_torch_np = to_numpy(results_torch['Jn'])
 
-    # Timing
-    beauty_print("[2] Performance comparison", type="module", centered=False)
-    benchmark_jacobian(model, q, methods, n_runs, device=device)
+    beauty_print("[1] Jacobian Comparison (NumPy vs Torch)", type="module", centered=False)
+    beauty_print(f"Jacobian shape: {Ja_np_np.shape}")
+    beauty_print(f"Condition number (NumPy): {np.linalg.cond(Ja_np_np):.2e}")
+    beauty_print(f"Condition number (Torch): {np.linalg.cond(Ja_torch_np):.2e}")
 
-    # Condition number statistics
-    beauty_print(f"[3] Condition number across {args.samples} random configurations", type="module", centered=False)
-    compute_condition_statistics(model, rng, args.samples, method='analytic', device=device)
+    beauty_print(f"Analytic Jacobian (NumPy):")
+    print(beauty_print_array(Ja_np_np, precision=6))
+    beauty_print(f"Analytic Jacobian (Torch):")
+    print(beauty_print_array(Ja_torch_np, precision=6))
+
+    diff_analytic = Ja_np_np - Ja_torch_np
+    diff_numeric = Jn_np_np - Jn_torch_np
+    beauty_print("NumPy vs Torch (Analytic):")
+    beauty_print(f"  Max difference:        {np.max(np.abs(diff_analytic)):.3e}")
+    beauty_print(f"  Frobenius norm:        {np.linalg.norm(diff_analytic, 'fro'):.3e}")
+    beauty_print("NumPy vs Torch (Numeric):")
+    beauty_print(f"  Max difference:        {np.max(np.abs(diff_numeric)):.3e}")
+    beauty_print(f"  Frobenius norm:        {np.linalg.norm(diff_numeric, 'fro'):.3e}")
+
+    beauty_print("[2] Performance Comparison", type="module", centered=False)
+    beauty_print("Analytic:")
+    print(f"  NumPy:  {results_np['time_analytic']:.4f} ms")
+    print(f"  Torch:  {results_torch['time_analytic']:.4f} ms")
+    print(f"  Ratio:  {results_torch['time_analytic'] / results_np['time_analytic']:.2f}x")
+    beauty_print("Numeric:")
+    print(f"  NumPy:  {results_np['time_numeric']:.4f} ms")
+    print(f"  Torch:  {results_torch['time_numeric']:.4f} ms")
+    print(f"  Ratio:  {results_torch['time_numeric'] / results_np['time_numeric']:.2f}x")
 
     beauty_print("✓ Jacobian validation complete", type="success")
 
@@ -174,7 +211,8 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description="Jacobian validation")
     parser.add_argument('--model-path', type=str, default=model_path, help='Path to URDF file (default: Alicia-D)')
-    parser.add_argument('--backend', choices=['numpy', 'torch'], default='numpy', help='Backend to test')
+    parser.add_argument('--backend', choices=['numpy', 'torch'], default='numpy', help='Backend to test (ignored - both are tested)')
+    parser.add_argument('--base-link', type=str, default='base_link', help='Base link name')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')    
     parser.add_argument('--device', default='cpu', help='PyTorch device (if torch backend)')
     parser.add_argument('--samples', type=int, default=10, help='Number of test configurations')
@@ -195,28 +233,28 @@ if __name__ == '__main__':
     [RoboCore:INFO] Condition number: 6.76e+02
     [RoboCore:INFO] Jacobian Matrix (Analytic):
     [
-    [+0.000102  -0.027725  +0.195946  -0.000347  +0.037936  +0.000000]
-    [+0.220999  +0.000044  -0.000312  +0.003851  -0.000060  +0.000000]
-    [-0.000000  +0.220999  +0.198407  -0.000354  +0.043381  -0.000000]
-    [+0.000000  -0.001593  -0.001593  -0.707106  -0.001593  -0.707106]
-    [+0.000000  -0.999999  -0.999999  +0.001126  -0.999999  +0.001126]
+    [+0.000250  +0.027725  -0.195946  +0.000354  -0.037936  -0.000000]
+    [-0.220999  +0.000000  -0.000000  -0.003850  +0.000000  +0.000000]
+    [+0.000000  +0.220999  +0.198407  -0.000354  +0.043381  +0.000000]
+    [+0.000000  -0.000000  -0.000000  +0.707107  -0.000000  +0.707107]
+    [+0.000000  +1.000000  +1.000000  +0.000000  +1.000000  -0.000000]
     [+1.000000  -0.000000  -0.000000  +0.707107  -0.000000  +0.707107]
     ]
     [RoboCore:INFO] Jacobian Matrix (Numeric):
     [
-    [+0.000102  -0.027725  +0.195946  -0.000347  +0.037936  +0.000000]
-    [+0.220999  +0.000044  -0.000312  +0.003851  -0.000060  +0.000000]
+    [+0.000250  +0.027725  -0.195946  +0.000354  -0.037936  +0.000000]
+    [-0.220999  +0.000000  +0.000000  -0.003850  +0.000000  +0.000000]
     [+0.000000  +0.220999  +0.198407  -0.000354  +0.043381  +0.000000]
-    [+0.000000  -0.001593  -0.001593  -0.707106  -0.001593  -0.707106]
-    [+0.000000  -0.999999  -0.999999  +0.001126  -0.999999  +0.001126]
-    [+1.000000  +0.000000  -0.000000  +0.707107  -0.000000  +0.707107]
+    [-0.000000  -0.000000  -0.000000  +0.707107  -0.000000  +0.707107]
+    [+0.000000  +1.000000  +1.000000  +0.000000  +1.000000  +0.000000]
+    [+1.000000  -0.000000  +0.000000  +0.707107  -0.000000  +0.707107]
     ]
     [RoboCore:INFO] Analytic vs Numeric:
-    [RoboCore:INFO]   Max difference:        4.147e-08
-    [RoboCore:INFO]   Frobenius norm:        8.305e-08
+    [RoboCore:INFO]   Max difference:        4.734e-08
+    [RoboCore:INFO]   Frobenius norm:        1.160e-07
     [RoboCore:MODULE] [2] Performance comparison
-    [RoboCore:INFO] Analytic   0.1212 ms
-    [RoboCore:INFO] Numeric    2.0630 ms
+    [RoboCore:INFO] Analytic   0.3209 ms
+    [RoboCore:INFO] Numeric    2.2604 ms
     [RoboCore:MODULE] [3] Condition number across 10 random configurations
     [RoboCore:INFO] Condition number statistics:
     [RoboCore:INFO]   Mean:   1.02e+02

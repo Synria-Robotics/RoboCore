@@ -27,7 +27,7 @@ import time
 import argparse
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 from robocore.modeling import RobotModel
 from robocore.kinematics import forward_kinematics, inverse_kinematics, jacobian
@@ -78,7 +78,7 @@ def cmd_performance(args, model):
     beauty_print(f"FK runs: {args.fk_runs}", type="info")
     
     # FK benchmark
-    beauty_print("Forward Kinematics")
+    beauty_print("Forward Kinematics (Single Configuration)")
     time_np = benchmark_fk(model, q, 'numpy', n_runs=args.fk_runs)
     beauty_print(f"  NumPy: {time_np:.4f} ms")
     
@@ -122,17 +122,20 @@ def summarize(name, stats):
 def cmd_ik_compare(args, model):
     """Run IK methods comparison."""
     beauty_print("IK Methods Comparison", type="module", centered=True)
-    
-    rng = np.random.default_rng(args.seed)
-    
+
     beauty_print(f"Samples: {args.samples}, Methods: {args.methods}, Backends: {args.backends}", type="info")
     beauty_print(f"Tolerances: pos={args.pos_tol:.1e}, ori={args.ori_tol:.1e}", type="info")
-    if args.multi_start > 0:
-        beauty_print(f"Multi-start: {args.multi_start} restarts, noise={args.multi_noise}", type="info")
+    beauty_print(f"Initial guesses: {args.num_inits} using strategy '{args.init_strategy}'", type="info")
     
-    # Generate test cases
-    qs = [model.random_q(rng) for _ in range(args.samples)]
-    poses = [model.fk(q)['end'] for q in qs]
+    # Generate test cases using batch processing
+    # Use numpy backend to generate poses (consistent across all backends)
+    robocore.set_backend('numpy')
+    qs = model.random_q_batch(args.samples, seed=args.seed)
+    poses = forward_kinematics(model, qs, return_end=True)
+    # Ensure poses is 3D: [batch_size, 4, 4]
+    if poses.ndim == 2:
+        poses = poses[np.newaxis, ...]
+    batch_size = poses.shape[0]
     
     # Build test matrix
     tests = []
@@ -166,30 +169,40 @@ def cmd_ik_compare(args, model):
         else:
             robocore.set_backend(backend)
 
-        for pose in poses:
-            q0 = np.zeros(model.num_chain_dof)
+        # Use batch IK processing with smart initial guesses
+        # Generate initial guess (zero for single guess, or use strategy for multiple)
+        if args.num_inits == 1 and args.init_strategy == 'zero':
+            q0_batch = np.zeros((batch_size, model.num_chain_dof))
+        else:
+            # For multiple guesses, we'll use a single zero as base (the new system will generate the rest)
+            q0_batch = np.zeros((batch_size, model.num_chain_dof))
 
-            t0 = time.perf_counter()
-            try:
-                res = inverse_kinematics(
-                    model, pose, q0,
-                    method=method,
-                    pos_tol=args.pos_tol,
-                    ori_tol=args.ori_tol,
-                    multi_start=args.multi_start,
-                    multi_noise=args.multi_noise,
-                    **extra,
-                )
-            except Exception as e:
-                print(f"  {name} error: {e}")
-                continue
-            
-            dt = time.perf_counter() - t0
-            
+        t0 = time.perf_counter()
+        try:
+            results_batch = inverse_kinematics(
+                model, poses, q0_batch,
+                method=method,
+                pos_tol=args.pos_tol,
+                ori_tol=args.ori_tol,
+                num_initial_guesses=args.num_inits,
+                initial_guess_strategy=args.init_strategy,
+                initial_guess_scale=args.init_scale,
+                random_seed=args.seed,
+                **extra,
+            )
+        except Exception as e:
+            print(f"  {name} error: {e}")
+            continue
+
+        dt_total = time.perf_counter() - t0
+        dt_per_sample = dt_total / batch_size
+
+        # Extract statistics from batch results
+        for res in results_batch:
             stats['iters'].append(res.get('iters', 0))
             stats['pos_err'].append(res.get('pos_err', np.nan))
             stats['ori_err'].append(res.get('ori_err', np.nan))
-            stats['time'].append(dt)
+            stats['time'].append(dt_per_sample)
             stats['success'].append(1.0 if res.get('success') else 0.0)
         
         results[name] = stats
@@ -281,8 +294,10 @@ def benchmark_fk_torch_batch(model, q_batch: np.ndarray, device: str = 'cpu', wa
     }
 
 
-def benchmark_ik_batch(model, target_poses: np.ndarray, q0_batch: np.ndarray,
-                       backend: str, device: str = 'cpu', method: str = 'dls') -> Dict:
+def benchmark_ik_batch(model, target_poses: np.ndarray, q0_batch: Optional[np.ndarray],
+                       backend: str, device: str = 'cpu', method: str = 'dls',
+                       num_initial_guesses: int = 1, initial_guess_strategy: str = 'random',
+                       initial_guess_scale: float = 1.0, random_seed: int = 42) -> Dict:
     """Benchmark IK batch computation."""
     batch_size = target_poses.shape[0]
 
@@ -292,18 +307,30 @@ def benchmark_ik_batch(model, target_poses: np.ndarray, q0_batch: np.ndarray,
     else:
         robocore.set_backend('numpy')
 
-    # Warmup
+    # Warmup - don't pass q0_batch to use automatic initial guess generation
     warmup_size = min(5, batch_size)
     warmup_poses = target_poses[:warmup_size]
-    warmup_q0 = q0_batch[:warmup_size]
-    _ = inverse_kinematics(model, warmup_poses, warmup_q0, method=method)
+    _ = inverse_kinematics(
+        model, warmup_poses, method=method,
+        num_initial_guesses=num_initial_guesses,
+        initial_guess_strategy=initial_guess_strategy,
+        initial_guess_scale=initial_guess_scale,
+        random_seed=random_seed,
+    )
 
     if backend == 'torch' and _HAS_TORCH and device.startswith('cuda'):
         torch.cuda.synchronize()
 
-    # Benchmark
+    # Benchmark - don't pass q0_batch to use automatic initial guess generation
+    # This allows Torch to use true batch processing with _solve_batch
     start_time = time.perf_counter()
-    results = inverse_kinematics(model, target_poses, q0_batch, method=method)
+    results = inverse_kinematics(
+        model, target_poses, method=method,
+        num_initial_guesses=num_initial_guesses,
+        initial_guess_strategy=initial_guess_strategy,
+        initial_guess_scale=initial_guess_scale,
+        random_seed=random_seed,
+    )
     if backend == 'torch' and _HAS_TORCH and device.startswith('cuda'):
         torch.cuda.synchronize()
     end_time = time.perf_counter()
@@ -400,37 +427,6 @@ def cmd_parallel(args, model):
         beauty_print(f"  Throughput: {result_torch_cuda['throughput']:.2f} samples/s")
         speedup = result_np['total_time'] / result_torch_cuda['total_time']
         beauty_print(f"  Speedup over NumPy: {speedup:.2f}x", type="success")
-    
-    # ========== Inverse Kinematics ==========
-    if args.include_ik:
-        beauty_print("Inverse Kinematics", type="module", centered=True)
-
-        # Generate target poses from FK
-        target_poses = []
-        for q in q_batch[:min(50, args.batch_size)]:  # Limit IK batch size for speed
-            T = forward_kinematics(model, q, return_end=True)
-            target_poses.append(T)
-        target_poses = np.array(target_poses)
-        q0_batch = np.zeros((len(target_poses), model.num_chain_dof))
-
-        # NumPy IK
-        beauty_print("NumPy (Batch Interface)")
-        result_ik_np = benchmark_ik_batch(model, target_poses, q0_batch, 'numpy', method='dls')
-        beauty_print(f"  Total time: {result_ik_np['total_time']:.4f} s")
-        beauty_print(f"  Avg time: {result_ik_np['avg_time']*1000:.4f} ms/sample")
-        beauty_print(f"  Throughput: {result_ik_np['throughput']:.2f} samples/s")
-        beauty_print(f"  Success rate: {result_ik_np['success_rate']*100:.1f}%")
-
-        # PyTorch IK
-        if _HAS_TORCH and 'torch-cpu' in args.backends:
-            beauty_print("PyTorch CPU (Batch)")
-            result_ik_torch = benchmark_ik_batch(model, target_poses, q0_batch, 'torch', 'cpu', method='dls')
-            beauty_print(f"  Total time: {result_ik_torch['total_time']:.4f} s")
-            beauty_print(f"  Avg time: {result_ik_torch['avg_time']*1000:.4f} ms/sample")
-            beauty_print(f"  Throughput: {result_ik_torch['throughput']:.2f} samples/s")
-            beauty_print(f"  Success rate: {result_ik_torch['success_rate']*100:.1f}%")
-            speedup = result_ik_np['total_time'] / result_ik_torch['total_time']
-            beauty_print(f"  Speedup over NumPy: {speedup:.2f}x", type="success" if speedup > 1 else "info")
 
     # ========== Jacobian ==========
     if args.include_jacobian:
@@ -452,6 +448,49 @@ def cmd_parallel(args, model):
             beauty_print(f"  Throughput: {result_jac_torch['throughput']:.2f} samples/s")
             speedup = result_jac_np['total_time'] / result_jac_torch['total_time']
             beauty_print(f"  Speedup over NumPy: {speedup:.2f}x", type="success" if speedup > 1 else "info")
+
+
+    # ========== Inverse Kinematics ==========
+    if args.include_ik:
+        beauty_print("Inverse Kinematics", type="module", centered=True)
+
+        # Generate target poses from FK using batch processing
+        ik_batch_size = min(50, args.batch_size)  # Limit IK batch size for speed
+        q_ik_batch = q_batch[:ik_batch_size]
+        target_poses = forward_kinematics(model, q_ik_batch, return_end=True)
+        # Ensure target_poses is 3D: [batch_size, 4, 4]
+        if target_poses.ndim == 2:
+            target_poses = target_poses[np.newaxis, ...]
+        # Don't pass q0_batch - let system generate initial guesses automatically
+        # This allows Torch to use true batch processing with _solve_batch
+
+        # NumPy IK
+        beauty_print("NumPy (Batch Interface)")
+        result_ik_np = benchmark_ik_batch(
+            model, target_poses, None, 'numpy', method='dls',
+            num_initial_guesses=1, initial_guess_strategy='random',
+            initial_guess_scale=1.0, random_seed=42
+        )
+        beauty_print(f"  Total time: {result_ik_np['total_time']:.4f} s")
+        beauty_print(f"  Avg time: {result_ik_np['avg_time']*1000:.4f} ms/sample")
+        beauty_print(f"  Throughput: {result_ik_np['throughput']:.2f} samples/s")
+        beauty_print(f"  Success rate: {result_ik_np['success_rate']*100:.1f}%")
+
+        # PyTorch IK
+        if _HAS_TORCH and 'torch-cpu' in args.backends:
+            beauty_print("PyTorch CPU (Batch)")
+            result_ik_torch = benchmark_ik_batch(
+                model, target_poses, None, 'torch', 'cpu', method='dls',
+                num_initial_guesses=1, initial_guess_strategy='random',
+                initial_guess_scale=1.0, random_seed=42
+            )
+            beauty_print(f"  Total time: {result_ik_torch['total_time']:.4f} s")
+            beauty_print(f"  Avg time: {result_ik_torch['avg_time']*1000:.4f} ms/sample")
+            beauty_print(f"  Throughput: {result_ik_torch['throughput']:.2f} samples/s")
+            beauty_print(f"  Success rate: {result_ik_torch['success_rate']*100:.1f}%")
+            speedup = result_ik_np['total_time'] / result_ik_torch['total_time']
+            beauty_print(f"  Speedup over NumPy: {speedup:.2f}x", type="success" if speedup > 1 else "info")
+
 
     beauty_print("✓ Parallel benchmark complete", type="success")
 
@@ -478,9 +517,10 @@ def main(args):
             torch_device = args.torch_device
             samples = 100
             methods = ['pinv', 'dls']
-            backends = ['numpy', 'torch']
-            multi_start = 0
-            multi_noise = 0.3
+            backends = ['numpy', 'torch-cpu']
+            num_inits = 1
+            init_strategy = 'random'
+            init_scale = 1.0
             pos_tol = 1e-4
             ori_tol = 1e-4
             torch_dtype = None
@@ -532,13 +572,16 @@ if __name__ == '__main__':
                            help='IK methods to test (pinv, dls, transpose)')
     parser_ik.add_argument('--backends', nargs='+', default=['numpy', 'torch'],
                            help='Backends to test')
-    parser_ik.add_argument('--multi-start', type=int, default=0,
-                           help='Number of random restarts (0 to disable)')
-    parser_ik.add_argument('--multi-noise', type=float, default=0.3,
-                           help='Noise scale for restarts (radians)')
-    parser_ik.add_argument('--pos-tol', type=float, default=1e-4,
+    parser_ik.add_argument('--num-inits', type=int, default=1,
+                           help='Number of initial guesses to try per target (default: 1)')
+    parser_ik.add_argument('--init-strategy', type=str, default='random',
+                           choices=['zero', 'random', 'sobol', 'latin', 'center', 'uniform'],
+                           help='Strategy for generating initial guesses (default: random)')
+    parser_ik.add_argument('--init-scale', type=float, default=1.0,
+                           help='Scale factor for joint limits when generating guesses (0.0 to 1.0, default: 1.0)')
+    parser_ik.add_argument('--pos-tol', type=float, default=1e-3,
                            help='Position tolerance (m)')
-    parser_ik.add_argument('--ori-tol', type=float, default=1e-4,
+    parser_ik.add_argument('--ori-tol', type=float, default=1e-3,
                            help='Orientation tolerance (rad)')
     parser_ik.add_argument('--torch_device', type=str, default='cpu',
                            help='PyTorch device (cpu, cuda)')

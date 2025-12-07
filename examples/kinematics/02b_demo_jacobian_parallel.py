@@ -36,21 +36,17 @@ def main(args):
     backend = args.backend
     rc.set_backend(backend)
 
-    # Parse joint configurations
-    joint_configs = args.joint_angles
-    if isinstance(joint_configs[0], list):
-        pass
-    else:
-        joint_configs = [joint_configs]
-
-    num_batch = len(joint_configs)
-    beauty_print(f"Processing {num_batch} joint configuration(s) using {backend} backend")
-
     # Load robot model
-    robot_model = RobotModel(str(args.model_path), end_link=args.end_link)
+    robot_model = RobotModel(str(args.model_path), base_link=args.base_link, end_link=args.end_link)
     if args.verbose:
         robot_model.summary(show_chain=True)
         robot_model.print_tree(show_fixed=True)
+
+    # Generate random joint configurations
+    beauty_print("Generating Random Joint Configurations", type="module", centered=True)
+    joint_configs = robot_model.random_q_batch(args.num_configs, seed=args.seed, scale=args.scale)
+    beauty_print(f"Generated {args.num_configs} random joint configuration(s)")
+    num_batch = args.num_configs
 
     # Single Jacobian example
     beauty_print("Single Jacobian Example", type="module", centered=True)
@@ -101,32 +97,18 @@ if __name__ == "__main__":
     
     model_path = get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="urdf")
 
-    parser = argparse.ArgumentParser(
-        description="Jacobian Parallel Demo - Batch Jacobian computation",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Use default configurations
-  python 01e_demo_jacobian_parallel.py
-
-  # Use torch backend for better batch performance
-  python 01e_demo_jacobian_parallel.py --backend torch
-
-  # Show detailed results
-  python 01e_demo_jacobian_parallel.py --show-details --show-matrix
-        """
-    )
+    parser = argparse.ArgumentParser(description="Jacobian Parallel Demo - Batch Jacobian computation")
     parser.add_argument('--model-path', type=str,
                         default=model_path,
                         help='Path to URDF file (default: Alicia-D)')
+    parser.add_argument('--base-link', type=str, default='base_link', help='Base link name')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
-    parser.add_argument('--joint-angles', type=float, nargs='+', 
-                        default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2,
-                                 0.2, 0.3, -0.4, 0.1, 0.6, -0.3,
-                                 0.0, 0.1, -0.2, 0.0, 0.4, -0.1],
-                        help='Joint angles in radians (flattened list, will be reshaped)')
-    parser.add_argument('--num-joints', type=int, default=6,
-                        help='Number of joints per configuration (default: 6)')
+    parser.add_argument('--num-configs', type=int, default=1000,
+                        help='Number of random joint configurations to generate (default: 1000)')
+    parser.add_argument('--seed', type=int, default=None,
+                        help='Random seed for reproducibility (default: None)')
+    parser.add_argument('--scale', type=float, default=0.8,
+                        help='Scaling factor for joint range sampling (0.0 to 1.0, default: 0.8)')
     parser.add_argument('--backend', type=str, default='torch',
                         choices=['numpy', 'torch'],
                         help='Backend to use for computation (default: torch)')
@@ -140,16 +122,6 @@ Examples:
     parser.add_argument('--show-matrix', action='store_true',
                         help='Show full Jacobian matrices')
     args = parser.parse_args()
-    
-    # Reshape joint angles into list of configurations
-    num_joints = args.num_joints
-    joint_angles_flat = args.joint_angles
-    if len(joint_angles_flat) % num_joints != 0:
-        raise ValueError(f"Total number of joint angles ({len(joint_angles_flat)}) must be divisible by num-joints ({num_joints})")
-    
-    num_batch = len(joint_angles_flat) // num_joints
-    args.joint_angles = [joint_angles_flat[i*num_joints:(i+1)*num_joints] 
-                        for i in range(num_batch)]
-    
+
     main(args)
 

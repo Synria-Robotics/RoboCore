@@ -8,14 +8,14 @@ Copyright (c) 2025 Synria Robotics Co., Ltd.
 
 import sys
 from robocore.bridge.sim.mujoco.interactive_dual_arm import InteractiveDualArmIK
-from robocore.utils.path import get_robocore_path
+from synriard import get_model_path
 
 
 def main():
     """Demo 1: Independent dual-arm IK control."""
     
-    # Model paths
-    mjcf_path = get_robocore_path("assets/robot_descriptions/mjcf/Bessica_D_v1_0/Bessica_D_Covered_Interactive.xml")
+    # Model path (Bessica is a dual-arm robot)
+    mjcf_path = get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="mjcf")
     
     # End-effector links
     left_end = "left_arm_link7"

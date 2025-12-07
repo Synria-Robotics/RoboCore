@@ -473,7 +473,7 @@ if __name__ == '__main__':
         if args.robot == "alicia":
             mjcf_path = synriard.get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="mjcf")
         else:
-            mjcf_path = synriard.get_model_path("Bessica_D", version="v1_0", variant="covered", model_format="mjcf")
+            mjcf_path = synriard.get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="mjcf")
         
     # Servo limits
     servo_limits = {}

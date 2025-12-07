@@ -69,6 +69,8 @@ class RobotModel:
         self._load_mesh_info()
         self._load_link_info()
 
+        # Track if base_link was explicitly set
+        self._base_link_explicitly_set = base_link is not None
         self.base_link = base_link or self.real_link[0]
         self.end_link = end_link or self.real_link[-1]
         self._build_graph()
@@ -87,7 +89,7 @@ class RobotModel:
         # Only print load message if this is not from spawn_chain (heuristic: explicit _parsed means spawned)
         if _parsed is None:
             beauty_print(f"📦 Loading robot model from: {self.model_path}")
-            beauty_print(f"✓ Robot loaded: {self.num_dof} DOF, end_link={self.end_link}", type="success")
+            beauty_print(f"✓ Robot loaded: {self.num_dof} DOF, base_link={self.base_link}, end_link={self.end_link}", type="success")
 
     def _load_model(self, _parsed: Optional[Dict[str, Any]] = None):
         self.parsed_model: Dict[str, Any] | None = _parsed
@@ -169,20 +171,36 @@ class RobotModel:
             self._graph.setdefault(j.parent, []).append(j)
 
     def _build_chain(self):
-        # Check if world_to_base_joint exists - if so, start from world instead of base_link
-        # This ensures we include the world_to_base transformation in the kinematic chain
+        # Check if world_to_base_joint exists
+        # If base_link is explicitly set to 'world', don't use world_to_base_joint
+        # Otherwise, if base_link is not specified (defaults to first link), use world_to_base_joint if it exists
         world_to_base_joint = None
+        base_link_explicitly_set = hasattr(self, '_base_link_explicitly_set') and self._base_link_explicitly_set
+
+        # Find world_to_base_joint
         for j in self.parsed_model.joints:
-            if j.name == 'world_to_base_joint' and j.parent == 'world' and j.child == self.base_link:
-                world_to_base_joint = j
-                break
+            if j.name == 'world_to_base_joint' and j.parent == 'world':
+                # Check if this joint's child matches our base_link
+                if j.child == self.base_link:
+                    world_to_base_joint = j
+                    break
+                # If base_link was not explicitly set, use the first world child as base
+                elif not base_link_explicitly_set:
+                    world_to_base_joint = j
+                    # Update base_link to match world_to_base_joint's child
+                    self.base_link = j.child
+                    break
 
         # Determine the actual root link for chain building
-        if world_to_base_joint is not None:
+        # If base_link is explicitly set to 'world', use world as root (includes world_to_base_joint)
+        # Otherwise, use base_link as root (results relative to base_link, not world)
+        if self.base_link == 'world' and world_to_base_joint is not None:
             # Start from world to include world_to_base_joint transformation
             chain_root = 'world'
         else:
-            # Use base_link as before
+            # Use base_link as root (results will be relative to base_link)
+            # If world_to_base_joint exists but base_link != 'world',
+            # we don't include it in the chain (results relative to base_link)
             chain_root = self.base_link
 
         # Linearize active chain and collect actuated joints
@@ -573,8 +591,11 @@ class RobotModel:
 
     def ik(self, target_pose: List[List[float]], q_initial: Optional[Sequence[float]] = None,
            method: str = 'pinv', max_iters: int = 120,
-           pos_tol: float = 1e-4, ori_tol: float = 1e-4, multi_start: int = 0,
-           multi_noise: float = 0.3, random_seed: Optional[int] = None,
+           pos_tol: float = 1e-4, ori_tol: float = 1e-4,
+           num_initial_guesses: int = 1,
+           initial_guess_strategy: str = 'zero',
+           initial_guess_scale: float = 1.0,
+           random_seed: Optional[int] = None,
            torch_device: Optional[str] = None, torch_dtype: Optional[Any] = None,
            **solver_kwargs) -> Dict[str, Any]:
         """Compute IK for the robot model.
@@ -584,8 +605,9 @@ class RobotModel:
         :param max_iters: maximum iterations.
         :param pos_tol: position tolerance (meters).
         :param ori_tol: orientation tolerance (radians).
-        :param multi_start: extra random restarts count (0 disable)
-        :param multi_noise: gaussian noise scale (radians) for restarts
+        :param num_initial_guesses: Number of initial guesses to try (default: 1)
+        :param initial_guess_strategy: Strategy for generating guesses - 'zero'|'random'|'sobol'|'latin'|'center'|'uniform' (default: 'zero')
+        :param initial_guess_scale: Scale factor for joint limits when generating guesses (0.0 to 1.0, default: 1.0)
         :param random_seed: seed for reproducibility
         :param torch_device: specify torch device (uses global backend setting)
         :param torch_dtype: specify torch dtype (uses global backend setting)
@@ -604,8 +626,9 @@ class RobotModel:
             max_iters=max_iters,
             pos_tol=pos_tol,
             ori_tol=ori_tol,
-            multi_start=multi_start,
-            multi_noise=multi_noise,
+            num_initial_guesses=num_initial_guesses,
+            initial_guess_strategy=initial_guess_strategy,
+            initial_guess_scale=initial_guess_scale,
             random_seed=random_seed,
             torch_device=torch_device,
             torch_dtype=torch_dtype,
@@ -1088,15 +1111,14 @@ class RobotModel:
         beauty_print(title, type="module", centered=True)
         # beauty_print(f"Name: {self.parsed_model.name}")
         beauty_print(f"File: {self.model_path}")
-        beauty_print(f"DOF: {self.num_dof}  |  End Link: {self.end_link}")
-        beauty_print(f"Base Link: {self.base_link}")
-        beauty_print(f"Actuated Joints: {self.joint_list}")
+        beauty_print(f"DOF: {self.num_dof}  |  Base Link: {self.base_link}  |  End Link: {self.end_link}")
+        # beauty_print(f"Actuated Joints: {self._chain_actuated}")
 
         if show_chain:
             beauty_print("Actuated Chain Details:")
             for j in self._chain_actuated:
                 limit_str = f"[{j.limit_lower:.3f}, {j.limit_upper:.3f}]" if j.limit_lower and j.limit_lower is not None else "unlimited"
-                beauty_print(
+                print(
                     f"  [{j.index}] {j.name} ({j.joint_type})\n"
                     f"      parent: {j.parent} -> child: {j.child}\n"
                     f"      axis: {beauty_print_array(j.axis)}  limits: {limit_str}"
@@ -1257,26 +1279,29 @@ class BimanualRobotModel(RobotModel):
            *, method: str = 'dls',
            coordination: str = 'indep',
            T_rel_grasp=None, T_left_initial=None, T_right_initial=None,
+           num_initial_guesses: int = 1,
+           initial_guess_strategy: str = 'random',
+           initial_guess_scale: float = 1.0,
+           random_seed: Optional[int] = None,
            **kwargs) -> Dict[str, Any]:
         """Compute inverse kinematics for both arms.
         
-        :param target_left: Left arm target pose (4x4)
-        :param target_right: Right arm target pose (4x4)
-        :param q0_left: Initial left configuration
-        :param q0_right: Initial right configuration
+        :param target_left: Left arm target pose (4x4) or [B, 4, 4]
+        :param target_right: Right arm target pose (4x4) or [B, 4, 4]
+        :param q0_left: Initial left configuration (optional, used as base for strategies)
+        :param q0_right: Initial right configuration (optional, used as base for strategies)
         :param method: 'dls'|'pinv'|'transpose'
-        :param coordination: 'indep'|'relative_pose'|'mirror'
+        :param coordination: 'indep'|'relative_pose'|'relative_pos'|'relative_ori'|'mirror'
         :param T_rel_grasp: Relative grasp transform (for relative_pose mode)
         :param T_left_initial: Left initial reference (for mirror mode)
         :param T_right_initial: Right initial reference (for mirror mode)
+        :param num_initial_guesses: Number of initial guesses to try (default: 1)
+        :param initial_guess_strategy: Strategy - 'zero'|'random'|'sobol'|'latin'|'center'|'uniform'
+        :param initial_guess_scale: Scale factor for joint limits (0.0 to 1.0)
+        :param random_seed: Seed for reproducibility
         :return: Dict with 'q_left', 'q_right', 'success_left', 'success_right'
         """
         from robocore.kinematics.bimanual import bimanual_inverse_kinematics
-
-        if q0_left is None:
-            q0_left = [0.0] * self.left_model.num_chain_dof
-        if q0_right is None:
-            q0_right = [0.0] * self.right_model.num_chain_dof
 
         return bimanual_inverse_kinematics(
             self.left_model, self.right_model,
@@ -1286,6 +1311,10 @@ class BimanualRobotModel(RobotModel):
             T_rel_grasp=T_rel_grasp,
             T_left_initial=T_left_initial,
             T_right_initial=T_right_initial,
+            num_initial_guesses=num_initial_guesses,
+            initial_guess_strategy=initial_guess_strategy,
+            initial_guess_scale=initial_guess_scale,
+            random_seed=random_seed,
             **kwargs
         )
 

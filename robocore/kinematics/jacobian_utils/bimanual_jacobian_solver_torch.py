@@ -19,24 +19,41 @@ class BiIndependentJacobianSolverTorch:
         self.left = left_model
         self.right = right_model
 
-    def compute(self, q_left: Sequence[float], q_right: Sequence[float]) -> torch.Tensor:
+    def compute(self, q_left: Sequence[float] | np.ndarray | torch.Tensor,
+                q_right: Sequence[float] | np.ndarray | torch.Tensor) -> torch.Tensor:
+        """Compute bimanual independent Jacobian.
+        
+        :param q_left: Left joint configuration(s) - [n] or [B, n]
+        :param q_right: Right joint configuration(s) - [n] or [B, n]
+        :return: Jacobian matrix - [12, nL+nR] or [B, 12, nL+nR]
+        """
         J_L = single_jacobian(self.left, q_left)
         J_R = single_jacobian(self.right, q_right)
 
         if hasattr(J_L, 'detach'):
             J_L = J_L.detach()
         else:
-            J_L = torch.tensor(J_L, dtype=torch.float32)
+            J_L = torch.tensor(J_L, dtype=torch.float64)
         if hasattr(J_R, 'detach'):
             J_R = J_R.detach()
         else:
-            J_R = torch.tensor(J_R, dtype=torch.float32)
+            J_R = torch.tensor(J_R, dtype=torch.float64)
 
-        nL = J_L.shape[1]
-        nR = J_R.shape[1]
-        J = torch.zeros((12, nL + nR), dtype=torch.float32)
-        J[0:6, 0:nL] = J_L
-        J[6:12, nL:] = J_R
+        # Handle batch mode
+        is_batch = J_L.ndim == 3
+        if is_batch:
+            batch_size = J_L.shape[0]
+            nL = J_L.shape[2]
+            nR = J_R.shape[2]
+            J = torch.zeros((batch_size, 12, nL + nR), dtype=J_L.dtype, device=J_L.device)
+            J[:, 0:6, 0:nL] = J_L
+            J[:, 6:12, nL:] = J_R
+        else:
+            nL = J_L.shape[1]
+            nR = J_R.shape[1]
+            J = torch.zeros((12, nL + nR), dtype=J_L.dtype, device=J_L.device)
+            J[0:6, 0:nL] = J_L
+            J[6:12, nL:] = J_R
         return J
 
 
@@ -51,27 +68,63 @@ class BiRelativeJacobianSolverTorch:
         self.left = left_model
         self.right = right_model
 
-    def compute(self, q_left: Sequence[float], q_right: Sequence[float], *, constraint_type: str = 'pose') -> torch.Tensor:
-        """
-        :param q_left: Left joint configuration
-        :param q_right: Right joint configuration
+    def compute(self, q_left: Sequence[float] | np.ndarray | torch.Tensor, 
+                q_right: Sequence[float] | np.ndarray | torch.Tensor, 
+                *, constraint_type: str = 'pose') -> torch.Tensor:
+        """Compute bimanual relative Jacobian.
+        
+        :param q_left: Left joint configuration(s) - [n] or [B, n]
+        :param q_right: Right joint configuration(s) - [n] or [B, n]
         :param constraint_type: 'pose'|'position'|'orientation'
-        :return: Relative constraint Jacobian
+        :return: Relative constraint Jacobian - [6, nL+nR] or [B, 6, nL+nR] (or [3, nL+nR] / [B, 3, nL+nR] for position/orientation)
         """
+        import numpy as np
+        # Convert to numpy for batch detection
+        if torch.is_tensor(q_left):
+            q_left_arr = q_left.detach().cpu().numpy()
+        else:
+            q_left_arr = np.asarray(q_left)
+        if torch.is_tensor(q_right):
+            q_right_arr = q_right.detach().cpu().numpy()
+        else:
+            q_right_arr = np.asarray(q_right)
+        
+        # Detect batch mode
+        is_batch = q_left_arr.ndim == 2 and q_right_arr.ndim == 2
+        if is_batch:
+            batch_size = q_left_arr.shape[0]
+            if q_right_arr.shape[0] != batch_size:
+                raise ValueError(f"Batch size mismatch: left={batch_size}, right={q_right_arr.shape[0]}")
+        
         # Use numerical relative Jacobian from utils (correct adjoint handling)
         # NOTE: This returns numpy array, so convert to torch
         from robocore.kinematics.utils import relative_jacobian
         
-        J_rel_full = relative_jacobian(self.left, self.right, q_left, q_right)
-        J_rel_full = torch.tensor(J_rel_full, dtype=torch.float64)
+        if is_batch:
+            # Process batch
+            J_rel_list = []
+            for i in range(batch_size):
+                J_rel = relative_jacobian(self.left, self.right, q_left_arr[i], q_right_arr[i])
+                J_rel_list.append(J_rel)
+            J_rel_full = np.stack(J_rel_list, axis=0)  # [B, 6, nL+nR]
+            J_rel_full = torch.tensor(J_rel_full, dtype=torch.float64)
+        else:
+            J_rel_full = relative_jacobian(self.left, self.right, q_left, q_right)
+            J_rel_full = torch.tensor(J_rel_full, dtype=torch.float64)  # [6, nL+nR]
         
         # Apply constraint type filtering
         if constraint_type == 'pose':
             return J_rel_full
         elif constraint_type == 'position':
-            return J_rel_full[:3, :]
+            if is_batch:
+                return J_rel_full[:, :3, :]  # [B, 3, nL+nR]
+            else:
+                return J_rel_full[:3, :]  # [3, nL+nR]
         elif constraint_type == 'orientation':
-            return J_rel_full[3:, :]
+            if is_batch:
+                return J_rel_full[:, 3:, :]  # [B, 3, nL+nR]
+            else:
+                return J_rel_full[3:, :]  # [3, nL+nR]
         else:
             raise ValueError("Unknown constraint_type")
 
