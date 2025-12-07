@@ -45,9 +45,9 @@ class InteractiveDualArmIK:
         print(f"✓ MuJoCo model loaded: {self.mj_model.nq} DOF")
         
         # Gripper center offset (from link7 to gripper center, in link7 frame)
-        # Based on MJCF: gripper fingers at pos="0.14128 ±0.0505 0.00015"
+        # Based on MJCF: gripper center at pos="0.14128 0 -0.00015" (both arms)
         # Center is at 0.14128 m in X direction from link7
-        self.gripper_offset = np.array([0.14128, 0.0, 0.00015, 1.0])  # Homogeneous coordinates
+        self.gripper_offset = np.array([0.14128, 0.0, -0.00015, 1.0])  # Homogeneous coordinates
         
         # Load RoboCore bimanual model
         self.robot = BimanualRobotModel(str(self.mjcf_path), left_end_link, right_end_link)
@@ -303,13 +303,13 @@ class InteractiveDualArmIK:
     def solve_ik_mirror(self):
         """Solve IK for mirror symmetric control with independent solving (Demo 3).
         
-        Mirrors left arm to right arm across YZ plane:
-        1. Position: Mirror X coordinate (x -> -x)
+        Mirrors left arm to right arm across XZ plane (Y=0):
+        1. Position: Mirror Y coordinate (y -> -y)
         2. Rotation: Apply mirrored rotation delta to each arm's initial orientation
         
         Strategy:
         - Compute rotation change from left initial to left current
-        - Mirror this rotation change across YZ plane
+        - Mirror this rotation change across XZ plane
         - Apply mirrored rotation to right initial orientation
         """
         # Convert gripper center targets to link7 targets and solve independently
@@ -447,17 +447,17 @@ class InteractiveDualArmIK:
                 self.T_left_target = T_left_dragged.copy()
 
                 # Compute mirrored right target from left drag (position + rotation delta)
-                # 1. Mirror position (x -> -x)
+                # 1. Mirror position (y -> -y, across XZ plane)
                 pos_left = T_left_dragged[0:3, 3]
-                pos_right_mirrored = np.array([-pos_left[0], pos_left[1], pos_left[2]])
+                pos_right_mirrored = np.array([pos_left[0], -pos_left[1], pos_left[2]])
 
                 # 2. Compute rotation change from left initial
                 R_left_current = T_left_dragged[0:3, 0:3]
                 R_left_initial = self.T_left_initial[0:3, 0:3]
                 R_delta_left = R_left_current @ R_left_initial.T
 
-                # 3. Mirror the rotation change
-                M_mirror = np.diag([-1, 1, 1])
+                # 3. Mirror the rotation change (across XZ plane, mirror Y axis)
+                M_mirror = np.diag([1, -1, 1])
                 R_delta_right = M_mirror @ R_delta_left @ M_mirror.T
 
                 # 4. Apply to right initial orientation
@@ -478,17 +478,17 @@ class InteractiveDualArmIK:
                 # Blue ball (right) dragged: update right, reverse mirror to left
                 self.T_right_target = T_right_dragged.copy()
 
-                # 1. Mirror position (reverse: -x -> x)
+                # 1. Mirror position (reverse: -y -> y, across XZ plane)
                 pos_right = T_right_dragged[0:3, 3]
-                pos_left_mirrored = np.array([-pos_right[0], pos_right[1], pos_right[2]])
+                pos_left_mirrored = np.array([pos_right[0], -pos_right[1], pos_right[2]])
 
                 # 2. Compute rotation change from right initial
                 R_right_current = T_right_dragged[0:3, 0:3]
                 R_right_initial = self.T_right_initial[0:3, 0:3]
                 R_delta_right = R_right_current @ R_right_initial.T
 
-                # 3. Mirror the rotation change (reverse)
-                M_mirror = np.diag([-1, 1, 1])
+                # 3. Mirror the rotation change (reverse, across XZ plane, mirror Y axis)
+                M_mirror = np.diag([1, -1, 1])
                 R_delta_left = M_mirror @ R_delta_right @ M_mirror.T
 
                 # 4. Apply to left initial orientation

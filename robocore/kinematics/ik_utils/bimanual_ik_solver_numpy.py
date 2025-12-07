@@ -140,7 +140,7 @@ class BiMirrorIKSolverNumpy(BiIndependentIKSolverNumpy):
               target_right: Optional[Sequence[Sequence[float]]],
               q0_left: Optional[Sequence[float]] = None,
               q0_right: Optional[Sequence[float]] = None,
-              mirror_axis: str = 'x',
+              mirror_axis: str = 'y',
               T_left_initial=None,
               T_right_initial=None,
               **ik_kwargs) -> Dict[str, Any]:
@@ -157,15 +157,24 @@ class BiMirrorIKSolverNumpy(BiIndependentIKSolverNumpy):
         import numpy as np
         # 只处理左臂拖动，右臂镜像
         if target_left is not None and T_left_initial is not None and T_right_initial is not None:
-            # 1. 镜像位置
+            # 1. 镜像位置（根据初始左右手位置，对称面是 Y=0，镜像 Y 轴）
             pos_left = np.array(target_left)[0:3, 3]
-            pos_right_mirrored = np.array([-pos_left[0], pos_left[1], pos_left[2]])
+            if mirror_axis == 'x':
+                pos_right_mirrored = np.array([-pos_left[0], pos_left[1], pos_left[2]])
+                M_mirror = np.diag([-1, 1, 1])
+            elif mirror_axis == 'y':
+                pos_right_mirrored = np.array([pos_left[0], -pos_left[1], pos_left[2]])
+                M_mirror = np.diag([1, -1, 1])
+            elif mirror_axis == 'z':
+                pos_right_mirrored = np.array([pos_left[0], pos_left[1], -pos_left[2]])
+                M_mirror = np.diag([1, 1, -1])
+            else:
+                raise ValueError(f"Invalid mirror_axis: {mirror_axis}, must be 'x', 'y', or 'z'")
 
             # 2. 镜像旋转
             R_left_current = np.array(target_left)[0:3, 0:3]
             R_left_initial = np.array(T_left_initial)[0:3, 0:3]
             R_delta_left = R_left_current @ R_left_initial.T
-            M_mirror = np.diag([-1, 1, 1])
             R_delta_right = M_mirror @ R_delta_left @ M_mirror.T
             R_right_initial = np.array(T_right_initial)[0:3, 0:3]
             R_right_mirrored = R_delta_right @ R_right_initial

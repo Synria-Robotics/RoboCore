@@ -292,8 +292,11 @@ class IKSolverNumPy:
                 for k in range(Ba_sub):
                     try:
                         S = np.linalg.svd(J[k], compute_uv=False)
-                        cond = S[0] / max(S[-1], 1e-12)
-                    except np.linalg.LinAlgError:
+                        if len(S) == 0:
+                            cond = 100.0
+                        else:
+                            cond = S[0] / max(S[-1], 1e-12)
+                    except (np.linalg.LinAlgError, IndexError):
                         cond = 100.0
                     err_combo = pos_norm_sub[k] + 0.5 * ori_norm_sub[k]
                     if cond > 200 or err_combo > 0.05:
