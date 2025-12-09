@@ -66,9 +66,14 @@ def main(args):
         'initial_guess_strategy': args.initial_guess_strategy,
         'initial_guess_scale': args.initial_guess_scale,
         'random_seed': args.random_seed,
+        'max_iters': args.max_iters,
+        'pos_tol': args.pos_tol,
+        'ori_tol': args.ori_tol,
     }
 
     # Batch processing
+    # Note: We don't pass q0_left/q0_right to test IK solver's ability to find solutions
+    # from scratch, even though targets are guaranteed to be in workspace (from FK)
     start_time = time.time()
     results_batch = bimanual_inverse_kinematics(
         left_model, right_model,
@@ -106,6 +111,27 @@ def main(args):
     # Display results
     beauty_print(f"Batch Processing Results:", type="module")
     print(f"  Success Rate: {success_count}/{num_configs} ({100*success_count/num_configs:.1f}%)")
+    print(f"  Serial Success Rate: {serial_success_count}/{num_configs} ({100*serial_success_count/num_configs:.1f}%)")
+
+    # Analyze failures
+    if isinstance(results_batch, list):
+        failed_samples = []
+        for i, result in enumerate(results_batch):
+            if not (result.get('success_left', False) and result.get('success_right', False)):
+                failed_samples.append(i)
+                if len(failed_samples) <= 3:  # Show first 3 failures
+                    res_left = result.get('res_left', {})
+                    res_right = result.get('res_right', {})
+                    pos_err_left = res_left.get('pos_err', float('inf')) if isinstance(res_left, dict) else float('inf')
+                    pos_err_right = res_right.get('pos_err', float('inf')) if isinstance(res_right, dict) else float('inf')
+                    ori_err_left = res_left.get('ori_err', float('inf')) if isinstance(res_left, dict) else float('inf')
+                    ori_err_right = res_right.get('ori_err', float('inf')) if isinstance(res_right, dict) else float('inf')
+                    print(f"  Failed Sample {i+1}:")
+                    print(f"    Left:  pos_err={pos_err_left:.6e} m, ori_err={ori_err_left:.6e} rad, success={result.get('success_left', False)}")
+                    print(f"    Right: pos_err={pos_err_right:.6e} m, ori_err={ori_err_right:.6e} rad, success={result.get('success_right', False)}")
+
+        if len(failed_samples) > 3:
+            print(f"  ... and {len(failed_samples) - 3} more failed samples")
 
     beauty_print(f"Performance Comparison:", type="module")
     print(f"  Serial Time:   {serial_time*1000:.4f} ms ({serial_time/num_configs*1000:.4f} ms/sample)")
@@ -130,7 +156,7 @@ def main(args):
 if __name__ == "__main__":
     from synriard import get_model_path
 
-    model_path = get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="urdf")
+    model_path = get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="mjcf")
 
     parser = argparse.ArgumentParser(description="Bimanual Inverse Kinematics Parallel Demo")
     parser.add_argument('--model-path', type=str, default=model_path,
@@ -141,20 +167,23 @@ if __name__ == "__main__":
     parser.add_argument('--right-end-link', type=str, default='right_arm_link7', help='Right arm end-effector link name')
     parser.add_argument('--num-configs', type=int, default=50, help='Number of target poses to process')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for generating configurations')
-    parser.add_argument('--scale', type=float, default=1.0, help='Scale factor for joint limits (0.0 to 1.0)')
+    parser.add_argument('--scale', type=float, default=0.8, help='Scale factor for joint limits (0.0 to 1.0, default: 0.8 for better reachability)')
     parser.add_argument('--coordination', type=str, default='indep',
                         choices=['indep', 'relative_pose', 'relative_pos', 'relative_ori', 'mirror'],
                         help='Coordination mode')
     parser.add_argument('--method', type=str, default='dls', choices=['dls', 'pinv', 'transpose'],
                         help='IK solving method')
-    parser.add_argument('--num-initial-guesses', type=int, default=1,
-                        help='Number of initial guesses to try')
+    parser.add_argument('--num-initial-guesses', type=int, default=10,
+                        help='Number of initial guesses to try (default: 10 for better success rate when solving from scratch)')
     parser.add_argument('--initial-guess-strategy', type=str, default='random',
                         choices=['zero', 'random', 'sobol', 'latin', 'center', 'uniform'],
                         help='Initial guess strategy')
     parser.add_argument('--initial-guess-scale', type=float, default=1.0,
                         help='Scale factor for joint limits (0.0 to 1.0)')
     parser.add_argument('--random-seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--max-iters', type=int, default=200, help='Maximum IK iterations')
+    parser.add_argument('--pos-tol', type=float, default=1e-3, help='Position tolerance (meters)')
+    parser.add_argument('--ori-tol', type=float, default=1e-3, help='Orientation tolerance (radians)')
     parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch'],
                         help='Backend to use for computation (default: numpy)')
     args = parser.parse_args()

@@ -119,7 +119,7 @@ def main(args):
 if __name__ == "__main__":
     from synriard import get_model_path
 
-    model_path = get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="urdf")
+    model_path = get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="mjcf")
 
     parser = argparse.ArgumentParser(description="Bimanual Jacobian Demo")
     parser.add_argument('--model-path', type=str, default=model_path,
@@ -128,9 +128,9 @@ if __name__ == "__main__":
     parser.add_argument('--left-end-link', type=str, default='left_arm_link7', help='Left arm end-effector link name')
     parser.add_argument('--right-base-link', type=str, default='base_link', help='Right arm base link name')
     parser.add_argument('--right-end-link', type=str, default='right_arm_link7', help='Right arm end-effector link name')
-    parser.add_argument('--q-left', type=float, nargs='+', default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2],
+    parser.add_argument('--q-left', type=float, nargs='+', default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2, 0.1],
                         help='Left joint angles in radians')
-    parser.add_argument('--q-right', type=float, nargs='+', default=[-0.1, -0.2, 0.3, 0.0, -0.5, 0.2],
+    parser.add_argument('--q-right', type=float, nargs='+', default=[-0.1, -0.2, 0.3, 0.0, -0.5, 0.2, -0.1],
                         help='Right joint angles in radians')
     parser.add_argument('--mode', type=str, default='indep', choices=['indep', 'relative'],
                         help='Jacobian mode: indep (independent), relative (relative constraint)')

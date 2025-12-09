@@ -109,24 +109,24 @@ def main(args):
     if args.target_left is not None:
         target_left = pose_7d_to_matrix(args.target_left)
     else:
-        # Use default target
-        target_left = np.array([
-            [1, 0, 0, -0.3],
-            [0, 1, 0, 0.0],
-            [0, 0, 1, 0.2],
-            [0, 0, 0, 1]
-        ])
+        # Use default target from zero-config FK to ensure it's in workspace
+        q_zero_left = np.zeros(left_model.num_chain_dof)
+        fk_result_left = left_model.fk(q_zero_left)
+        target_left = fk_result_left['end']
+        # Slightly modify position to create a reachable target
+        target_left[0, 3] -= 0.1  # Move left arm slightly left
+        target_left[2, 3] += 0.05  # Move slightly up
 
     if args.target_right is not None:
         target_right = pose_7d_to_matrix(args.target_right)
     else:
-        # Use default target
-        target_right = np.array([
-            [1, 0, 0, 0.3],
-            [0, 1, 0, 0.0],
-            [0, 0, 1, 0.2],
-            [0, 0, 0, 1]
-        ])
+        # Use default target from zero-config FK to ensure it's in workspace
+        q_zero_right = np.zeros(right_model.num_chain_dof)
+        fk_result_right = right_model.fk(q_zero_right)
+        target_right = fk_result_right['end']
+        # Slightly modify position to create a reachable target
+        target_right[0, 3] += 0.1  # Move right arm slightly right
+        target_right[2, 3] += 0.05  # Move slightly up
 
     # Prepare IK kwargs
     ik_kwargs = {
@@ -135,6 +135,9 @@ def main(args):
         'initial_guess_strategy': args.initial_guess_strategy,
         'initial_guess_scale': args.initial_guess_scale,
         'random_seed': args.random_seed,
+        'max_iters': args.max_iters,
+        'pos_tol': args.pos_tol,
+        'ori_tol': args.ori_tol,
     }
 
     # Compute with both backends
@@ -183,7 +186,7 @@ def main(args):
 if __name__ == "__main__":
     from synriard import get_model_path
 
-    model_path = get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="urdf")
+    model_path = get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="mjcf")
 
     parser = argparse.ArgumentParser(description="Bimanual Inverse Kinematics Demo")
     parser.add_argument('--model-path', type=str, default=model_path,
@@ -209,6 +212,9 @@ if __name__ == "__main__":
     parser.add_argument('--initial-guess-scale', type=float, default=1.0,
                         help='Scale factor for joint limits (0.0 to 1.0)')
     parser.add_argument('--random-seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--max-iters', type=int, default=200, help='Maximum IK iterations')
+    parser.add_argument('--pos-tol', type=float, default=1e-3, help='Position tolerance (meters)')
+    parser.add_argument('--ori-tol', type=float, default=1e-3, help='Orientation tolerance (radians)')
     parser.add_argument('--verbose', action='store_true', help='Show detailed model information')
     args = parser.parse_args()
     main(args)

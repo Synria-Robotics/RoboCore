@@ -1,7 +1,7 @@
-"""Bimanual Forward Kinematics Parallel Demo
+"""Bimanual Jacobian Parallel Demo
 
-This demo demonstrates parallel/batch bimanual forward kinematics computation.
-It compares serial vs parallel processing performance for multiple joint configurations.
+This demo demonstrates parallel/batch bimanual Jacobian computation.
+It shows how to use batch processing for multiple joint configurations.
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -28,7 +28,7 @@ import time
 
 import robocore as rc
 from robocore.modeling.robot_model import RobotModel
-from robocore.kinematics.bimanual import bimanual_forward_kinematics
+from robocore.kinematics.bimanual import bimanual_jacobian
 from robocore.utils.beauty_logger import beauty_print_array, beauty_print
 from robocore.utils.backend import to_numpy
 
@@ -42,53 +42,69 @@ def main(args):
     right_model = RobotModel(str(args.model_path), base_link=args.right_base_link, end_link=args.right_end_link)
 
     # Generate random joint configurations
-    num_batch = args.num_configs
-    beauty_print(f"Generating {num_batch} Random Joint Configurations", type="module", centered=True)
-    q_left_batch = left_model.random_q_batch(num_batch, seed=args.seed, scale=args.scale)
-    q_right_batch = right_model.random_q_batch(num_batch, seed=args.seed+1, scale=args.scale)
+    num_configs = args.num_configs
+    beauty_print("Generating Random Joint Configurations", type="module", centered=True)
+    q_left_batch = left_model.random_q_batch(num_configs, seed=args.seed, scale=args.scale)
+    q_right_batch = right_model.random_q_batch(num_configs, seed=args.seed+1, scale=args.scale)
 
-    beauty_print(f"Processing {num_batch} joint configuration(s) using {backend} backend", type="module", centered=True)
+    beauty_print(f"Processing {num_configs} joint configuration(s) using {backend} backend", type="module", centered=True)
 
     # Batch processing
     start_time = time.time()
-    results_batch = bimanual_forward_kinematics(
+    J_batch = bimanual_jacobian(
         left_model, right_model, q_left_batch, q_right_batch,
-        return_end=True, mode=args.mode
+        mode=args.mode
     )
     batch_time = time.time() - start_time
 
     # Serial processing (for comparison)
     start_time = time.time()
-    results_serial = []
-    for i in range(num_batch):
-        result = bimanual_forward_kinematics(
+    J_serial = []
+    for i in range(num_configs):
+        J = bimanual_jacobian(
             left_model, right_model, q_left_batch[i], q_right_batch[i],
-            return_end=True, mode=args.mode
+            mode=args.mode
         )
-        results_serial.append(result)
+        J_serial.append(J)
     serial_time = time.time() - start_time
+
+    # Convert to numpy for analysis
+    J_batch_np = to_numpy(J_batch)
+    J_serial_np = [to_numpy(J) for J in J_serial]
 
     # Display results
     beauty_print(f"Batch Processing Results:", type="module")
-    T_left_batch = to_numpy(results_batch['left'])
-    T_right_batch = to_numpy(results_batch['right'])
-
-    if T_left_batch.ndim == 3:
-        beauty_print(f"Left Arm Positions (first 3 samples):")
-        for i in range(min(3, num_batch)):
-            pos = T_left_batch[i, :3, 3]
-            print(f"  Sample {i+1}: {beauty_print_array(pos)}")
-
-        beauty_print(f"Right Arm Positions (first 3 samples):")
-        for i in range(min(3, num_batch)):
-            pos = T_right_batch[i, :3, 3]
-            print(f"  Sample {i+1}: {beauty_print_array(pos)}")
+    if J_batch_np.ndim == 3:
+        print(f"  Batch Jacobian Shape: {J_batch_np.shape}")
+        print(f"  Serial Jacobian Shape: {J_serial_np[0].shape} (per config)")
+        
+        # Show first few condition numbers
+        beauty_print(f"Condition Numbers (first 3 samples):")
+        for i in range(min(3, num_configs)):
+            cond = np.linalg.cond(J_batch_np[i])
+            print(f"  Sample {i+1}: {cond:.6e}")
+    else:
+        print(f"  Jacobian Shape: {J_batch_np.shape}")
 
     beauty_print(f"Performance Comparison:", type="module")
-    print(f"  Serial Time:   {serial_time*1000:.4f} ms ({serial_time/num_batch*1000:.4f} ms/sample)")
-    print(f"  Batch Time:    {batch_time*1000:.4f} ms ({batch_time/num_batch*1000:.4f} ms/sample)")
+    print(f"  Serial Time:   {serial_time*1000:.4f} ms ({serial_time/num_configs*1000:.4f} ms/sample)")
+    print(f"  Batch Time:    {batch_time*1000:.4f} ms ({batch_time/num_configs*1000:.4f} ms/sample)")
     if batch_time > 0:
         print(f"  Speedup:       {serial_time / batch_time:.2f}x")
+
+    # Show sub-matrices for independent mode (first sample)
+    if args.mode == 'indep' and J_batch_np.ndim == 3:
+        nL = left_model.num_chain_dof
+        nR = right_model.num_chain_dof
+        J_first = J_batch_np[0]
+        J_L = J_first[:6, :nL]
+        J_R = J_first[6:, nL:]
+
+        beauty_print(f"First Sample - Left Arm Jacobian (6 x {nL}):")
+        print(beauty_print_array(J_L, precision=4))
+
+        beauty_print(f"First Sample - Right Arm Jacobian (6 x {nR}):")
+        print(beauty_print_array(J_R, precision=4))
 
 
 if __name__ == "__main__":
@@ -96,7 +112,7 @@ if __name__ == "__main__":
 
     model_path = get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="mjcf")
 
-    parser = argparse.ArgumentParser(description="Bimanual Forward Kinematics Parallel Demo")
+    parser = argparse.ArgumentParser(description="Bimanual Jacobian Parallel Demo")
     parser.add_argument('--model-path', type=str, default=model_path,
                         help='Path to robot model file (default: Bessica-D)')
     parser.add_argument('--left-base-link', type=str, default='base_link', help='Left arm base link name')
@@ -106,10 +122,9 @@ if __name__ == "__main__":
     parser.add_argument('--num-configs', type=int, default=50, help='Number of joint configurations to process')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for generating configurations')
     parser.add_argument('--scale', type=float, default=1.0, help='Scale factor for joint limits (0.0 to 1.0)')
-    parser.add_argument('--mode', type=str, default='indep', choices=['indep', 'relative', 'mirror'],
-                        help='FK mode: indep (independent), relative (relative transform), mirror (mirror mode)')
+    parser.add_argument('--mode', type=str, default='indep', choices=['indep', 'relative'],
+                        help='Jacobian mode: indep (independent), relative (relative constraint)')
     parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch'],
                         help='Backend to use for computation (default: numpy)')
     args = parser.parse_args()
     main(args)
-

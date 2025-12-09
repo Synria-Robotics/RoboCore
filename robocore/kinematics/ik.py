@@ -195,17 +195,115 @@ def _solve_numpy(
             return results
         return res
 
-    # Multiple guesses - try each guess for each target
+    # Multiple guesses - smart batch processing with progressive refinement
+    # Strategy:
+    # 1. Batch process all targets with first guess (fast, vectorized)
+    # 2. For failed targets, try remaining guesses in batches
+    # 3. This combines batch efficiency with early exit benefits
+    num_guesses = len(initial_guesses)
+
+    # Initialize results with first guess for all targets
+    q0_first = np.tile(initial_guesses[0], (batch_size, 1))
+    first_results = solver.solve(target_arr, q0_first, **common_kwargs)
+
+    # Convert to list format if needed
+    if isinstance(first_results, dict):
+        first_results_list = []
+        for i in range(batch_size):
+            result_dict = {}
+            for k, v in first_results.items():
+                if isinstance(v, list) and len(v) == batch_size:
+                    result_dict[k] = v[i]
+                elif k == 'backend':
+                    result_dict[k] = v
+                else:
+                    result_dict[k] = v
+            first_results_list.append(result_dict)
+        first_results = first_results_list
+
+    # Track which targets need more guesses
     results = []
-    for target in target_arr:
-        candidates = []
-        for q0 in initial_guesses:
-            res = run_once(target, q0)
-            if res.get('success'):
-                candidates.append(res)
-                break  # Early exit on success
-            candidates.append(res)
-        results.append(best_result(candidates))
+    failed_targets = []  # List of (target_idx, candidates) tuples
+    failed_indices = []
+
+    for target_idx in range(batch_size):
+        first_res = first_results[target_idx] if isinstance(first_results, list) else first_results
+        candidates = [first_res]
+
+        if first_res.get('success'):
+            # First guess succeeded, use it
+            results.append(first_res)
+        else:
+            # First guess failed, need to try other guesses
+            failed_targets.append(target_arr[target_idx])
+            failed_indices.append(target_idx)
+            results.append(None)  # Placeholder, will be filled later
+
+    # If all targets succeeded, return early
+    if not failed_targets:
+        return results
+
+    # Process failed targets with remaining guesses in batches
+    # Strategy: For each remaining guess, batch process all failed targets
+    for guess_idx in range(1, num_guesses):
+        if not failed_targets:
+            break  # All targets succeeded
+
+        # Batch process all failed targets with this guess
+        failed_targets_arr = np.array(failed_targets)
+        q0_batch = np.tile(initial_guesses[guess_idx], (len(failed_targets), 1))
+        batch_results = solver.solve(failed_targets_arr, q0_batch, **common_kwargs)
+
+        # Convert to list format if needed
+        if isinstance(batch_results, dict):
+            batch_results_list = []
+            for i in range(len(failed_targets)):
+                result_dict = {}
+                for k, v in batch_results.items():
+                    if isinstance(v, list) and len(v) == len(failed_targets):
+                        result_dict[k] = v[i]
+                    elif k == 'backend':
+                        result_dict[k] = v
+                    else:
+                        result_dict[k] = v
+                batch_results_list.append(result_dict)
+            batch_results = batch_results_list
+
+        # Update results and remove successful targets from failed list
+        new_failed_targets = []
+        new_failed_indices = []
+        new_candidates_map = {}  # Map from original index to candidates list
+
+        for i, failed_idx in enumerate(failed_indices):
+            guess_res = batch_results[i] if isinstance(batch_results, list) else batch_results
+            # Get existing candidates for this target
+            if failed_idx not in new_candidates_map:
+                # Find the first result for this target
+                first_res = first_results[failed_idx] if isinstance(first_results, list) else first_results
+                new_candidates_map[failed_idx] = [first_res]
+            new_candidates_map[failed_idx].append(guess_res)
+
+            if guess_res.get('success'):
+                # This guess succeeded, use best from all candidates
+                results[failed_idx] = best_result(new_candidates_map[failed_idx])
+            else:
+                # Still failed, keep trying
+                new_failed_targets.append(failed_targets[i])
+                new_failed_indices.append(failed_idx)
+
+        failed_targets = new_failed_targets
+        failed_indices = new_failed_indices
+
+    # Fill in any remaining failed targets with best result from all guesses
+    for failed_idx in failed_indices:
+        if results[failed_idx] is None:
+            candidates = new_candidates_map.get(failed_idx, [])
+            if candidates:
+                results[failed_idx] = best_result(candidates)
+            else:
+                # Fallback
+                results[failed_idx] = {'q': [0.0] * model.num_chain_dof, 'success': False}
+
     return results
 
 
