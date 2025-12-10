@@ -20,7 +20,9 @@ Website: https://synriarobotics.ai
 """
 
 from .robot_model import RobotModel
+from .robot_model import BimanualRobotModel
 
 __all__ = [
     "RobotModel",
+    "BimanualRobotModel",
 ]

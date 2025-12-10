@@ -113,9 +113,13 @@ class RobotModel:
         """Loads joint information."""
         self.joint_list = self.parsed_model.get_joint_names()
         self.num_dof = self.num_joint = len(self.joint_list)
-        self.joint_limit = self.parsed_model.get_joint_limits()
-        self.joint_limit_max = self.joint_limit[:, 1]
-        self.joint_limit_min = self.joint_limit[:, 0]
+        self.joint_limits = self.parsed_model.get_joint_limits()
+        self.joint_limits_max = self.joint_limits[:, 1]
+        self.joint_limits_min = self.joint_limits[:, 0]
+        self.actuated_joint_list = [j.index for j in self.joint_list if j.joint_type in ("revolute", "prismatic")]
+        self.actuated_joint_limits = self.joint_limits[self.actuated_joint_list]
+        self.actuated_joint_limits_max = self.actuated_joint_limits[:, 1]
+        self.actuated_joint_limits_min = self.actuated_joint_limits[:, 0]
 
     def _load_mesh_info(self):
         """Loads mesh information for the robot."""

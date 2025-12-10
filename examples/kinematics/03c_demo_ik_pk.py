@@ -29,12 +29,6 @@ from pytorch_kinematics.chain import SerialChain
 from pytorch_kinematics.transforms import Transform3d
 from pytorch_kinematics.ik import PseudoInverseIK
 
-try:
-    from scipy.stats import qmc
-    HAS_SCIPY = True
-except ImportError:
-    HAS_SCIPY = False
-
 import robocore as rc
 from robocore.modeling import RobotModel
 from robocore.kinematics.ik import inverse_kinematics
@@ -48,7 +42,7 @@ def main(args):
     # Load models
     model_path = str(args.model_path)
     end_link = args.end_link
-    
+
     # PyTorch Kinematics
     with open(model_path, 'rb') as f:
         urdf_bytes = f.read()
@@ -65,35 +59,13 @@ def main(args):
     device = torch.device(args.device)
     dtype = torch.float64
     chain = chain.to(dtype=dtype, device=device)
+    joint_limits = torch.tensor([[js.limit_lower, js.limit_upper] for js in rc_model._chain_actuated], dtype=dtype, device=device)
 
     # Build target pose from input
-    T_target = torch.eye(4, dtype=dtype, device=device)
-    T_target[:3, 3] = torch.tensor(args.end_pose[:3], dtype=dtype, device=device)
-    quat_target_xyzw = np.array(args.end_pose[3:])  # [x, y, z, w]
-    R_target = torch.tensor(quaternion_to_matrix(quat_target_xyzw), dtype=dtype, device=device)
-    T_target[:3, :3] = R_target
-    
-    # Generate initial guess
-    if args.q_init is not None:
-        q_init = torch.tensor(args.q_init, dtype=dtype, device=device)
-    else:
-        q_init = torch.tensor(rng.uniform(-np.pi/2, np.pi/2, n_dof), dtype=dtype, device=device)
-
-    # Get joint limits from RoboCore model for fair comparison
-    # pytorch_kinematics expects joint_limits shape: [2, n_dof] where [0, :] is lower, [1, :] is upper
-    joint_limits_list = []
-    for js in rc_model._chain_actuated:
-        joint_limits_list.append([js.limit_lower, js.limit_upper])
-    joint_limits = torch.tensor(joint_limits_list, dtype=dtype, device=device).T  # [2, n_dof]
-
+    num_configs = args.num_configs
+    joint_configs = rc_model.random_q(rng, scale=args.scale)
+    target_poses = forward_kinematics(rc_model, joint_configs, return_end=True)
     beauty_print("[1] Inverse Kinematics Computation", type="module", centered=False)
-    beauty_print(f"Initial Guess (radians):")
-    print(f"  q_init = {beauty_print_array(q_init.cpu().numpy())}")
-
-    beauty_print(f"Target End-Effector Pose:")
-    print(f"  Position: {beauty_print_array(T_target[:3, 3].cpu().numpy())}")
-    quat_display = matrix_to_quaternion(T_target[:3, :3].cpu().numpy())
-    print(f"  Quaternion (xyzw): {beauty_print_array(quat_display, precision=6)}")
 
     # Solve IK with PyTorch Kinematics using PseudoInverseIK
     # Create IK solver with matching parameters and joint limits
@@ -101,15 +73,16 @@ def main(args):
         chain,
         pos_tolerance=args.pos_tol,
         rot_tolerance=args.ori_tol,
-        retry_configs=q_init.unsqueeze(0),  # (1, DOF) tensor
         max_iterations=args.max_iters,
         lr=args.step_size,  # learning rate
         regularlization=args.damping,  # lambda^2
-        joint_limits=joint_limits,  # [2, n_dof] tensor: [lower, upper]
+        num_retries=args.num_retries,
+        joint_limits=joint_limits,
     )
     
+
     # Create target pose as Transform3d
-    target_transform = Transform3d(matrix=T_target.unsqueeze(0))  # (1, 4, 4)
+    target_transform = Transform3d(matrix=torch.tensor(target_poses, dtype=dtype, device=device))  # (1, 4, 4)
     sol_pk = ik_solver_pk.solve(target_transform)
     
     # Extract result from IKSolution
@@ -132,19 +105,17 @@ def main(args):
     # Solve IK with RoboCore
     # Note: RoboCore applies joint limits from URDF, while pytorch_kinematics does not.
     # Using default adaptive parameters for better convergence with joint limits.
-    T_target_np = T_target.cpu().numpy()
-    q_init_np = q_init.cpu().numpy()
     ik_result_rc = inverse_kinematics(
         rc_model,
-        T_target_np,
-        q_init_np,
+        target_poses,
         method='dls',
         max_iters=args.max_iters,
         pos_tol=args.pos_tol,
         ori_tol=args.ori_tol,
-        torch_device=device,
-        torch_dtype=dtype,
-        use_analytic_jacobian=True,
+        num_initial_guesses=args.num_retries,
+        initial_guess_strategy='random',
+        initial_guess_scale=1.0,
+        random_seed=args.seed,
     )
 
     beauty_print(f"IK Solution (PyTorch Kinematics):")
@@ -185,13 +156,13 @@ def main(args):
             chain,
             pos_tolerance=args.pos_tol,
             rot_tolerance=args.ori_tol,
-            retry_configs=q_init.unsqueeze(0),
+            num_retries=args.num_retries,
             max_iterations=args.max_iters,
             lr=args.step_size,
             regularlization=args.damping,
-            joint_limits=joint_limits,  # Use joint limits for fair comparison
+            joint_limits=joint_limits,
         )
-        target_transform = Transform3d(matrix=T_target.unsqueeze(0))
+        target_transform = Transform3d(matrix=torch.tensor(target_poses, dtype=dtype, device=device))  # (1, 4, 4)
         sol_pk = ik_solver_pk.solve(target_transform)
         q_result = sol_pk.solutions[0, 0, :].cpu().numpy()
         converged = sol_pk.converged[0, 0].item()
@@ -205,11 +176,13 @@ def main(args):
 
     def benchmark_rc():
         result = inverse_kinematics(
-            rc_model, T_target_np, q_init_np,
+            rc_model, target_poses, q0=None,
             method='dls', max_iters=args.max_iters,
             pos_tol=args.pos_tol, ori_tol=args.ori_tol,
-            torch_device=device, torch_dtype=dtype,
-            use_analytic_jacobian=True,
+            num_initial_guesses=args.num_retries,
+            initial_guess_strategy='random',
+            initial_guess_scale=1.0,
+            random_seed=args.seed,
         )
         return result
 
@@ -241,78 +214,20 @@ def main(args):
 
     for i in range(args.samples):
         # Generate random target pose
-        q_target = torch.tensor(rc_model.random_q(rng), dtype=dtype, device=device)
-        q_target_tensor = q_target.unsqueeze(0)
-        ret_target = chain.forward_kinematics(q_target_tensor, end_only=False)
-        tg_target = ret_target[end_link]
-        T_target_rand = tg_target.get_matrix()[0]
-        T_target_rand_np = T_target_rand.cpu().numpy()
-
-        # Generate multiple initial guesses: one near target, others uniformly sampled in joint limits
-        # Since target is reachable (from FK), at least one guess should be close
-        retry_configs = []
-        # First retry: near target (with small noise to test robustness)
-        noise_scale = 0.1  # Small noise in radians
-        q_init_near = q_target + torch.tensor(rng.normal(0, noise_scale, n_dof), dtype=dtype, device=device)
-        retry_configs.append(q_init_near)
-
-        # Other retries: uniformly sampled within joint limits
-        # Get joint limits
-        joint_lower = []
-        joint_upper = []
-        for js in rc_model._chain_actuated:
-            joint_lower.append(js.limit_lower)
-            joint_upper.append(js.limit_upper)
-        joint_lower = np.array(joint_lower)
-        joint_upper = np.array(joint_upper)
-
-        # Generate uniform samples in joint space
-        num_retries_remaining = args.num_retries - 1
-        if num_retries_remaining > 0:
-            if HAS_SCIPY and num_retries_remaining > 1:
-                # Use Sobol sequence for better space-filling properties
-                try:
-                    sampler = qmc.Sobol(d=n_dof, seed=rng.integers(0, 2**31) if rng else None)
-                    # Generate more samples than needed, then select evenly spaced ones
-                    n_samples = max(num_retries_remaining, 2**n_dof) if n_dof <= 6 else num_retries_remaining * 2
-                    samples_all = sampler.random(n=n_samples)
-                    # Select evenly spaced samples
-                    indices = np.linspace(0, len(samples_all) - 1, num_retries_remaining, dtype=int)
-                    samples = samples_all[indices]
-                except:
-                    # Fallback to Latin Hypercube if Sobol fails
-                    sampler = qmc.LatinHypercube(d=n_dof, seed=rng.integers(0, 2**31) if rng else None)
-                    samples = sampler.random(n=num_retries_remaining)
-
-                # Scale to joint limits
-                for i in range(num_retries_remaining):
-                    q_uniform = joint_lower + samples[i] * (joint_upper - joint_lower)
-                    retry_configs.append(torch.tensor(q_uniform, dtype=dtype, device=device))
-            else:
-                # Fallback: simple uniform sampling
-                for i in range(num_retries_remaining):
-                    # Uniform random in [0, 1] for each joint
-                    alpha = rng.random(n_dof) if rng else np.random.random(n_dof)
-                    q_uniform = joint_lower + alpha * (joint_upper - joint_lower)
-                    retry_configs.append(torch.tensor(q_uniform, dtype=dtype, device=device))
-
-        retry_configs_tensor = torch.stack(retry_configs)  # [num_retries, n_dof]
-
-        # For RoboCore, use the first (near-target) initial guess
-        q_init_rand_np = retry_configs[0].cpu().numpy()
-
+        joint_configs_rand = rc_model.random_q(rng, scale=args.scale)
+        target_poses_rand = forward_kinematics(rc_model, joint_configs_rand, return_end=True)
         # PyTorch Kinematics IK with multiple initial guesses
         ik_solver_pk_rand = PseudoInverseIK(
             chain,
             pos_tolerance=args.pos_tol,
             rot_tolerance=args.ori_tol,
-            retry_configs=retry_configs_tensor,  # [num_retries, n_dof]
+            num_retries=args.num_retries,
             max_iterations=args.max_iters,
             lr=args.step_size,
             regularlization=args.damping,
-            joint_limits=joint_limits,  # Use joint limits for fair comparison
+            joint_limits=joint_limits,
         )
-        target_transform_rand = Transform3d(matrix=T_target_rand.unsqueeze(0))
+        target_transform_rand = Transform3d(matrix=torch.tensor(target_poses_rand, dtype=dtype, device=device))  # (1, 4, 4)
         sol_pk_rand = ik_solver_pk_rand.solve(target_transform_rand)
 
         # Select best retry: first converged, or first one if none converged
@@ -333,17 +248,13 @@ def main(args):
             'ori_err': sol_pk_rand.err_rot[0, best_retry_idx].item(),
         }
 
-        # RoboCore IK (with new initial guess system)
-        # Use zero as base, let the new system generate initial guesses
-        q0_base = np.zeros(n_dof)
+        # RoboCore IK - multiple initial guesses are handled automatically by inverse_kinematics()
         ik_rc_rand = inverse_kinematics(
-            rc_model, T_target_rand_np, q0_base,
+            rc_model, target_poses_rand, q0=None,
             method='dls', max_iters=args.max_iters,
             pos_tol=args.pos_tol, ori_tol=args.ori_tol,
-            torch_device=device, torch_dtype=dtype,
-            use_analytic_jacobian=True,
             num_initial_guesses=args.num_retries,
-            initial_guess_strategy='sobol' if HAS_SCIPY and args.num_retries > 1 else 'random',
+            initial_guess_strategy='random',
             initial_guess_scale=1.0,
             random_seed=args.seed,
         )
@@ -366,11 +277,11 @@ def main(args):
     beauty_print(f"Position error statistics (successful cases):")
     beauty_print(f"  PyTorch Kinematics - Mean: {np.mean([e for e, s in zip(pos_errs_pk, success_pk) if s]):.6e} m")
     beauty_print(f"  RoboCore           - Mean: {np.mean([e for e, s in zip(pos_errs_rc, success_rc) if s]):.6e} m")
-    
+
     beauty_print(f"Orientation error statistics (successful cases):")
     beauty_print(f"  PyTorch Kinematics - Mean: {np.mean([e for e, s in zip(ori_errs_pk, success_pk) if s]):.6e} rad")
     beauty_print(f"  RoboCore           - Mean: {np.mean([e for e, s in zip(ori_errs_rc, success_rc) if s]):.6e} rad")
-    
+
     if q_diffs:
         beauty_print(f"Joint angle difference statistics (both successful):")
         beauty_print(f"  Mean:   {np.mean(q_diffs):.6e} rad")
@@ -390,7 +301,7 @@ if __name__ == '__main__':
                         help='Path to URDF file (default: Alicia-D)')
     parser.add_argument('--base-link', type=str, default='world', help='Base link name')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
-    parser.add_argument('--end-pose', type=float, nargs='+', 
+    parser.add_argument('--end-pose', type=float, nargs='+',
                         default=[0.17006, 0.01704, 0.20533, 0.042114, 0.828366, 0.083037, 0.552396],
                         help='Target end-effector pose as 7 floats (px, py, pz, qx, qy, qz, qw)')
     parser.add_argument('--q-init', type=float, nargs='+', default=None,
@@ -403,8 +314,9 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='cpu', help='PyTorch device (cpu, cuda)')
     parser.add_argument('--samples', type=int, default=50, help='Number of test configurations')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
-    parser.add_argument('--num-retries', type=int, default=10, help='Number of initial guesses to try (default: 10)')
+    parser.add_argument('--num-retries', type=int, default=1, help='Number of initial guesses to try (default: 10)')
+    parser.add_argument('--num-configs', type=int, default=100, help='Number of random joint configurations to generate (default: 100)')
+    parser.add_argument('--scale', type=float, default=0.8, help='Scaling factor for the joint range (default: 0.5)')
     args = parser.parse_args()
 
     main(args)
-

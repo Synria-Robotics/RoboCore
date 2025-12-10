@@ -92,8 +92,8 @@ def main(args):
     beauty_print(f"Success Right: {result_single['success_right']}")
     if result_single['success_left'] and result_single['success_right']:
         # Extract error information from res_left and res_right
-        res_left = result_single.get('res_left', {})
-        res_right = result_single.get('res_right', {})
+        res_left = result_single['res_left']
+        res_right = result_single['res_right']
         
         # Handle case where res_left/res_right might be dict or list
         if isinstance(res_left, list) and len(res_left) > 0:
@@ -102,14 +102,14 @@ def main(args):
             res_right = res_right[0]
         
         # Get iters (use max of both arms if available)
-        iters_left = res_left.get('iters', 0) if isinstance(res_left, dict) else 0
-        iters_right = res_right.get('iters', 0) if isinstance(res_right, dict) else 0
+        iters_left = res_left['iters']
+        iters_right = res_right['iters']
         iters = max(iters_left, iters_right)
         
-        pos_err_left = res_left.get('pos_err', 0.0) if isinstance(res_left, dict) else 0.0
-        pos_err_right = res_right.get('pos_err', 0.0) if isinstance(res_right, dict) else 0.0
-        ori_err_left = res_left.get('ori_err', 0.0) if isinstance(res_left, dict) else 0.0
-        ori_err_right = res_right.get('ori_err', 0.0) if isinstance(res_right, dict) else 0.0
+        pos_err_left = res_left['pos_err']
+        pos_err_right = res_right['pos_err']
+        ori_err_left = res_left['ori_err']
+        ori_err_right = res_right['ori_err']
         
         beauty_print(f"Position error left: {pos_err_left:.6e} m")
         beauty_print(f"Position error right: {pos_err_right:.6e} m")
@@ -135,7 +135,7 @@ def main(args):
             num_initial_guesses=args.num_inits,
             initial_guess_strategy=args.init_strategy,
             initial_guess_scale=args.init_scale,
-            random_seed=args.seed,
+            random_seed=args.seed
         )
         results_batch.append(result)
     batch_time = time.time() - start_time
@@ -163,8 +163,8 @@ def main(args):
             beauty_print(f"  Success Right: {result['success_right']}")
             if result['success_left'] and result['success_right']:
                 # Extract error information from res_left and res_right
-                res_left = result.get('res_left', {})
-                res_right = result.get('res_right', {})
+                res_left = result['res_left']
+                res_right = result['res_right']
                 
                 # Handle case where res_left/res_right might be dict or list
                 if isinstance(res_left, list) and len(res_left) > 0:
@@ -173,14 +173,14 @@ def main(args):
                     res_right = res_right[0]
                 
                 # Get iters (use max of both arms if available)
-                iters_left = res_left.get('iters', 0) if isinstance(res_left, dict) else 0
-                iters_right = res_right.get('iters', 0) if isinstance(res_right, dict) else 0
+                iters_left = res_left['iters'] if isinstance(res_left, dict) else 0
+                iters_right = res_right['iters'] if isinstance(res_right, dict) else 0
                 iters = max(iters_left, iters_right)
                 
-                pos_err_left = res_left.get('pos_err', 0.0) if isinstance(res_left, dict) else 0.0
-                pos_err_right = res_right.get('pos_err', 0.0) if isinstance(res_right, dict) else 0.0
-                ori_err_left = res_left.get('ori_err', 0.0) if isinstance(res_left, dict) else 0.0
-                ori_err_right = res_right.get('ori_err', 0.0) if isinstance(res_right, dict) else 0.0
+                pos_err_left = res_left['pos_err'] if isinstance(res_left, dict) else 0.0
+                pos_err_right = res_right['pos_err'] if isinstance(res_right, dict) else 0.0
+                ori_err_left = res_left['ori_err'] if isinstance(res_left, dict) else 0.0
+                ori_err_right = res_right['ori_err'] if isinstance(res_right, dict) else 0.0
                 
                 beauty_print(f"  Left joint angles: {beauty_print_array(np.array(result['q_left']))}")
                 beauty_print(f"  Right joint angles: {beauty_print_array(np.array(result['q_right']))}")

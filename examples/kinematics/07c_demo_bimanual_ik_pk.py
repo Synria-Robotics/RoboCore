@@ -29,15 +29,9 @@ from pytorch_kinematics.chain import SerialChain
 from pytorch_kinematics.transforms import Transform3d
 from pytorch_kinematics.ik import PseudoInverseIK
 
-try:
-    from scipy.stats import qmc
-    HAS_SCIPY = True
-except ImportError:
-    HAS_SCIPY = False
-
 import robocore as rc
 from robocore.modeling import RobotModel
-from robocore.kinematics.bimanual import bimanual_inverse_kinematics
+from robocore.kinematics.bimanual import bimanual_inverse_kinematics, bimanual_forward_kinematics
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 from robocore.utils.backend import to_numpy
 from robocore.transform.conversions import quaternion_to_matrix, matrix_to_quaternion
@@ -71,60 +65,30 @@ def main(args):
     dtype = torch.float64
     chain_left = chain_left.to(dtype=dtype, device=device)
     chain_right = chain_right.to(dtype=dtype, device=device)
+    joint_limits_left = torch.tensor([[js.limit_lower, js.limit_upper] for js in left_model._chain_actuated], dtype=dtype, device=device)
+    joint_limits_right = torch.tensor([[js.limit_lower, js.limit_upper] for js in right_model._chain_actuated], dtype=dtype, device=device)
 
     # Build target poses from input
-    T_target_left = torch.eye(4, dtype=dtype, device=device)
-    T_target_left[:3, 3] = torch.tensor(args.target_left[:3], dtype=dtype, device=device)
-    quat_target_left_xyzw = np.array(args.target_left[3:])  # [x, y, z, w]
-    R_target_left = torch.tensor(quaternion_to_matrix(quat_target_left_xyzw), dtype=dtype, device=device)
-    T_target_left[:3, :3] = R_target_left
-    
-    T_target_right = torch.eye(4, dtype=dtype, device=device)
-    T_target_right[:3, 3] = torch.tensor(args.target_right[:3], dtype=dtype, device=device)
-    quat_target_right_xyzw = np.array(args.target_right[3:])  # [x, y, z, w]
-    R_target_right = torch.tensor(quaternion_to_matrix(quat_target_right_xyzw), dtype=dtype, device=device)
-    T_target_right[:3, :3] = R_target_right
-    
-    # Generate initial guesses for PyTorch Kinematics (RoboCore uses initial_guess_strategy)
-    q0_left = torch.tensor(left_model.random_q(rng=rng), dtype=dtype, device=device)
-    q0_right = torch.tensor(right_model.random_q(rng=rng), dtype=dtype, device=device)
-
-    # Get joint limits from RoboCore models
-    joint_limits_left_list = []
-    for js in left_model._chain_actuated:
-        joint_limits_left_list.append([js.limit_lower, js.limit_upper])
-    joint_limits_left = torch.tensor(joint_limits_left_list, dtype=dtype, device=device).T  # [2, n_dof_left]
-    
-    joint_limits_right_list = []
-    for js in right_model._chain_actuated:
-        joint_limits_right_list.append([js.limit_lower, js.limit_upper])
-    joint_limits_right = torch.tensor(joint_limits_right_list, dtype=dtype, device=device).T  # [2, n_dof_right]
-
+    joint_configs_left = left_model.random_q(rng, scale=args.scale)
+    joint_configs_right = right_model.random_q(rng, scale=args.scale)
+    fk_result = bimanual_forward_kinematics(
+        left_model, right_model,
+        joint_configs_left, joint_configs_right,
+        return_end=True, mode='indep'
+    )
+    target_left = to_numpy(fk_result['left'])
+    target_right = to_numpy(fk_result['right'])
     beauty_print("[1] Inverse Kinematics Computation", type="module", centered=False)
-    beauty_print(f"Initial Guess - Left (radians):")
-    print(f"  q0_left = {beauty_print_array(q0_left.cpu().numpy())}")
-    beauty_print(f"Initial Guess - Right (radians):")
-    print(f"  q0_right = {beauty_print_array(q0_right.cpu().numpy())}")
-
-    beauty_print(f"Target End-Effector Pose - Left:")
-    print(f"  Position: {beauty_print_array(T_target_left[:3, 3].cpu().numpy())}")
-    quat_display_left = matrix_to_quaternion(T_target_left[:3, :3].cpu().numpy())
-    print(f"  Quaternion (xyzw): {beauty_print_array(quat_display_left, precision=6)}")
-    
-    beauty_print(f"Target End-Effector Pose - Right:")
-    print(f"  Position: {beauty_print_array(T_target_right[:3, 3].cpu().numpy())}")
-    quat_display_right = matrix_to_quaternion(T_target_right[:3, :3].cpu().numpy())
-    print(f"  Quaternion (xyzw): {beauty_print_array(quat_display_right, precision=6)}")
 
     # Solve IK with PyTorch Kinematics (independent for each arm)
     ik_solver_pk_left = PseudoInverseIK(
         chain_left,
         pos_tolerance=args.pos_tol,
         rot_tolerance=args.ori_tol,
-        retry_configs=q0_left.unsqueeze(0),
         max_iterations=args.max_iters,
         lr=args.step_size,
         regularlization=args.damping,
+        num_retries=args.num_retries,
         joint_limits=joint_limits_left,
     )
     
@@ -132,23 +96,29 @@ def main(args):
         chain_right,
         pos_tolerance=args.pos_tol,
         rot_tolerance=args.ori_tol,
-        retry_configs=q0_right.unsqueeze(0),
         max_iterations=args.max_iters,
         lr=args.step_size,
         regularlization=args.damping,
+        num_retries=args.num_retries,
         joint_limits=joint_limits_right,
     )
     
-    target_transform_left = Transform3d(matrix=T_target_left.unsqueeze(0))
-    target_transform_right = Transform3d(matrix=T_target_right.unsqueeze(0))
+    target_transform_left = Transform3d(matrix=torch.tensor(target_left, dtype=dtype, device=device))
+    target_transform_right = Transform3d(matrix=torch.tensor(target_right, dtype=dtype, device=device))
     
     sol_pk_left = ik_solver_pk_left.solve(target_transform_left)
     sol_pk_right = ik_solver_pk_right.solve(target_transform_right)
     
-    q_pk_left = sol_pk_left.solutions[0, 0, :].cpu().numpy()
-    q_pk_right = sol_pk_right.solutions[0, 0, :].cpu().numpy()
-    converged_pk_left = sol_pk_left.converged[0, 0].item()
-    converged_pk_right = sol_pk_right.converged[0, 0].item()
+    # Select best retry: first converged, or first one if none converged
+    converged_mask_left = sol_pk_left.converged[0, :].cpu().numpy()
+    converged_mask_right = sol_pk_right.converged[0, :].cpu().numpy()
+    best_retry_idx_left = np.where(converged_mask_left)[0][0] if np.any(converged_mask_left) else 0
+    best_retry_idx_right = np.where(converged_mask_right)[0][0] if np.any(converged_mask_right) else 0
+
+    q_pk_left = sol_pk_left.solutions[0, best_retry_idx_left, :].cpu().numpy()
+    q_pk_right = sol_pk_right.solutions[0, best_retry_idx_right, :].cpu().numpy()
+    converged_pk_left = sol_pk_left.converged[0, best_retry_idx_left].item()
+    converged_pk_right = sol_pk_right.converged[0, best_retry_idx_right].item()
     
     ik_result_pk = {
         'success_left': converged_pk_left,
@@ -157,29 +127,29 @@ def main(args):
         'q_right': q_pk_right,
         'iters_left': sol_pk_left.iterations,
         'iters_right': sol_pk_right.iterations,
-        'pos_err_left': sol_pk_left.err_pos[0, 0].item(),
-        'pos_err_right': sol_pk_right.err_pos[0, 0].item(),
-        'ori_err_left': sol_pk_left.err_rot[0, 0].item(),
-        'ori_err_right': sol_pk_right.err_rot[0, 0].item(),
+        'pos_err_left': sol_pk_left.err_pos[0, best_retry_idx_left].item(),
+        'pos_err_right': sol_pk_right.err_pos[0, best_retry_idx_right].item(),
+        'ori_err_left': sol_pk_left.err_rot[0, best_retry_idx_left].item(),
+        'ori_err_right': sol_pk_right.err_rot[0, best_retry_idx_right].item(),
     }
 
     # Solve IK with RoboCore
-    T_target_left_np = T_target_left.cpu().numpy()
-    T_target_right_np = T_target_right.cpu().numpy()
-    
     ik_result_rc = bimanual_inverse_kinematics(
         left_model, right_model,
-        target_left=T_target_left_np,
-        target_right=T_target_right_np,
+        target_left=target_left,
+        target_right=target_right,
         method='dls',
         coordination=args.coordination,
-        torch_device=device,
-        torch_dtype=dtype,
-        use_analytic_jacobian=True,
         num_initial_guesses=args.num_retries,
         initial_guess_strategy='random',
         initial_guess_scale=1.0,
         random_seed=args.seed,
+        pos_tol=args.pos_tol,
+        ori_tol=args.ori_tol,
+        max_iters=args.max_iters,
+        torch_device=device,
+        torch_dtype=dtype,
+        use_analytic_jacobian=True,
     )
 
     beauty_print(f"IK Solution (PyTorch Kinematics):")
@@ -193,8 +163,8 @@ def main(args):
     print(f"  Orientation Error Right: {ik_result_pk['ori_err_right']:.6e} rad")
 
     # Extract error information from res_left and res_right
-    res_left = ik_result_rc.get('res_left', {})
-    res_right = ik_result_rc.get('res_right', {})
+    res_left = ik_result_rc['res_left']
+    res_right = ik_result_rc['res_right']
     
     # Handle case where res_left/res_right might be dict or list
     if isinstance(res_left, list) and len(res_left) > 0:
@@ -203,14 +173,14 @@ def main(args):
         res_right = res_right[0]
     
     # Get iters (use max of both arms if available)
-    iters_left = res_left.get('iters', 0) if isinstance(res_left, dict) else 0
-    iters_right = res_right.get('iters', 0) if isinstance(res_right, dict) else 0
+    iters_left = res_left['iters'] if isinstance(res_left, dict) else 0
+    iters_right = res_right['iters'] if isinstance(res_right, dict) else 0
     iters_rc = max(iters_left, iters_right)
     
-    pos_err_left_rc = res_left.get('pos_err', 0.0) if isinstance(res_left, dict) else 0.0
-    pos_err_right_rc = res_right.get('pos_err', 0.0) if isinstance(res_right, dict) else 0.0
-    ori_err_left_rc = res_left.get('ori_err', 0.0) if isinstance(res_left, dict) else 0.0
-    ori_err_right_rc = res_right.get('ori_err', 0.0) if isinstance(res_right, dict) else 0.0
+    pos_err_left_rc = res_left['pos_err'] if isinstance(res_left, dict) else 0.0
+    pos_err_right_rc = res_right['pos_err'] if isinstance(res_right, dict) else 0.0
+    ori_err_left_rc = res_left['ori_err'] if isinstance(res_left, dict) else 0.0
+    ori_err_right_rc = res_right['ori_err'] if isinstance(res_right, dict) else 0.0
 
     beauty_print(f"IK Solution (RoboCore):")
     print(f"  Success Left: {ik_result_rc['success_left']}")
@@ -257,7 +227,7 @@ def main(args):
             chain_left,
             pos_tolerance=args.pos_tol,
             rot_tolerance=args.ori_tol,
-            retry_configs=q0_left.unsqueeze(0),
+            num_retries=args.num_retries,
             max_iterations=args.max_iters,
             lr=args.step_size,
             regularlization=args.damping,
@@ -267,14 +237,14 @@ def main(args):
             chain_right,
             pos_tolerance=args.pos_tol,
             rot_tolerance=args.ori_tol,
-            retry_configs=q0_right.unsqueeze(0),
+            num_retries=args.num_retries,
             max_iterations=args.max_iters,
             lr=args.step_size,
             regularlization=args.damping,
             joint_limits=joint_limits_right,
         )
-        target_transform_left = Transform3d(matrix=T_target_left.unsqueeze(0))
-        target_transform_right = Transform3d(matrix=T_target_right.unsqueeze(0))
+        target_transform_left = Transform3d(matrix=torch.tensor(target_left, dtype=dtype, device=device))
+        target_transform_right = Transform3d(matrix=torch.tensor(target_right, dtype=dtype, device=device))
         sol_left = ik_solver_pk_left.solve(target_transform_left)
         sol_right = ik_solver_pk_right.solve(target_transform_right)
         return {
@@ -285,17 +255,20 @@ def main(args):
     def benchmark_rc():
         return bimanual_inverse_kinematics(
             left_model, right_model,
-            target_left=T_target_left_np,
-            target_right=T_target_right_np,
+            target_left=target_left,
+            target_right=target_right,
             method='dls',
             coordination=args.coordination,
-            torch_device=device,
-            torch_dtype=dtype,
-            use_analytic_jacobian=True,
             num_initial_guesses=args.num_retries,
             initial_guess_strategy='random',
             initial_guess_scale=1.0,
             random_seed=args.seed,
+            pos_tol=args.pos_tol,
+            ori_tol=args.ori_tol,
+            max_iters=args.max_iters,
+            torch_device=device,
+            torch_dtype=dtype,
+            use_analytic_jacobian=True,
         )
 
     def benchmark(func):
@@ -330,32 +303,23 @@ def main(args):
     ori_errs_rc_right = []
 
     for i in range(args.samples):
-        # Generate random target poses using FK
-        q_target_left = torch.tensor(left_model.random_q(rng), dtype=dtype, device=device)
-        q_target_right = torch.tensor(right_model.random_q(rng), dtype=dtype, device=device)
-        
-        q_target_left_tensor = q_target_left.unsqueeze(0)
-        q_target_right_tensor = q_target_right.unsqueeze(0)
-        ret_target_left = chain_left.forward_kinematics(q_target_left_tensor, end_only=False)
-        ret_target_right = chain_right.forward_kinematics(q_target_right_tensor, end_only=False)
-        tg_target_left = ret_target_left[args.left_end_link]
-        tg_target_right = ret_target_right[args.right_end_link]
-        T_target_left_rand = tg_target_left.get_matrix()[0]
-        T_target_right_rand = tg_target_right.get_matrix()[0]
-        T_target_left_rand_np = T_target_left_rand.cpu().numpy()
-        T_target_right_rand_np = T_target_right_rand.cpu().numpy()
+        # Generate random target poses
+        joint_configs_left_rand = left_model.random_q(rng, scale=args.scale)
+        joint_configs_right_rand = right_model.random_q(rng, scale=args.scale)
+        fk_result_rand = bimanual_forward_kinematics(
+            left_model, right_model,
+            joint_configs_left_rand, joint_configs_right_rand,
+            return_end=True, mode='indep',
+        )
+        target_left_rand = to_numpy(fk_result_rand['left'])
+        target_right_rand = to_numpy(fk_result_rand['right'])
 
-        # Generate initial guesses
-        noise_scale = 0.1
-        q_init_left_near = q_target_left + torch.tensor(rng.normal(0, noise_scale, n_dof_left), dtype=dtype, device=device)
-        q_init_right_near = q_target_right + torch.tensor(rng.normal(0, noise_scale, n_dof_right), dtype=dtype, device=device)
-
-        # PyTorch Kinematics IK
+        # PyTorch Kinematics IK with multiple initial guesses
         ik_solver_pk_left_rand = PseudoInverseIK(
             chain_left,
             pos_tolerance=args.pos_tol,
             rot_tolerance=args.ori_tol,
-            retry_configs=q_init_left_near.unsqueeze(0),
+            num_retries=args.num_retries,
             max_iterations=args.max_iters,
             lr=args.step_size,
             regularlization=args.damping,
@@ -365,41 +329,50 @@ def main(args):
             chain_right,
             pos_tolerance=args.pos_tol,
             rot_tolerance=args.ori_tol,
-            retry_configs=q_init_right_near.unsqueeze(0),
+            num_retries=args.num_retries,
             max_iterations=args.max_iters,
             lr=args.step_size,
             regularlization=args.damping,
             joint_limits=joint_limits_right,
         )
-        target_transform_left_rand = Transform3d(matrix=T_target_left_rand.unsqueeze(0))
-        target_transform_right_rand = Transform3d(matrix=T_target_right_rand.unsqueeze(0))
+        target_transform_left_rand = Transform3d(matrix=torch.tensor(target_left_rand, dtype=dtype, device=device))
+        target_transform_right_rand = Transform3d(matrix=torch.tensor(target_right_rand, dtype=dtype, device=device))
         
         sol_pk_left_rand = ik_solver_pk_left_rand.solve(target_transform_left_rand)
         sol_pk_right_rand = ik_solver_pk_right_rand.solve(target_transform_right_rand)
+
+        # Select best retry: first converged, or first one if none converged
+        converged_mask_left = sol_pk_left_rand.converged[0, :].cpu().numpy()
+        converged_mask_right = sol_pk_right_rand.converged[0, :].cpu().numpy()
+        best_retry_idx_left = np.where(converged_mask_left)[0][0] if np.any(converged_mask_left) else 0
+        best_retry_idx_right = np.where(converged_mask_right)[0][0] if np.any(converged_mask_right) else 0
         
         ik_pk_rand = {
-            'success_left': sol_pk_left_rand.converged[0, 0].item(),
-            'success_right': sol_pk_right_rand.converged[0, 0].item(),
-            'pos_err_left': sol_pk_left_rand.err_pos[0, 0].item(),
-            'pos_err_right': sol_pk_right_rand.err_pos[0, 0].item(),
-            'ori_err_left': sol_pk_left_rand.err_rot[0, 0].item(),
-            'ori_err_right': sol_pk_right_rand.err_rot[0, 0].item(),
+            'success_left': sol_pk_left_rand.converged[0, best_retry_idx_left].item(),
+            'success_right': sol_pk_right_rand.converged[0, best_retry_idx_right].item(),
+            'pos_err_left': sol_pk_left_rand.err_pos[0, best_retry_idx_left].item(),
+            'pos_err_right': sol_pk_right_rand.err_pos[0, best_retry_idx_right].item(),
+            'ori_err_left': sol_pk_left_rand.err_rot[0, best_retry_idx_left].item(),
+            'ori_err_right': sol_pk_right_rand.err_rot[0, best_retry_idx_right].item(),
         }
 
-        # RoboCore IK
+        # RoboCore IK - multiple initial guesses are handled automatically by bimanual_inverse_kinematics()
         ik_rc_rand = bimanual_inverse_kinematics(
             left_model, right_model,
-            target_left=T_target_left_rand_np,
-            target_right=T_target_right_rand_np,
+            target_left=target_left_rand,
+            target_right=target_right_rand,
             method='dls',
             coordination=args.coordination,
-            torch_device=device,
-            torch_dtype=dtype,
-            use_analytic_jacobian=True,
             num_initial_guesses=args.num_retries,
             initial_guess_strategy='random',
             initial_guess_scale=1.0,
             random_seed=args.seed,
+            pos_tol=args.pos_tol,
+            ori_tol=args.ori_tol,
+            max_iters=args.max_iters,
+            torch_device=device,
+            torch_dtype=dtype,
+            use_analytic_jacobian=True,
         )
 
         success_pk_left.append(ik_pk_rand['success_left'])
@@ -410,17 +383,17 @@ def main(args):
         pos_errs_pk_right.append(ik_pk_rand['pos_err_right'])
         
         # Extract error information from res_left and res_right for RoboCore
-        res_left_rand = ik_rc_rand.get('res_left', {})
-        res_right_rand = ik_rc_rand.get('res_right', {})
+        res_left_rand = ik_rc_rand['res_left']
+        res_right_rand = ik_rc_rand['res_right']
         if isinstance(res_left_rand, list) and len(res_left_rand) > 0:
             res_left_rand = res_left_rand[0]
         if isinstance(res_right_rand, list) and len(res_right_rand) > 0:
             res_right_rand = res_right_rand[0]
-        
-        pos_err_left_rc_rand = res_left_rand.get('pos_err', 0.0) if isinstance(res_left_rand, dict) else 0.0
-        pos_err_right_rc_rand = res_right_rand.get('pos_err', 0.0) if isinstance(res_right_rand, dict) else 0.0
-        ori_err_left_rc_rand = res_left_rand.get('ori_err', 0.0) if isinstance(res_left_rand, dict) else 0.0
-        ori_err_right_rc_rand = res_right_rand.get('ori_err', 0.0) if isinstance(res_right_rand, dict) else 0.0
+
+        pos_err_left_rc_rand = res_left_rand['pos_err']
+        pos_err_right_rc_rand = res_right_rand['pos_err']
+        ori_err_left_rc_rand = res_left_rand['ori_err']
+        ori_err_right_rc_rand = res_right_rand['ori_err']
         
         pos_errs_rc_left.append(pos_err_left_rc_rand)
         pos_errs_rc_right.append(pos_err_right_rc_rand)
@@ -469,7 +442,7 @@ if __name__ == '__main__':
     parser.add_argument('--left-end-link', type=str, default='left_arm_link7', help='Left arm end-effector link name')
     parser.add_argument('--right-base-link', type=str, default='base_link', help='Right arm base link name')
     parser.add_argument('--right-end-link', type=str, default='right_arm_link7', help='Right arm end-effector link name')
-    parser.add_argument('--target-left', type=float, nargs='+', 
+    parser.add_argument('--target-left', type=float, nargs='+',
                         default=[0.05717, -0.35161, 0.45995, -0.504640, 0.483414, 0.385570, 0.602483],
                         help='Target left end-effector pose as 7 floats (px, py, pz, qx, qy, qz, qw)')
     parser.add_argument('--target-right', type=float, nargs='+',
@@ -484,9 +457,10 @@ if __name__ == '__main__':
     parser.add_argument('--damping', type=float, default=1e-9, help='Regularization factor for DLS (lambda^2)')
     parser.add_argument('--step-size', type=float, default=0.2, help='Learning rate')
     parser.add_argument('--device', default='cpu', help='PyTorch device (cpu, cuda)')
-    parser.add_argument('--samples', type=int, default=50, help='Number of test configurations')
+    parser.add_argument('--samples', type=int, default=100, help='Number of test configurations')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
-    parser.add_argument('--num-retries', type=int, default=1, help='Number of initial guesses to try (default: 10)')
+    parser.add_argument('--num-retries', type=int, default=1, help='Number of initial guesses to try (default: 1)')
+    parser.add_argument('--scale', type=float, default=0.8, help='Scaling factor for the joint range (default: 0.8)')
     args = parser.parse_args()
 
     main(args)

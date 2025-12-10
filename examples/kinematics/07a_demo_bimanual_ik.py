@@ -83,8 +83,8 @@ def compute_ik(left_model, right_model, backend, target_left, target_right, coor
     elapsed_time = time.time() - start_time
 
     # Extract error information from res_left and res_right
-    res_left = ik_result.get('res_left', {})
-    res_right = ik_result.get('res_right', {})
+    res_left = ik_result['res_left']
+    res_right = ik_result['res_right']
     
     # Handle case where res_left/res_right might be dict or list
     if isinstance(res_left, list) and len(res_left) > 0:
@@ -93,18 +93,18 @@ def compute_ik(left_model, right_model, backend, target_left, target_right, coor
         res_right = res_right[0]
     
     # Get iters (use max of both arms if available)
-    iters_left = res_left.get('iters', 0) if isinstance(res_left, dict) else 0
-    iters_right = res_right.get('iters', 0) if isinstance(res_right, dict) else 0
+    iters_left = res_left['iters']
+    iters_right = res_right['iters']
     iters = max(iters_left, iters_right)
 
     return {
         'success_left': ik_result['success_left'],
         'success_right': ik_result['success_right'],
         'iters': iters,
-        'pos_err_left': res_left.get('pos_err', 0.0) if isinstance(res_left, dict) else 0.0,
-        'pos_err_right': res_right.get('pos_err', 0.0) if isinstance(res_right, dict) else 0.0,
-        'ori_err_left': res_left.get('ori_err', 0.0) if isinstance(res_left, dict) else 0.0,
-        'ori_err_right': res_right.get('ori_err', 0.0) if isinstance(res_right, dict) else 0.0,
+        'pos_err_left': res_left['pos_err'],
+        'pos_err_right': res_right['pos_err'],
+        'ori_err_left': res_left['ori_err'],
+        'ori_err_right': res_right['ori_err'],
         'q_left': ik_result['q_left'],
         'q_right': ik_result['q_right'],
         'time': elapsed_time
