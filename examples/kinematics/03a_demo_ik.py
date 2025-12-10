@@ -26,19 +26,22 @@ import time
 import robocore as rc
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.ik import inverse_kinematics
-from robocore.kinematics.fk import forward_kinematics
 from robocore.utils.beauty_logger import beauty_print_array, beauty_print
 from robocore.utils.backend import to_numpy
 from robocore.transform.conversions import *
 
 
-def compute_ik(robot_model, backend, end_pose, q_init):
+def compute_ik(robot_model, backend, end_pose, q0=None, num_initial_guesses=1, initial_guess_strategy='random', initial_guess_scale=1.0, random_seed=None):
     """Compute inverse kinematics for given backend.
     
     :param robot_model: RobotModel instance
     :param backend: Backend name ('numpy' or 'torch')
     :param end_pose: Target end-effector pose [px, py, pz, qx, qy, qz, qw]
-    :param q_init: Initial joint angles guess
+    :param q0: Base initial joint angles guess (optional, used as base for strategies)
+    :param num_initial_guesses: Number of initial guesses to try
+    :param initial_guess_strategy: Strategy for generating initial guesses
+    :param initial_guess_scale: Scale factor for joint limits
+    :param random_seed: Random seed for reproducibility
     :return: Dictionary with results and computation time
     """
     rc.set_backend(backend)
@@ -52,15 +55,18 @@ def compute_ik(robot_model, backend, end_pose, q_init):
     ik_result = inverse_kinematics(
         robot_model,
         T_fk,
-        q_init,
+        q0,
         method='dls',
         max_iters=100,
         pos_tol=1e-4,
         ori_tol=1e-4,
         use_analytic_jacobian=True,
+        num_initial_guesses=num_initial_guesses,
+        initial_guess_strategy=initial_guess_strategy,
+        initial_guess_scale=initial_guess_scale,
+        random_seed=random_seed,
     )
 
-    T_verify = forward_kinematics(robot_model, ik_result['q'], return_end=True)
     elapsed_time = time.time() - start_time
 
     return {
@@ -70,27 +76,35 @@ def compute_ik(robot_model, backend, end_pose, q_init):
         'ori_err': ik_result['ori_err'],
         'err_norm': ik_result.get('err_norm', None),
         'q': ik_result['q'],
-        'verify_pos': T_verify[:3, 3],
-        'verify_pos_err': np.linalg.norm(T_verify[:3, 3] - T_fk[:3, 3]),
         'time': elapsed_time
     }
 
 
 def main(args):
-    q_init = np.array([+0.86066, -0.19202, +1.12657, +0.62005, -1.27493, +1.49421])
-    beauty_print(f"Initial Guess (radians):")
-    print(f"  q_init = {beauty_print_array(q_init)}")
-
     robot_model = RobotModel(str(args.model_path), base_link=args.base_link, end_link=args.end_link)
+
+
     # Compute with both backends
-    results_np = compute_ik(robot_model, 'numpy', args.end_pose, q_init)
-    results_torch = compute_ik(robot_model, 'torch', args.end_pose, q_init)
+    results_np = compute_ik(
+        robot_model, 'numpy', args.end_pose,
+        q0=None,
+        num_initial_guesses=args.num_inits,
+        initial_guess_strategy=args.init_strategy,
+        initial_guess_scale=args.init_scale,
+        random_seed=args.seed
+    )
+    results_torch = compute_ik(
+        robot_model, 'torch', args.end_pose,
+        q0=None,
+        num_initial_guesses=args.num_inits,
+        initial_guess_strategy=args.init_strategy,
+        initial_guess_scale=args.init_scale,
+        random_seed=args.seed
+    )
 
     # Convert to numpy for comparison
     q_np = to_numpy(results_np['q'])
     q_torch = to_numpy(results_torch['q'])
-    verify_pos_np = to_numpy(results_np['verify_pos'])
-    verify_pos_torch = to_numpy(results_torch['verify_pos'])
 
     beauty_print(f"IK Solution:")
     print(f"  Success:  NumPy={results_np['success']}, Torch={results_torch['success']}")
@@ -109,10 +123,6 @@ def main(args):
     beauty_print(f"Solved Joint Angles (degrees):")
     print(f"  NumPy:  {beauty_print_array(np.rad2deg(q_np))}")
     print(f"  Torch:  {beauty_print_array(np.rad2deg(q_torch))}")
-
-    beauty_print(f"Verification (FK of IK solution):")
-    print(f"  Position:  NumPy={beauty_print_array(verify_pos_np)}, Torch={beauty_print_array(verify_pos_torch)}")
-    print(f"  Position Error:  NumPy={results_np['verify_pos_err']:.6e} m, Torch={results_torch['verify_pos_err']:.6e} m")
 
     beauty_print(f"Computation Time:")
     print(f"  NumPy:  {results_np['time']* 1000:.4f} ms")
@@ -134,9 +144,17 @@ if __name__ == "__main__":
     parser.add_argument('--end-pose', type=float, nargs='+',
                         default=[-0.17006, -0.01704, 0.20533, 0.828399, -0.041455, -0.552330, 0.083476],
                         help='Target end-effector pose as 7 floats (px, py, pz, qx, qy, qz, qw)')
+    parser.add_argument('--num-inits', type=int, default=1,
+                        help='Number of initial guesses to try per target (default: 1)')
+    parser.add_argument('--init-strategy', type=str, default='random',
+                        choices=['zero', 'random', 'sobol', 'latin', 'center', 'uniform'],
+                        help='Strategy for generating initial guesses (default: random)')
+    parser.add_argument('--init-scale', type=float, default=1.0,
+                        help='Scale factor for joint limits when generating guesses (0.0 to 1.0, default: 1.0)')
+    parser.add_argument('--seed', type=int, default=None,
+                        help='Random seed for reproducibility (default: None)')
     parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch'],
                         help='Backend to use for computation (default: numpy, ignored - both are tested)')
-    # Target joint angles: [0.1, 0.2, -0.3, 0.0, 0.5, -0.2]
     args = parser.parse_args()
     main(args)
 

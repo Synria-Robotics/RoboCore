@@ -51,10 +51,8 @@ class BiIndependentIKSolverNumpy:
         tgt_left = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
         tgt_right = target_right.tolist() if hasattr(target_right, 'tolist') else target_right
 
-        res_left = (inverse_kinematics(self.left, tgt_left, q0_left, **ik_kwargs)
-                    if tgt_left is not None else {'q': q0_left if q0_left is not None else [0.0] * self.left.num_chain_dof, 'success': True})
-        res_right = (inverse_kinematics(self.right, tgt_right, q0_right, **ik_kwargs)
-                     if tgt_right is not None else {'q': q0_right if q0_right is not None else [0.0] * self.right.num_chain_dof, 'success': True})
+        res_left = inverse_kinematics(self.left, tgt_left, q0_left, **ik_kwargs)
+        res_right = inverse_kinematics(self.right, tgt_right, q0_right, **ik_kwargs)
 
         # Handle batch mode (returns list of dicts)
         if is_batch and isinstance(res_left, list) and isinstance(res_right, list):
@@ -108,16 +106,14 @@ class BiRelativeIKSolverNumpy(BiIndependentIKSolverNumpy):
         """
         # 1. 先解左臂
         tgt_left = target_left.tolist() if hasattr(target_left, 'tolist') else target_left
-        res_left = (inverse_kinematics(self.left, tgt_left, q0_left, **ik_kwargs)
-                    if tgt_left is not None else {'q': q0_left if q0_left is not None else [0.0] * self.left.num_chain_dof, 'success': True})
+        res_left = inverse_kinematics(self.left, tgt_left, q0_left, **ik_kwargs)
         q_left = res_left.get('q', q0_left if q0_left is not None else [0.0] * self.left.num_chain_dof)
 
         # 2. 用左臂当前末端和 T_rel_grasp 计算右臂目标
         T_left_current = self.left.fk(q_left)['end']
         T_right_constrained = T_left_current @ T_rel_grasp if T_rel_grasp is not None else None
 
-        res_right = (inverse_kinematics(self.right, T_right_constrained, q0_right, **ik_kwargs)
-                     if T_right_constrained is not None else {'q': q0_right if q0_right is not None else [0.0] * self.right.num_chain_dof, 'success': True})
+        res_right = inverse_kinematics(self.right, T_right_constrained, q0_right, **ik_kwargs)
 
         return {
             'q_left': q_left,
