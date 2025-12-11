@@ -19,7 +19,7 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
-__version__ = "1.5.1"
+__version__ = "2.0.0"
 __author__ = "Synria Robotics Team"
 __copyright__ = "Copyright (c) 2025 Synria Robotics Co., Ltd."
 __license__ = "GPL-3.0"
@@ -39,6 +39,13 @@ from .utils.backend import set_backend, get_backend
 __all__ = [
     'set_backend',
     'get_backend',
+    'modeling',
+    'kinematics',
+    'transform',
+    'planning',
+    'analysis',
+    'configs',
+    'utils',
     'control',
 ]
 
