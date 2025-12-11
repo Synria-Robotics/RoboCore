@@ -55,16 +55,13 @@ def main(args):
 
     beauty_print(f"Inverse Kinematics Comparison: PyTorch Kinematics vs RoboCore ({n_dof} DOF)", type="module")
 
-    rng = np.random.default_rng(args.seed)
     device = torch.device(args.device)
     dtype = torch.float64
     chain = chain.to(dtype=dtype, device=device)
     joint_limits = torch.tensor([[js.limit_lower, js.limit_upper] for js in rc_model._chain_actuated], dtype=dtype, device=device)
 
     # Build target pose from input
-    num_configs = args.num_configs
-    joint_configs = rc_model.random_q(rng, scale=args.scale)
-    target_poses = forward_kinematics(rc_model, joint_configs, return_end=True)
+    target_pose = rc_model.random_pose(seed=args.seed, scale=args.scale)
     beauty_print("[1] Inverse Kinematics Computation", type="module", centered=False)
 
     # Solve IK with PyTorch Kinematics using PseudoInverseIK
@@ -82,7 +79,7 @@ def main(args):
     
 
     # Create target pose as Transform3d
-    target_transform = Transform3d(matrix=torch.tensor(target_poses, dtype=dtype, device=device))  # (1, 4, 4)
+    target_transform = Transform3d(matrix=torch.tensor(target_pose, dtype=dtype, device=device))  # (1, 4, 4)
     sol_pk = ik_solver_pk.solve(target_transform)
     
     # Extract result from IKSolution
@@ -107,7 +104,7 @@ def main(args):
     # Using default adaptive parameters for better convergence with joint limits.
     ik_result_rc = inverse_kinematics(
         rc_model,
-        target_poses,
+        target_pose,
         method='dls',
         max_iters=args.max_iters,
         pos_tol=args.pos_tol,
@@ -162,7 +159,7 @@ def main(args):
             regularlization=args.damping,
             joint_limits=joint_limits,
         )
-        target_transform = Transform3d(matrix=torch.tensor(target_poses, dtype=dtype, device=device))  # (1, 4, 4)
+        target_transform = Transform3d(matrix=torch.tensor(target_pose, dtype=dtype, device=device))  # (1, 4, 4)
         sol_pk = ik_solver_pk.solve(target_transform)
         q_result = sol_pk.solutions[0, 0, :].cpu().numpy()
         converged = sol_pk.converged[0, 0].item()
@@ -176,7 +173,7 @@ def main(args):
 
     def benchmark_rc():
         result = inverse_kinematics(
-            rc_model, target_poses, q0=None,
+            rc_model, target_pose, q0=None,
             method='dls', max_iters=args.max_iters,
             pos_tol=args.pos_tol, ori_tol=args.ori_tol,
             num_initial_guesses=args.num_retries,
@@ -214,8 +211,7 @@ def main(args):
 
     for i in range(args.samples):
         # Generate random target pose
-        joint_configs_rand = rc_model.random_q(rng, scale=args.scale)
-        target_poses_rand = forward_kinematics(rc_model, joint_configs_rand, return_end=True)
+        target_pose_rand = rc_model.random_pose(seed=args.seed, scale=args.scale)
         # PyTorch Kinematics IK with multiple initial guesses
         ik_solver_pk_rand = PseudoInverseIK(
             chain,
@@ -227,7 +223,7 @@ def main(args):
             regularlization=args.damping,
             joint_limits=joint_limits,
         )
-        target_transform_rand = Transform3d(matrix=torch.tensor(target_poses_rand, dtype=dtype, device=device))  # (1, 4, 4)
+        target_transform_rand = Transform3d(matrix=torch.tensor(target_pose_rand, dtype=dtype, device=device))  # (1, 4, 4)
         sol_pk_rand = ik_solver_pk_rand.solve(target_transform_rand)
 
         # Select best retry: first converged, or first one if none converged
@@ -250,7 +246,7 @@ def main(args):
 
         # RoboCore IK - multiple initial guesses are handled automatically by inverse_kinematics()
         ik_rc_rand = inverse_kinematics(
-            rc_model, target_poses_rand, q0=None,
+            rc_model, target_pose_rand, q0=None,
             method='dls', max_iters=args.max_iters,
             pos_tol=args.pos_tol, ori_tol=args.ori_tol,
             num_initial_guesses=args.num_retries,

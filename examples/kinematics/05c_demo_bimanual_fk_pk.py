@@ -55,7 +55,6 @@ def main(args):
     beauty_print(f"Left arm: {n_dof_left} DOF, Right arm: {n_dof_right} DOF", type="info")
     beauty_print(f"PyTorch device: {args.device}", type="info")
     
-    rng = np.random.default_rng(args.seed)
     device = torch.device(args.device)
     dtype = torch.float64
     chain_left = chain_left.to(dtype=dtype, device=device)
@@ -192,8 +191,8 @@ def main(args):
     rot_diffs_right = []
     
     for i in range(args.samples):
-        q_left_rand = torch.tensor(left_model.random_q(rng), dtype=dtype, device=device)
-        q_right_rand = torch.tensor(right_model.random_q(rng), dtype=dtype, device=device)
+        q_left_rand = torch.tensor(left_model.random_q(seed=args.seed), dtype=dtype, device=device)
+        q_right_rand = torch.tensor(right_model.random_q(seed=args.seed), dtype=dtype, device=device)
         
         # PyTorch Kinematics
         q_left_rand_tensor = q_left_rand.unsqueeze(0)

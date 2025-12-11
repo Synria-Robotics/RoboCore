@@ -52,7 +52,6 @@ def main(args):
     beauty_print(f"Forward Kinematics Comparison: PyTorch Kinematics vs RoboCore ({n_dof} DOF)", type="module")
     beauty_print(f"PyTorch device: {args.device}", type="info")
     
-    rng = np.random.default_rng(args.seed)
     device = torch.device(args.device)
     dtype = torch.float64
     chain = chain.to(dtype=dtype, device=device)
@@ -135,7 +134,7 @@ def main(args):
     pos_diffs = []
     rot_diffs = []
     for i in range(args.samples):
-        q_rand = torch.tensor(rc_model.random_q(rng), dtype=dtype, device=device)
+        q_rand = torch.tensor(rc_model.random_q(seed=args.seed), dtype=dtype, device=device)
         
         # PyTorch Kinematics
         q_rand_tensor = q_rand.unsqueeze(0)

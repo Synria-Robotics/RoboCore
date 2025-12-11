@@ -55,7 +55,6 @@ def main(args):
     beauty_print(f"Mode: {args.mode}", type="info")
     beauty_print(f"PyTorch device: {args.device}", type="info")
     
-    rng = np.random.default_rng(args.seed)
     device = torch.device(args.device)
     dtype = torch.float64
     chain_left = chain_left.to(dtype=dtype, device=device)
@@ -166,8 +165,8 @@ def main(args):
     max_diffs = []
     
     for i in range(args.samples):
-        q_left_rand = torch.tensor(left_model.random_q(rng), dtype=dtype, device=device)
-        q_right_rand = torch.tensor(right_model.random_q(rng), dtype=dtype, device=device)
+        q_left_rand = torch.tensor(left_model.random_q(seed=args.seed), dtype=dtype, device=device)
+        q_right_rand = torch.tensor(right_model.random_q(seed=args.seed), dtype=dtype, device=device)
         
         # PyTorch Kinematics
         J_pk_left_rand = chain_left.jacobian(q_left_rand)

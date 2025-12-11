@@ -77,7 +77,8 @@ def slerp(q1, q2, t):
         sin_theta = xp.sin(theta)
         
         # Avoid division by zero
-        safe_sin = xp.maximum(sin_theta, 1e-10)
+        eps = xp.tensor(1e-10, dtype=sin_theta.dtype, device=sin_theta.device)
+        safe_sin = xp.maximum(sin_theta, eps)
         
         w1 = xp.sin((1 - t) * theta) / safe_sin
         w2 = xp.sin(t * theta) / safe_sin

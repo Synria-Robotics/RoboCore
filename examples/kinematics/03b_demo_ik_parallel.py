@@ -47,16 +47,8 @@ def main(args):
     # Generate random joint configurations
     num_configs = args.num_configs
     beauty_print("Generating Random Joint Configurations", type="module", centered=True)
-    joint_configs = robot_model.random_q_batch(num_configs, seed=args.seed, scale=args.scale)
-    beauty_print(f"Generated {num_configs} random joint configuration(s)")
-
-    # Generate target poses from joint configurations using FK
-    beauty_print("Computing Forward Kinematics", type="module", centered=True)
-    target_poses = forward_kinematics(robot_model, joint_configs, return_end=True)
-    # Ensure target_poses is 3D: [batch_size, 4, 4]
-    if target_poses.ndim == 2:
-        target_poses = target_poses[np.newaxis, ...]
-    beauty_print(f"Computed {target_poses.shape[0]} target pose(s) from FK")
+    target_poses = robot_model.random_pose_batch(num_configs, seed=args.seed, scale=args.scale)
+    beauty_print(f"Generated {target_poses.shape[0]} random target pose(s)")
 
     # Single IK example
     beauty_print("Single IK Example", type="module", centered=True)

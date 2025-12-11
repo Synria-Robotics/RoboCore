@@ -85,12 +85,11 @@ def run_demo(demo_path, end_pose):
 
 def generate_reachable_targets(robot_model, n_targets=20, seed=42):
     """Generate random reachable target poses by sampling joint space."""
-    rng = np.random.default_rng(seed)
     targets = []
     
     for _ in range(n_targets):
         # Sample random joint angles
-        q = robot_model.random_q(rng)
+        q = robot_model.random_q(seed=seed)
         # Compute FK to get reachable pose
         T = forward_kinematics(robot_model, q, return_end=True)
         

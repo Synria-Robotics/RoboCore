@@ -60,7 +60,6 @@ def main(args):
     beauty_print(f"PyTorch device: {args.device}", type="info")
     beauty_print("Note: PyTorch Kinematics solves each arm independently. RoboCore supports coordination modes.", type="info")
 
-    rng = np.random.default_rng(args.seed)
     device = torch.device(args.device)
     dtype = torch.float64
     chain_left = chain_left.to(dtype=dtype, device=device)
@@ -69,8 +68,8 @@ def main(args):
     joint_limits_right = torch.tensor([[js.limit_lower, js.limit_upper] for js in right_model._chain_actuated], dtype=dtype, device=device)
 
     # Build target poses from input
-    joint_configs_left = left_model.random_q(rng, scale=args.scale)
-    joint_configs_right = right_model.random_q(rng, scale=args.scale)
+    joint_configs_left = left_model.random_q(seed=args.seed, scale=args.scale)
+    joint_configs_right = right_model.random_q(seed=args.seed, scale=args.scale)
     fk_result = bimanual_forward_kinematics(
         left_model, right_model,
         joint_configs_left, joint_configs_right,
@@ -304,8 +303,8 @@ def main(args):
 
     for i in range(args.samples):
         # Generate random target poses
-        joint_configs_left_rand = left_model.random_q(rng, scale=args.scale)
-        joint_configs_right_rand = right_model.random_q(rng, scale=args.scale)
+        joint_configs_left_rand = left_model.random_q(seed=args.seed, scale=args.scale)
+        joint_configs_right_rand = right_model.random_q(seed=args.seed, scale=args.scale)
         fk_result_rand = bimanual_forward_kinematics(
             left_model, right_model,
             joint_configs_left_rand, joint_configs_right_rand,

@@ -671,25 +671,16 @@ class RobotModel:
             row_mask=row_mask,
         )
 
-    def random_q(self, rng=None, scale: float = 0.5):
+    def random_q(self, seed: int = None, scale: float = 0.5):
         """
         Generate a random joint configuration within joint limits.
         
-        :param rng: NumPy random generator (if None, creates a new one with random seed)
+        :param seed: random seed for reproducibility (if None, uses random seed)
         :param scale: scaling factor for the joint range (0.0 to 1.0, default: 0.5)
                       0.5 means sample from middle 50% of each joint's range
         :return: list of random joint values (length = dof())
-        
-        Example::
-        
-            >>> model = RobotModel("robot.urdf")
-            >>> q = model.random_q()  # Random configuration
-            >>> q = model.random_q(scale=0.8)  # Use 80% of joint range
-            >>> rng = np.random.default_rng(42)
-            >>> q = model.random_q(rng=rng)  # Reproducible random
         """
-        if rng is None:
-            rng = np.random.default_rng()
+        rng = np.random.default_rng(seed)
         q = [0.0] * self.num_chain_dof
         for js in self._chain_actuated:
             lo, hi = -1.0, 1.0
@@ -701,6 +692,55 @@ class RobotModel:
             span = 0.5 * (hi - lo) * scale
             q[js.index] = float(rng.uniform(mid - span, mid + span))
         return q
+    
+    def random_q_batch(self, batch_size: int, seed: int = None, scale: float = 0.5):
+        """
+        Generate a batch of random joint configurations within joint limits.
+        
+        :param batch_size: number of configurations to generate
+        :param seed: random seed for reproducibility (if None, uses random seed)
+        :param scale: scaling factor for the joint range (0.0 to 1.0, default: 0.5)
+        :return: NumPy array of shape (batch_size, dof())
+        """
+        rng = np.random.default_rng(seed)
+        n_joints = self.num_chain_dof
+        q_batch = np.zeros((batch_size, n_joints))
+
+        for i in range(batch_size):
+            for js in self._chain_actuated:
+                lo, hi = -1.0, 1.0
+                if js.limit_lower is not None:
+                    lo = js.limit_lower
+                if js.limit_upper is not None:
+                    hi = js.limit_upper
+                mid = 0.5 * (lo + hi)
+                span = 0.5 * (hi - lo) * scale
+                q_batch[i, js.index] = rng.uniform(mid - span, mid + span)
+
+        return q_batch
+    
+    def random_pose(self, seed: int = None, scale: float = 0.5):
+        """
+        Generate a random pose within the joint limits.
+        :param seed: random seed for reproducibility (if None, uses random seed)
+        :param scale: scaling factor for the joint range (0.0 to 1.0, default: 0.5)
+        :return: 4x4 pose matrix
+        """
+        q = self.random_q(seed=seed, scale=scale)
+        return self.fk(q, return_end=True)
+    
+    def random_pose_batch(self, batch_size: int, seed: int = None, scale: float = 0.5):
+        """
+        Generate a batch of random poses within the joint limits.
+        :param batch_size: number of poses to generate
+        :param seed: random seed for reproducibility (if None, uses random seed)
+        :param scale: scaling factor for the joint range (0.0 to 1.0, default: 0.5)
+        :return: list of 4x4 pose matrices
+        """
+        T_batch = forward_kinematics(self, self.random_q_batch(batch_size, seed=seed, scale=scale), return_end=True)
+        if T_batch.ndim == 2:
+            T_batch = T_batch[np.newaxis, ...]
+        return T_batch
 
     # -------- Multi-chain support / spawn ---------
     def spawn_chain(self, end_link: str, base_link: Optional[str] = None) -> "RobotModel":
@@ -980,38 +1020,7 @@ class RobotModel:
             e_ori = axis * angle
         return np.concatenate([e_pos, e_ori])
 
-    def random_q_batch(self, batch_size: int, seed: int = None, scale: float = 0.5):
-        """
-        Generate a batch of random joint configurations within joint limits.
-        
-        :param batch_size: number of configurations to generate
-        :param seed: random seed for reproducibility (if None, uses random seed)
-        :param scale: scaling factor for the joint range (0.0 to 1.0, default: 0.5)
-        :return: NumPy array of shape (batch_size, dof())
-        
-        Example::
-        
-            >>> model = RobotModel("robot.urdf")
-            >>> q_batch = model.random_q_batch(100)  # 100 random configs
-            >>> q_batch = model.random_q_batch(100, seed=42)  # Reproducible
-            >>> q_batch = model.random_q_batch(100, scale=0.8)  # Use 80% of range
-        """
-        rng = np.random.default_rng(seed)
-        n_joints = self.num_chain_dof
-        q_batch = np.zeros((batch_size, n_joints))
 
-        for i in range(batch_size):
-            for js in self._chain_actuated:
-                lo, hi = -1.0, 1.0
-                if js.limit_lower is not None:
-                    lo = js.limit_lower
-                if js.limit_upper is not None:
-                    hi = js.limit_upper
-                mid = 0.5 * (lo + hi)
-                span = 0.5 * (hi - lo) * scale
-                q_batch[i, js.index] = rng.uniform(mid - span, mid + span)
-
-        return q_batch
 
     # -------- Workspace Analysis (lazy-loaded) ---------
     def compute_workspace(self, num_samples: int = 5000, method: str = 'monte_carlo',

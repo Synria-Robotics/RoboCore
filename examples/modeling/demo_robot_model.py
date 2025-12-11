@@ -224,8 +224,7 @@ def main(args):
         beauty_print("Chain DOF mismatch: using max chain DOF, shorter model will pad with zeros", type="warning")
 
     if args.random:
-        rng = np.random.default_rng(args.seed)
-        q = np.array(urdf_model.random_q(rng=rng, scale=args.scale))
+        q = np.array(urdf_model.random_q(seed=args.seed, scale=args.scale))
         beauty_print("Using random joint angles (middle range)")
         # Use max chain DOF to accommodate both models
         max_chain_dof = max(urdf_model.num_chain_dof, mjcf_model.num_chain_dof)

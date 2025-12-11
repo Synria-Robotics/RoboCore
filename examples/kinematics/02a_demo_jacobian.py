@@ -88,11 +88,11 @@ def benchmark_jacobian(model, q, methods, n_runs, device=None):
     return times
 
 
-def compute_condition_statistics(model, rng, samples, method='analytic', device=None):
+def compute_condition_statistics(model, seed, samples, method='analytic', device=None):
     """Compute condition number statistics across random configurations."""
     condition_numbers = []
     for i in range(samples):
-        q_rand = model.random_q(rng)
+        q_rand = model.random_q(seed)
         
         # Convert to appropriate format
         if device is not None:
@@ -154,7 +154,6 @@ def main(args):
     robot_model = RobotModel(args.model_path, base_link=args.base_link, end_link=args.end_link)
     beauty_print(f"Jacobian Validation: {robot_model.name} ({robot_model.num_dof} DOF)", type="module")
 
-    rng = np.random.default_rng(args.seed)
     q = np.zeros(robot_model.num_chain_dof)
 
     beauty_print(f"Joint configuration (rad):")

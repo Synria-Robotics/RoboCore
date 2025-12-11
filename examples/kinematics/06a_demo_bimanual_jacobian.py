@@ -66,7 +66,6 @@ def main(args):
     beauty_print(f"Bimanual Jacobian Validation: {left_model.name} (Left: {left_model.num_chain_dof} DOF, Right: {right_model.num_chain_dof} DOF)", type="module")
     beauty_print(f"Mode: {args.mode}", type="info")
 
-    rng = np.random.default_rng(args.seed)
     q_left = np.array(args.q_left)
     q_right = np.array(args.q_right)
 

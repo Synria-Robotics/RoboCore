@@ -51,7 +51,6 @@ def main(args):
     beauty_print(f"Jacobian Comparison: PyTorch Kinematics vs RoboCore ({n_dof} DOF)", type="module")
     beauty_print(f"PyTorch device: {args.device}", type="info")
     
-    rng = np.random.default_rng(args.seed)
     device = torch.device(args.device)
     dtype = torch.float64
     chain = chain.to(dtype=dtype, device=device)
@@ -112,11 +111,7 @@ def main(args):
     condition_numbers = []
     max_diffs = []
     for i in range(args.samples):
-        q_rand = torch.tensor(
-            rng.uniform(-np.pi/2, np.pi/2, n_dof),
-            dtype=dtype,
-            device=device
-        )
+        q_rand = torch.tensor(rc_model.random_q(seed=args.seed), dtype=dtype, device=device)
         
         # PyTorch Kinematics
         J_pk_rand = chain.jacobian(q_rand)

@@ -84,9 +84,9 @@ class IKSolverNumPy:
         pos_weight: float = 1.0,
         ori_weight: float = 1.0,
         adaptive_damping: bool = True,
-        adaptive_step: bool = True,
+        adaptive_step: bool = False,
         use_central_diff: bool = True,
-        use_analytic_jacobian: bool = False,
+        use_analytic_jacobian: bool = True,
         method: str = "dls",
         transpose_gain: float | None = None,
         max_step_norm: float = 0.5,
@@ -206,6 +206,7 @@ class IKSolverNumPy:
         active = np.ones(B, dtype=bool)
         prev_err = np.full(B, np.inf)
         plateau = np.zeros(B, dtype=np.int32)
+        q_initial = q.copy()  # Track initial configuration to detect large cumulative jumps
 
         p_target = target_poses_batch[:, :3, 3]
         R_target = target_poses_batch[:, :3, :3]
@@ -313,19 +314,24 @@ class IKSolverNumPy:
             for k in range(Ba_sub):
                 Jk = J[k]
                 ek = e[k]
+                qk = q_sub[k]
+
+                # Project Jacobian to handle joint limits: zero out columns for joints that would be blocked
+                Jk_projected = self._project_jacobian_for_limits(Jk, qk, ek, lam[k], method)
+
                 if method == "dls":
-                    dq[k] = self._solve_dls(Jk, ek, lam[k])
+                    dq[k] = self._solve_dls(Jk_projected, ek, lam[k])
                 elif method == "pinv":
-                    dq[k] = self._solve_pinv(Jk, ek, lam[k])
+                    dq[k] = self._solve_pinv(Jk_projected, ek, lam[k])
                 else:  # transpose
                     if transpose_gain is not None:
                         alpha = transpose_gain
                     else:
-                        J_err = Jk.T @ ek
-                        JJt_err = Jk @ J_err
+                        J_err = Jk_projected.T @ ek
+                        JJt_err = Jk_projected @ J_err
                         alpha = np.dot(ek, ek) / (np.dot(JJt_err, JJt_err) + 1e-12)
                         alpha = np.clip(alpha, 0.001, 0.5)
-                    dq[k] = alpha * (Jk.T @ ek)
+                    dq[k] = alpha * (Jk_projected.T @ ek)
 
             # Adaptive step
             if adaptive_step and method != "transpose":
@@ -340,7 +346,7 @@ class IKSolverNumPy:
                 scale = np.clip(max_step_norm / (dq_norm + 1e-12), 0, 1)
                 dq = dq * scale
 
-            # Update with joint limits
+            # Update with joint limits - but also detect large jumps that might indicate discontinuity
             q_new = q_sub + dq
             for js in self.model._chain_actuated:
                 j = js.index
@@ -348,6 +354,46 @@ class IKSolverNumPy:
                     q_new[:, j] = np.maximum(q_new[:, j], js.limit_lower)
                 if js.limit_upper is not None:
                     q_new[:, j] = np.minimum(q_new[:, j], js.limit_upper)
+
+            # Detect and prevent large jumps near limits (indicates discontinuity)
+            for k in range(Ba_sub):
+                orig_idx = act_idx[k]
+                for js in self.model._chain_actuated:
+                    j = js.index
+                    if js.limit_lower is not None and js.limit_upper is not None:
+                        joint_range = js.limit_upper - js.limit_lower
+                        dist_to_lower = q_sub[k, j] - js.limit_lower
+                        dist_to_upper = js.limit_upper - q_sub[k, j]
+                        threshold = joint_range * 0.1  # 10% of range - more aggressive
+
+                        # Check both single-step jump and cumulative jump from initial
+                        step_jump = abs(q_new[k, j] - q_sub[k, j])
+                        cumulative_jump = abs(q_new[k, j] - q_initial[orig_idx, j])
+
+                        # If near limit and jump is large, it might be a discontinuity
+                        if (dist_to_lower < threshold or dist_to_upper < threshold):
+                            # Check single-step jump
+                            if step_jump > joint_range * 0.15:  # 15% of range per step
+                                max_step = joint_range * 0.05  # Max 5% of range per step
+                                if q_new[k, j] > q_sub[k, j] + max_step:
+                                    q_new[k, j] = q_sub[k, j] + max_step
+                                elif q_new[k, j] < q_sub[k, j] - max_step:
+                                    q_new[k, j] = q_sub[k, j] - max_step
+                            # Also check cumulative jump - if too large, clamp to initial + small step
+                            elif cumulative_jump > joint_range * 0.4:  # 40% of range total
+                                # Allow only small deviation from initial when near limit
+                                max_deviation = joint_range * 0.1
+                                if q_new[k, j] > q_initial[orig_idx, j] + max_deviation:
+                                    q_new[k, j] = q_initial[orig_idx, j] + max_deviation
+                                elif q_new[k, j] < q_initial[orig_idx, j] - max_deviation:
+                                    q_new[k, j] = q_initial[orig_idx, j] - max_deviation
+
+                            # Re-apply limits
+                            if js.limit_lower is not None:
+                                q_new[k, j] = max(q_new[k, j], js.limit_lower)
+                            if js.limit_upper is not None:
+                                q_new[k, j] = min(q_new[k, j], js.limit_upper)
+
             q[act_idx] = q_new
 
         # Use best solution for non-converged
@@ -427,6 +473,7 @@ class IKSolverNumPy:
         p_target = target_pose[:3, 3]
         
         q = q0.copy()
+        q_initial = q.copy()  # Track initial configuration to detect large cumulative jumps
         best_q = q.copy()
         best_err = np.inf
         best_pos_err = np.inf
@@ -555,11 +602,14 @@ class IKSolverNumPy:
             else:
                 damping = (self.min_damping + self.max_damping) / 2
 
+            # Project Jacobian to handle joint limits before solving
+            J_eff_projected = self._project_jacobian_for_limits(J_eff, q, err, damping, method)
+
             # Solve per method
             if method == "dls":
-                dq = self._solve_dls(J_eff, err, damping)
+                dq = self._solve_dls(J_eff_projected, err, damping)
             elif method == "pinv":
-                dq = self._solve_pinv(J_eff, err, damping)
+                dq = self._solve_pinv(J_eff_projected, err, damping)
             else:  # transpose
                 # Jacobian Transpose 方法
                 # 使用自适应增益：alpha = ||err||² / ||J @ J.T @ err||²
@@ -578,7 +628,7 @@ class IKSolverNumPy:
                         alpha_raw = 0.01
                     # 限制 alpha 范围避免步长过大
                     alpha = np.clip(alpha_raw, 0.001, 0.5)
-                dq = alpha * (J_eff.T @ err)
+                dq = alpha * (J_eff_projected.T @ err)
 
             # Nullspace redundancy handling (only if more joints than task rows and gain>0)
             if nullspace_gain > 0 and self.n > J_eff.shape[0]:
@@ -627,10 +677,49 @@ class IKSolverNumPy:
                     dq_step = dq_step * (max_step_norm / (dq_norm + 1e-15))
             
             # Update joint angles
-            q += dq_step
+            q_new = q + dq_step
             
             # Apply joint limits
-            q = self._apply_joint_limits(q)
+            q_new = self._apply_joint_limits(q_new)
+
+            # Detect and prevent large jumps near limits (indicates discontinuity)
+            for js in self.model._chain_actuated:
+                j = js.index
+                if js.limit_lower is not None and js.limit_upper is not None:
+                    joint_range = js.limit_upper - js.limit_lower
+                    dist_to_lower = q[j] - js.limit_lower
+                    dist_to_upper = js.limit_upper - q[j]
+                    threshold = joint_range * 0.1  # 10% of range - more aggressive
+
+                    # Check both single-step jump and cumulative jump from initial
+                    step_jump = abs(q_new[j] - q[j])
+                    cumulative_jump = abs(q_new[j] - q_initial[j])
+
+                    # If near limit and jump is large, it might be a discontinuity
+                    if (dist_to_lower < threshold or dist_to_upper < threshold):
+                        # Check single-step jump
+                        if step_jump > joint_range * 0.15:  # 15% of range per step
+                            max_step = joint_range * 0.05  # Max 5% of range per step
+                            if q_new[j] > q[j] + max_step:
+                                q_new[j] = q[j] + max_step
+                            elif q_new[j] < q[j] - max_step:
+                                q_new[j] = q[j] - max_step
+                        # Also check cumulative jump - if too large, clamp to initial + small step
+                        elif cumulative_jump > joint_range * 0.4:  # 40% of range total
+                            # Allow only small deviation from initial when near limit
+                            max_deviation = joint_range * 0.1
+                            if q_new[j] > q_initial[j] + max_deviation:
+                                q_new[j] = q_initial[j] + max_deviation
+                            elif q_new[j] < q_initial[j] - max_deviation:
+                                q_new[j] = q_initial[j] - max_deviation
+
+                        # Re-apply limits
+                        if js.limit_lower is not None:
+                            q_new[j] = max(q_new[j], js.limit_lower)
+                        if js.limit_upper is not None:
+                            q_new[j] = min(q_new[j], js.limit_upper)
+
+            q = q_new
         
         # Return best solution found
         # 失败：返回迭代中最优残差对应的 pos/ori 误差（若未更新保持最后一次计算）
@@ -723,6 +812,97 @@ class IKSolverNumPy:
             tol = 1e-9 * max(J.shape)
             S_inv = np.array([1 / s if s > tol else 0.0 for s in S])
         return (Vt.T * S_inv) @ (U.T @ err)
+
+    def _project_jacobian_for_limits(self, J: np.ndarray, q: np.ndarray, err: np.ndarray,
+                                     damping: float, method: str = "dls", max_iter: int = 3) -> np.ndarray:
+        """Project Jacobian to handle joint limits by zeroing out columns for blocked joints.
+        
+        A joint is considered "blocked" if it's at a limit and the computed dq would
+        try to move it further toward/outside the limit.
+        
+        This prevents DLS from trying to use blocked joints to compensate for errors,
+        which causes jumps in other joints.
+        
+        :param J: Jacobian matrix [6, n]
+        :param q: Current joint configuration [n]
+        :param err: Error vector [6]
+        :param damping: Damping factor
+        :param method: IK method
+        :param max_iter: Maximum iterations for projection
+        :return: Projected Jacobian matrix [6, n]
+        """
+        J_projected = J.copy()
+        eps = 1e-6  # Small threshold to detect "at limit"
+        limit_threshold_ratio = 0.01  # Consider joint "near limit" if within 1% of range
+
+        # First pass: detect joints that are at or very close to limits
+        initially_blocked = np.zeros(len(q), dtype=bool)
+        for js in self.model._chain_actuated:
+            j = js.index
+            if js.limit_lower is not None and js.limit_upper is not None:
+                joint_range = js.limit_upper - js.limit_lower
+                dist_to_lower = q[j] - js.limit_lower
+                dist_to_upper = js.limit_upper - q[j]
+                threshold = joint_range * limit_threshold_ratio
+
+                # If very close to limit, check if Jacobian suggests movement toward limit
+                if dist_to_lower < max(eps, threshold):
+                    # Estimate dq direction for this joint: J^T @ err gives approximate direction
+                    dq_estimate = J[:, j].T @ err
+                    if dq_estimate < 0:  # Would try to go lower
+                        initially_blocked[j] = True
+                elif dist_to_upper < max(eps, threshold):
+                    dq_estimate = J[:, j].T @ err
+                    if dq_estimate > 0:  # Would try to go higher
+                        initially_blocked[j] = True
+
+        # Zero out initially blocked joints
+        J_projected[:, initially_blocked] = 0.0
+
+        # Iteratively refine: compute dq and check for additional blocked joints
+        for _ in range(max_iter):
+            # Compute dq with current projection
+            if method == "dls":
+                dq = self._solve_dls(J_projected, err, damping)
+            elif method == "pinv":
+                dq = self._solve_pinv(J_projected, err, damping)
+            else:
+                # For transpose, use simple estimate
+                dq = J_projected.T @ err
+                dq_norm = np.linalg.norm(dq)
+                if dq_norm > 0:
+                    dq = dq * min(0.1 / dq_norm, 1.0)
+
+            # Check which joints would be blocked
+            newly_blocked = np.zeros(len(q), dtype=bool)
+            for js in self.model._chain_actuated:
+                j = js.index
+                if initially_blocked[j]:
+                    continue  # Already blocked
+
+                if js.limit_lower is not None and js.limit_upper is not None:
+                    q_candidate = q[j] + dq[j]
+
+                    # Check if joint would exceed limits
+                    if q_candidate < js.limit_lower - eps:
+                        newly_blocked[j] = True
+                    elif q_candidate > js.limit_upper + eps:
+                        newly_blocked[j] = True
+                    # Also check if at limit and trying to push further
+                    elif q[j] <= js.limit_lower + eps and dq[j] < -eps:
+                        newly_blocked[j] = True
+                    elif q[j] >= js.limit_upper - eps and dq[j] > eps:
+                        newly_blocked[j] = True
+
+            if not newly_blocked.any():
+                # No more blocked joints
+                break
+
+            # Zero out columns for newly blocked joints
+            J_projected[:, newly_blocked] = 0.0
+            initially_blocked = initially_blocked | newly_blocked
+
+        return J_projected
 
     def _apply_joint_limits(self, q: np.ndarray) -> np.ndarray:
         """Clamp joint angles to limits.
