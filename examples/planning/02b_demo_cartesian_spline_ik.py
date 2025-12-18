@@ -42,28 +42,6 @@ from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 from robocore.utils.backend import to_numpy
 
 
-def is_near_joint_limit(q, robot_model, threshold_ratio=0.1):
-    """Check if joint angles are near joint limits.
-    
-    :param q: Joint configuration
-    :param robot_model: RobotModel instance
-    :param threshold_ratio: Ratio of joint range to consider as "near limit" (default: 0.1 = 10%)
-    :return: True if any joint is near limit
-    """
-    q = np.asarray(q)
-    for js in robot_model._chain_actuated:
-        if js.limit_lower is not None and js.limit_upper is not None:
-            joint_range = js.limit_upper - js.limit_lower
-            threshold = joint_range * threshold_ratio
-            
-            dist_to_lower = q[js.index] - js.limit_lower
-            dist_to_upper = js.limit_upper - q[js.index]
-            
-            if dist_to_lower < threshold or dist_to_upper < threshold:
-                return True
-    return False
-
-
 def normalize_joint_angles(q_new, q_prev, robot_model):
     """Normalize joint angles to minimize discontinuity with previous configuration.
     
@@ -107,74 +85,13 @@ def normalize_joint_angles(q_new, q_prev, robot_model):
     return q_normalized
 
 
-def detect_joint_limit_jump(q_new, q_prev, robot_model):
-    """Detect if any joint jumped from one limit to another.
-    
-    :param q_new: New joint configuration
-    :param q_prev: Previous joint configuration
-    :param robot_model: RobotModel instance
-    :return: True if any joint jumped from limit to opposite limit
-    """
-    if q_prev is None:
-        return False
-    
-    q_new = np.asarray(q_new)
-    q_prev = np.asarray(q_prev)
-    
-    for js in robot_model._chain_actuated:
-        if js.limit_lower is not None and js.limit_upper is not None:
-            # Check if previous was near upper limit and new is near lower limit
-            prev_near_upper = (js.limit_upper - q_prev[js.index]) < (js.limit_upper - js.limit_lower) * 0.2
-            new_near_lower = (q_new[js.index] - js.limit_lower) < (js.limit_upper - js.limit_lower) * 0.2
-            
-            # Check if previous was near lower limit and new is near upper limit
-            prev_near_lower = (q_prev[js.index] - js.limit_lower) < (js.limit_upper - js.limit_lower) * 0.2
-            new_near_upper = (js.limit_upper - q_new[js.index]) < (js.limit_upper - js.limit_lower) * 0.2
-            
-            if (prev_near_upper and new_near_lower) or (prev_near_lower and new_near_upper):
-                return True
-    
-    return False
-
-
-def adjust_initial_guess_away_from_limits(q, robot_model, threshold_ratio=0.1, margin=0.05):
-    """Adjust initial guess to move away from joint limits.
-    
-    :param q: Joint configuration near limits
-    :param robot_model: RobotModel instance
-    :param threshold_ratio: Ratio to detect near limit
-    :param margin: Additional margin to move away from limit
-    :return: Adjusted joint configuration
-    """
-    q = np.asarray(q).copy()
-    for js in robot_model._chain_actuated:
-        if js.limit_lower is not None and js.limit_upper is not None:
-            joint_range = js.limit_upper - js.limit_lower
-            threshold = joint_range * threshold_ratio
-            
-            dist_to_lower = q[js.index] - js.limit_lower
-            dist_to_upper = js.limit_upper - q[js.index]
-            
-            # If near lower limit, move towards center
-            if dist_to_lower < threshold:
-                target = js.limit_lower + joint_range * (threshold_ratio + margin)
-                q[js.index] = np.clip(target, js.limit_lower, js.limit_upper)
-            # If near upper limit, move towards center
-            elif dist_to_upper < threshold:
-                target = js.limit_upper - joint_range * (threshold_ratio + margin)
-                q[js.index] = np.clip(target, js.limit_lower, js.limit_upper)
-    
-    return q
-
-
-def solve_ik_with_continuity(robot_model, target_pose, q0, args, threshold_ratio=0.1):
-    """Solve IK with special handling for joint limit discontinuities.
+def solve_ik_simple(robot_model, target_pose, q0, args):
+    """Solve IK using previous solution as initial guess (simple approach like InteractiveDualArmIK).
     
     :param robot_model: RobotModel instance
     :param target_pose: Target pose (4x4 matrix)
     :param q0: Previous joint configuration (for continuity)
     :param args: Command line arguments
-    :param threshold_ratio: Ratio of joint range to consider as "near limit"
     :return: IK result dictionary
     """
     if q0 is None:
@@ -191,17 +108,11 @@ def solve_ik_with_continuity(robot_model, target_pose, q0, args, threshold_ratio
             initial_guess_strategy='zero',
             initial_guess_scale=args.init_scale,
             random_seed=None,
-            base_step=0.0001,
-            min_damping=0.001,
-            max_damping=0.01,
         )
         return result
     
-    # Check if previous configuration is near joint limits
-    near_limit = is_near_joint_limit(q0, robot_model, threshold_ratio)
-    
-    # First, try with previous solution as initial guess
-    result_prev = inverse_kinematics(
+    # Always use previous solution as initial guess (ensures continuity)
+    result = inverse_kinematics(
         robot_model,
         target_pose,
         q0=q0,
@@ -213,93 +124,14 @@ def solve_ik_with_continuity(robot_model, target_pose, q0, args, threshold_ratio
         initial_guess_strategy='zero',
         initial_guess_scale=args.init_scale,
         random_seed=None,
-        base_step=0.000001,
-        min_damping=0.1,
-        max_damping=0.2,
     )
     
-    # Check if result has a limit jump
-    has_jump = detect_joint_limit_jump(result_prev['q'], q0, robot_model)
-    
-    # Calculate joint angle change for previous result
-    q_prev_norm = np.linalg.norm(np.array(result_prev['q']) - np.array(q0))
-    
-    # If near limit or has jump, try multiple initial guesses
-    if near_limit or has_jump:
-        candidates = [result_prev]
-        
-        # Try with adjusted initial guess (moved away from limits)
-        if near_limit:
-            q_adjusted = adjust_initial_guess_away_from_limits(q0, robot_model, threshold_ratio, margin=0.1)
-            result_adjusted = inverse_kinematics(
-                robot_model,
-                target_pose,
-                q0=q_adjusted,
-                method=args.method,
-                max_iters=args.max_iters,
-                pos_tol=args.pos_tol,
-                ori_tol=args.ori_tol,
-                num_initial_guesses=1,
-                initial_guess_strategy='zero',
-                initial_guess_scale=args.init_scale,
-                random_seed=None,
-                base_step=0.000001,
-                min_damping=0.1,
-                max_damping=0.2,
-            )
-            candidates.append(result_adjusted)
-        
-        # Increase number of guesses when we detect a jump
-        num_guesses = args.num_initial_guesses * 2 if has_jump else args.num_initial_guesses
-        
-        # Try multiple random guesses to find a more continuous solution
-        for _ in range(num_guesses):
-            result = inverse_kinematics(
-                robot_model,
-                target_pose,
-                q0=None,  # Use random guess
-                method=args.method,
-                max_iters=args.max_iters,
-                pos_tol=args.pos_tol,
-                ori_tol=args.ori_tol,
-                num_initial_guesses=1,
-                initial_guess_strategy=args.init_strategy,
-                initial_guess_scale=args.init_scale,
-                random_seed=None,
-                base_step=0.000001,
-                min_damping=0.1,
-                max_damping=0.2,
-            )
-            candidates.append(result)
-        
-        # Select best candidate: prefer successful ones without jumps, then minimize joint angle change
-        successful = [c for c in candidates if c['success']]
-        if successful:
-            # Filter out candidates with limit jumps
-            no_jump = [c for c in successful if not detect_joint_limit_jump(c['q'], q0, robot_model)]
-            if no_jump:
-                # Among successful without jumps, choose the one with smallest joint angle change
-                best = min(no_jump, key=lambda c: np.linalg.norm(np.array(c['q']) - np.array(q0)))
-            else:
-                # If all have jumps, choose the one with smallest joint angle change
-                # Prioritize continuity over error when all have jumps
-                best = min(successful, key=lambda c: np.linalg.norm(np.array(c['q']) - np.array(q0)))
-            return best
-        else:
-            # If all failed, choose the one with smallest joint angle change (prioritize continuity)
-            # Only consider error if joint angle changes are similar
-            best = min(candidates, key=lambda c: (
-                np.linalg.norm(np.array(c['q']) - np.array(q0)) +  # Prioritize continuity
-                (c.get('pos_err', 0.0) + c.get('ori_err', 0.0)) * 0.1  # Small weight on error
-            ))
-            return best
-    else:
-        # Normal case: use previous solution
-        # Normalize to maintain continuity
-        if result_prev['success']:
-            q_normalized = normalize_joint_angles(result_prev['q'], q0, robot_model)
-            result_prev['q'] = q_normalized.tolist()
-        return result_prev
+    # Normalize joint angles for revolute joints to maintain continuity
+    if result['success']:
+        q_normalized = normalize_joint_angles(result['q'], q0, robot_model)
+        result['q'] = q_normalized.tolist()
+
+    return result
 
 
 def main(args):
@@ -390,8 +222,6 @@ def main(args):
 
     beauty_print(f"Solving IK sequentially for {len(target_poses)} poses...")
     beauty_print(f"  Using previous solution as initial guess (ensures continuity)")
-    beauty_print(f"  Special handling for joint limit discontinuities")
-    beauty_print(f"  If failed, retry with {args.num_initial_guesses} random guesses")
 
     # Get initial joint configuration for first pose
     if args.use_random_init:
@@ -404,26 +234,20 @@ def main(args):
     ik_results = []
 
     for i, target_pose in enumerate(target_poses):
-        # Check if previous configuration is near limits
-        near_limit = is_near_joint_limit(q0, robot_model, args.limit_threshold_ratio) if q0 is not None else False
-        
-        # Use specialized IK solver that handles joint limit discontinuities
-        result = solve_ik_with_continuity(
+        # Use simple IK solver (always uses previous solution as initial guess)
+        result = solve_ik_simple(
             robot_model,
             target_pose,
             q0,
-            args,
-            threshold_ratio=args.limit_threshold_ratio
+            args
         )
-        
-        # Check for limit jumps
-        has_jump = detect_joint_limit_jump(result['q'], q0, robot_model) if q0 is not None else False
-        
+
         ik_results.append(result)
-        print(f"Point {i+1}: Success={result['success']}, NearLimit={near_limit}, HasJump={has_jump}")
         if q0 is not None:
             q_diff = np.linalg.norm(np.array(result['q']) - np.array(q0))
-            print(f"  Joint angle change: {q_diff:.6f}")
+            print(f"Point {i+1}: Success={result['success']}, Joint angle change: {q_diff:.6f}")
+        else:
+            print(f"Point {i+1}: Success={result['success']}")
         print("q: ", result['q'])
         print("pos_err: ", result['pos_err'])
         print("ori_err: ", result['ori_err'])
@@ -635,8 +459,8 @@ if __name__ == '__main__':
     parser.add_argument('--method', type=str, default='dls', choices=['dls', 'pinv', 'transpose'],
                         help='IK method (default: dls)')
     parser.add_argument('--max-iters', type=int, default=100, help='Maximum IK iterations')
-    parser.add_argument('--pos-tol', type=float, default=1e-3, help='Position tolerance (m)')
-    parser.add_argument('--ori-tol', type=float, default=1e-3, help='Orientation tolerance (rad)')
+    parser.add_argument('--pos-tol', type=float, default=1e-2, help='Position tolerance (m)')
+    parser.add_argument('--ori-tol', type=float, default=1e-2, help='Orientation tolerance (rad)')
     parser.add_argument('--num-initial-guesses', type=int, default=5,
                         help='Number of initial guesses for failed poses (default: 5)')
     parser.add_argument('--init-strategy', type=str, default='random',
@@ -646,15 +470,13 @@ if __name__ == '__main__':
                         help='Scale factor for initial guesses')
     parser.add_argument('--use-random-init', action='store_true',
                         help='Use random initial configuration for first pose (default: use zero)')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--seed', type=int, default=666, help='Random seed')
     parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch'],
                         help='Backend (default: torch)')
     parser.add_argument('--device', type=str, default='cpu', help='Device (cpu/cuda)')
     parser.add_argument('--num-waypoints', type=int, default=5, help='Number of waypoints (default: 5)')
     parser.add_argument('--workspace-scale', type=float, default=0.6,
                         help='Workspace scale factor for random poses (0.0 to 1.0, default: 0.6)')
-    parser.add_argument('--limit-threshold-ratio', type=float, default=0.1,
-                        help='Ratio of joint range to consider as "near limit" (default: 0.1 = 10%%)')
     args = parser.parse_args()
 
     main(args)
