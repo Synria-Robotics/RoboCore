@@ -1,4 +1,4 @@
-"""Bimanual Inverse Kinematics validation and comparison with Pytorch Kinematics
+"""Bimanual Inverse Kinematics validation and comparison with Pytorch Kinematics and Pinocchio
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -28,6 +28,8 @@ import pytorch_kinematics as pk
 from pytorch_kinematics.chain import SerialChain
 from pytorch_kinematics.transforms import Transform3d
 from pytorch_kinematics.ik import PseudoInverseIK
+import pinocchio
+from numpy.linalg import norm, solve
 
 import robocore as rc
 from robocore.modeling import RobotModel
