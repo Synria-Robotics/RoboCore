@@ -30,37 +30,12 @@ from robocore.planning import (
     SLERPPlanner,
     CircularArcPlanner,
     SplineCurvePlanner,
+    draw_axis,
 )
 from robocore.transform.se3 import make_transform
 from robocore.transform.so3 import euler_to_matrix
 from robocore.transform.conversions import quaternion_to_matrix, matrix_to_euler
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
-
-
-def draw_axis(ax, origin, R, scale=0.05, alpha=0.8):
-    """Draw a coordinate frame (axis) at given origin with given rotation.
-
-    :param ax: 3D axes object
-    :param origin: Origin position [3]
-    :param R: Rotation matrix [3, 3]
-    :param scale: Scale of the axis
-    :param alpha: Transparency
-    """
-    # Define unit vectors for X, Y, Z axes
-    x_axis = R[:, 0] * scale
-    y_axis = R[:, 1] * scale
-    z_axis = R[:, 2] * scale
-
-    # Draw axes
-    ax.quiver(origin[0], origin[1], origin[2],
-              x_axis[0], x_axis[1], x_axis[2],
-              color='r', arrow_length_ratio=0.3, linewidth=2, alpha=alpha)
-    ax.quiver(origin[0], origin[1], origin[2],
-              y_axis[0], y_axis[1], y_axis[2],
-              color='g', arrow_length_ratio=0.3, linewidth=2, alpha=alpha)
-    ax.quiver(origin[0], origin[1], origin[2],
-              z_axis[0], z_axis[1], z_axis[2],
-              color='b', arrow_length_ratio=0.3, linewidth=2, alpha=alpha)
 
 
 def demo_linear_position():

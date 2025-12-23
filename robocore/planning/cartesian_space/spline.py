@@ -34,7 +34,11 @@ class SplineCurvePlanner(BaseTrajectoryPlanner):
     """Spline curve trajectory planner in Cartesian space.
     
     Generates smooth spline curves through multiple waypoints.
-    Position uses cubic spline interpolation, orientation uses SLERP.
+    Position interpolation automatically selects method based on waypoint count:
+    - 4+ waypoints: cubic spline (smooth C2 continuous)
+    - 3 waypoints: quadratic spline (smooth C1 continuous)
+    - 2 waypoints: linear interpolation
+    Orientation uses SLERP for smooth rotation interpolation.
     """
     
     def plan(
@@ -98,10 +102,19 @@ class SplineCurvePlanner(BaseTrajectoryPlanner):
                 u_waypoints[i] = u_waypoints[i - 1] + np.linalg.norm(positions[i] - positions[i - 1])
             u_waypoints = u_waypoints / u_waypoints[-1] if u_waypoints[-1] > 0 else np.linspace(0, 1, n_waypoints)
             
+            # Choose interpolation kind based on number of waypoints
+            # cubic requires at least 4 points, quadratic requires at least 3 points
+            if n_waypoints >= 4:
+                interp_kind = 'cubic'
+            elif n_waypoints == 3:
+                interp_kind = 'quadratic'
+            else:  # n_waypoints == 2
+                interp_kind = 'linear'
+
             # Interpolate each dimension
             u_interp = t / duration
             for dim in range(3):
-                interp_func = interp1d(u_waypoints, positions[:, dim], kind='cubic',
+                interp_func = interp1d(u_waypoints, positions[:, dim], kind=interp_kind,
                                       bounds_error=False, fill_value='extrapolate')
                 positions_interp[:, dim] = interp_func(u_interp)
         else:

@@ -40,6 +40,14 @@ from .cartesian_space.spline import SplineCurvePlanner
 from .velocity_profile.trapezoidal import TrapezoidalVelocityProfile
 from .velocity_profile.s_curve import SCurveVelocityProfile
 
+# Utility functions
+from .utils import (
+    draw_axis,
+    plot_cartesian_trajectory,
+    plot_joint_trajectory,
+    plot_cartesian_with_ik,
+)
+
 __all__ = [
     # Base
     'BaseTrajectoryPlanner',
@@ -57,5 +65,10 @@ __all__ = [
     # Velocity profiles
     'TrapezoidalVelocityProfile',
     'SCurveVelocityProfile',
+    # Utilities
+    'draw_axis',
+    'plot_cartesian_trajectory',
+    'plot_joint_trajectory',
+    'plot_cartesian_with_ik',
 ]
 

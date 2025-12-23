@@ -28,26 +28,22 @@ Website: https://synriarobotics.ai
 import numpy as np
 import argparse
 import time
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 
 import robocore as rc
 from robocore.modeling import RobotModel
-from robocore.planning import SplineCurvePlanner
+from robocore.planning import SplineCurvePlanner, plot_cartesian_with_ik
 from robocore.kinematics.ik import inverse_kinematics
 from robocore.transform.se3 import make_transform
-from robocore.transform.so3 import euler_to_matrix
-from robocore.transform.conversions import quaternion_to_matrix
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 from robocore.utils.backend import to_numpy
 
 
 def normalize_joint_angles(q_new, q_prev, robot_model):
     """Normalize joint angles to minimize discontinuity with previous configuration.
-    
+
     For revolute joints, add/subtract 2π to keep angles close to previous configuration.
     This helps maintain continuity when joints wrap around.
-    
+
     :param q_new: New joint configuration
     :param q_prev: Previous joint configuration (can be None)
     :param robot_model: RobotModel instance
@@ -56,15 +52,15 @@ def normalize_joint_angles(q_new, q_prev, robot_model):
     q_new = np.asarray(q_new)
     if q_prev is None:
         return q_new
-    
+
     q_prev = np.asarray(q_prev)
     q_normalized = q_new.copy()
-    
+
     for js in robot_model._chain_actuated:
         if js.joint_type == 'revolute':
             # For revolute joints, try to minimize the difference
             diff = q_new[js.index] - q_prev[js.index]
-            
+
             # If difference is large, try adding/subtracting 2π
             if abs(diff) > np.pi:
                 # Try subtracting 2π
@@ -74,20 +70,20 @@ def normalize_joint_angles(q_new, q_prev, robot_model):
                         if abs(q_candidate - q_prev[js.index]) < abs(diff):
                             q_normalized[js.index] = q_candidate
                             continue
-                
+
                 # Try adding 2π
                 q_candidate = q_new[js.index] + 2 * np.pi
                 if js.limit_lower is not None and js.limit_upper is not None:
                     if js.limit_lower <= q_candidate <= js.limit_upper:
                         if abs(q_candidate - q_prev[js.index]) < abs(diff):
                             q_normalized[js.index] = q_candidate
-    
+
     return q_normalized
 
 
 def solve_ik_simple(robot_model, target_pose, q0, args):
     """Solve IK using previous solution as initial guess (simple approach like InteractiveDualArmIK).
-    
+
     :param robot_model: RobotModel instance
     :param target_pose: Target pose (4x4 matrix)
     :param q0: Previous joint configuration (for continuity)
@@ -110,7 +106,7 @@ def solve_ik_simple(robot_model, target_pose, q0, args):
             random_seed=None,
         )
         return result
-    
+
     # Always use previous solution as initial guess (ensures continuity)
     result = inverse_kinematics(
         robot_model,
@@ -125,7 +121,7 @@ def solve_ik_simple(robot_model, target_pose, q0, args):
         initial_guess_scale=args.init_scale,
         random_seed=None,
     )
-    
+
     # Normalize joint angles for revolute joints to maintain continuity
     if result['success']:
         q_normalized = normalize_joint_angles(result['q'], q0, robot_model)
@@ -323,7 +319,12 @@ def main(args):
     beauty_print("✓ Cartesian spline planning with IK batch solver completed!", type="success")
 
     # [4] Plot trajectory
-    plot_trajectory(trajectory, waypoints, joint_angles, ik_results)
+    try:
+        import matplotlib.pyplot as plt
+        plot_cartesian_with_ik(trajectory, waypoints, joint_angles, ik_results)
+        plt.show()
+    except ImportError:
+        beauty_print("matplotlib not installed. Skipping plots.", type="warning")
 
     return {
         'trajectory': trajectory,
@@ -332,116 +333,6 @@ def main(args):
         'success_rate': success_count / len(ik_results),
         'waypoints': waypoints
     }
-
-
-def draw_axis(ax, origin, R, scale=0.05, alpha=0.8):
-    """Draw a coordinate frame (axis) at given origin with given rotation.
-
-    :param ax: 3D axes object
-    :param origin: Origin position [3]
-    :param R: Rotation matrix [3, 3]
-    :param scale: Scale of the axis
-    :param alpha: Transparency
-    """
-    # Define unit vectors for X, Y, Z axes
-    x_axis = R[:, 0] * scale
-    y_axis = R[:, 1] * scale
-    z_axis = R[:, 2] * scale
-
-    # Draw axes
-    ax.quiver(origin[0], origin[1], origin[2],
-              x_axis[0], x_axis[1], x_axis[2],
-              color='r', arrow_length_ratio=0.3, linewidth=2, alpha=alpha)
-    ax.quiver(origin[0], origin[1], origin[2],
-              y_axis[0], y_axis[1], y_axis[2],
-              color='g', arrow_length_ratio=0.3, linewidth=2, alpha=alpha)
-    ax.quiver(origin[0], origin[1], origin[2],
-              z_axis[0], z_axis[1], z_axis[2],
-              color='b', arrow_length_ratio=0.3, linewidth=2, alpha=alpha)
-
-
-def plot_trajectory(trajectory, waypoints, joint_angles, ik_results):
-    """Plot the Cartesian trajectory and joint angles"""
-    try:
-        fig = plt.figure(figsize=(18, 6))
-
-        # 3D trajectory plot
-        ax1 = fig.add_subplot(131, projection='3d')
-
-        # Plot trajectory positions
-        if 'positions' in trajectory:
-            positions = to_numpy(trajectory['positions'])
-            ax1.plot(positions[:, 0], positions[:, 1], positions[:, 2],
-                     color='blue', label='Trajectory', linewidth=2, alpha=0.8)
-
-            # Mark start and end
-            ax1.scatter(positions[0, 0], positions[0, 1], positions[0, 2],
-                        c='green', s=100, marker='o', label='Start', zorder=5)
-            ax1.scatter(positions[-1, 0], positions[-1, 1], positions[-1, 2],
-                        c='red', s=100, marker='s', label='End', zorder=5)
-
-        # Plot waypoints
-        waypoint_positions = np.array([wp[:3, 3] for wp in waypoints])
-        ax1.scatter(waypoint_positions[:, 0], waypoint_positions[:, 1], waypoint_positions[:, 2],
-                    c='purple', s=150, marker='*', label='Waypoints',
-                    edgecolors='black', linewidths=1, zorder=5)
-
-        # Plot orientation axes (sampled)
-        sample_step = 10
-        if 'orientations' in trajectory:
-            orientations = to_numpy(trajectory['orientations'])
-            positions = to_numpy(trajectory['positions'])
-
-            # Convert quaternions to rotation matrices if needed
-            if len(orientations.shape) == 2 and orientations.shape[1] == 4:
-                R_matrices = np.zeros((len(orientations), 3, 3))
-                for i, q in enumerate(orientations):
-                    R_matrices[i] = quaternion_to_matrix(q)
-                orientations = R_matrices
-
-            # Sample and draw axes
-            for i in range(0, len(orientations), sample_step):
-                pos = positions[i]
-                R = orientations[i]
-                draw_axis(ax1, pos, R, scale=0.03, alpha=0.6)
-
-        ax1.set_xlabel('X (m)')
-        ax1.set_ylabel('Y (m)')
-        ax1.set_zlabel('Z (m)')
-        ax1.set_title('Cartesian Space Trajectory')
-        ax1.legend(loc='best')
-        ax1.grid(True, alpha=0.3)
-
-        # Joint angles plot
-        ax2 = fig.add_subplot(132)
-        joint_angles_np = to_numpy(joint_angles)
-        t = to_numpy(trajectory['t'])
-
-        for i in range(joint_angles_np.shape[1]):
-            ax2.plot(t, joint_angles_np[:, i], label=f'Joint {i+1}', linewidth=2, alpha=0.8)
-
-        ax2.set_xlabel('Time (s)')
-        ax2.set_ylabel('Joint Angle (rad)')
-        ax2.set_title('Joint Angle Trajectory')
-        ax2.legend(loc='best')
-        ax2.grid(True, alpha=0.3)
-
-        # IK success rate over time
-        ax3 = fig.add_subplot(133)
-        success_mask = np.array([r['success'] for r in ik_results])
-        ax3.plot(t, success_mask.astype(float), 'g-', linewidth=2, alpha=0.8, label='IK Success')
-        ax3.fill_between(t, 0, success_mask.astype(float), alpha=0.3, color='green')
-        ax3.set_xlabel('Time (s)')
-        ax3.set_ylabel('Success (1) / Failure (0)')
-        ax3.set_title('IK Success Rate Over Time')
-        ax3.set_ylim(-0.1, 1.1)
-        ax3.legend(loc='best')
-        ax3.grid(True, alpha=0.3)
-
-        plt.tight_layout()
-        plt.show()
-    except ImportError:
-        beauty_print("matplotlib not installed. Skipping plots.", type="warning")
 
 
 if __name__ == '__main__':
