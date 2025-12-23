@@ -1,4 +1,4 @@
-"""Bimanual Jacobian validation and comparison with Pytorch Kinematics
+"""Bimanual Jacobian validation and comparison with Pytorch Kinematics and Pinocchio
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -25,6 +25,7 @@ import time
 import numpy as np
 import torch
 import pytorch_kinematics as pk
+import pinocchio
 
 import robocore as rc
 from robocore.modeling import RobotModel

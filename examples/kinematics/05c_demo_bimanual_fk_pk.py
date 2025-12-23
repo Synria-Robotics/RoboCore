@@ -1,4 +1,4 @@
-"""Bimanual Forward Kinematics validation and comparison with Pytorch Kinematics
+"""Bimanual Forward Kinematics validation and comparison with Pytorch Kinematics and Pinocchio
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -25,6 +25,7 @@ import time
 import numpy as np
 import torch
 import pytorch_kinematics as pk
+import pinocchio
 
 import robocore as rc
 from robocore.modeling import RobotModel
@@ -46,12 +47,36 @@ def main(args):
     n_dof_left = len(chain_left.get_joint_parameter_names())
     n_dof_right = len(chain_right.get_joint_parameter_names())
     
+    # Pinocchio - build models for both arms
+    pin_model = pinocchio.buildModelFromUrdf(model_path)
+    pin_data = pin_model.createData()
+    try:
+        left_frame_id = pin_model.getFrameId(args.left_end_link)
+    except:
+        try:
+            left_joint_id = pin_model.getJointId(args.left_end_link)
+            left_frame_id = None
+        except:
+            beauty_print(f"Warning: Could not find {args.left_end_link} in pinocchio model.", type="warning")
+            left_joint_id = len(pin_model.joints) - 1
+            left_frame_id = None
+    try:
+        right_frame_id = pin_model.getFrameId(args.right_end_link)
+    except:
+        try:
+            right_joint_id = pin_model.getJointId(args.right_end_link)
+            right_frame_id = None
+        except:
+            beauty_print(f"Warning: Could not find {args.right_end_link} in pinocchio model.", type="warning")
+            right_joint_id = len(pin_model.joints) - 1
+            right_frame_id = None
+    
     # RoboCore
     left_model = RobotModel(model_path, base_link=args.left_base_link, end_link=args.left_end_link)
     right_model = RobotModel(model_path, base_link=args.right_base_link, end_link=args.right_end_link)
     rc.set_backend('torch', device=args.device)
     
-    beauty_print(f"Bimanual Forward Kinematics Comparison: PyTorch Kinematics vs RoboCore", type="module")
+    beauty_print(f"Bimanual Forward Kinematics Comparison: PyTorch Kinematics vs Pinocchio vs RoboCore", type="module")
     beauty_print(f"Left arm: {n_dof_left} DOF, Right arm: {n_dof_right} DOF", type="info")
     beauty_print(f"PyTorch device: {args.device}", type="info")
     
@@ -63,11 +88,13 @@ def main(args):
     beauty_print("[1] Forward Kinematics Computation", type="module", centered=False)
     q_left = torch.tensor(args.q_left, dtype=dtype, device=device)
     q_right = torch.tensor(args.q_right, dtype=dtype, device=device)
+    q_left_np = q_left.cpu().numpy()
+    q_right_np = q_right.cpu().numpy()
     
     beauty_print(f"Left arm joint configuration (rad):")
-    print(f"  q_left = {beauty_print_array(q_left.cpu().numpy())}")
+    print(f"  q_left = {beauty_print_array(q_left_np)}")
     beauty_print(f"Right arm joint configuration (rad):")
-    print(f"  q_right = {beauty_print_array(q_right.cpu().numpy())}")
+    print(f"  q_right = {beauty_print_array(q_right_np)}")
     
     # Compute FK with PyTorch Kinematics
     q_left_tensor = q_left.unsqueeze(0)
@@ -85,6 +112,33 @@ def main(args):
     rot_pk_left = T_pk_left[:3, :3]
     rot_pk_right = T_pk_right[:3, :3]
     
+    # Compute FK with Pinocchio (Note: Pinocchio processes full model, so we need to handle joint mapping)
+    # For bimanual, we assume the model has both arms and we need to set all joints
+    # This is a simplified version - in practice, you'd need to map left/right joints correctly
+    q_full = np.zeros(pin_model.nq)
+    # Map left and right joint angles to full model (simplified - assumes sequential joints)
+    if n_dof_left <= pin_model.nq:
+        q_full[:n_dof_left] = q_left_np
+    if n_dof_right <= pin_model.nq - n_dof_left:
+        q_full[n_dof_left:n_dof_left+n_dof_right] = q_right_np
+    
+    pinocchio.forwardKinematics(pin_model, pin_data, q_full)
+    pinocchio.updateFramePlacements(pin_model, pin_data)
+    
+    if left_frame_id is not None:
+        T_pin_left = pin_data.oMf[left_frame_id].homogeneous
+    else:
+        T_pin_left = pin_data.oMi[left_joint_id].homogeneous
+    if right_frame_id is not None:
+        T_pin_right = pin_data.oMf[right_frame_id].homogeneous
+    else:
+        T_pin_right = pin_data.oMi[right_joint_id].homogeneous
+    
+    pos_pin_left = T_pin_left[:3, 3]
+    pos_pin_right = T_pin_right[:3, 3]
+    rot_pin_left = T_pin_left[:3, :3]
+    rot_pin_right = T_pin_right[:3, :3]
+    
     # Compute FK with RoboCore
     result_rc = bimanual_forward_kinematics(
         left_model, right_model, q_left, q_right,
@@ -99,51 +153,99 @@ def main(args):
     
     beauty_print(f"Left Arm End-Effector Position (PyTorch Kinematics):")
     print(f"  p = {beauty_print_array(pos_pk_left)}")
+    beauty_print(f"Left Arm End-Effector Position (Pinocchio):")
+    print(f"  p = {beauty_print_array(pos_pin_left)}")
     beauty_print(f"Left Arm End-Effector Position (RoboCore):")
     print(f"  p = {beauty_print_array(pos_rc_left)}")
     
     beauty_print(f"Right Arm End-Effector Position (PyTorch Kinematics):")
     print(f"  p = {beauty_print_array(pos_pk_right)}")
+    beauty_print(f"Right Arm End-Effector Position (Pinocchio):")
+    print(f"  p = {beauty_print_array(pos_pin_right)}")
     beauty_print(f"Right Arm End-Effector Position (RoboCore):")
     print(f"  p = {beauty_print_array(pos_rc_right)}")
     
     # Convert to quaternion for display
     quat_pk_left = matrix_to_quaternion(rot_pk_left)
+    quat_pin_left = matrix_to_quaternion(rot_pin_left)
     quat_rc_left = matrix_to_quaternion(rot_rc_left)
     quat_pk_right = matrix_to_quaternion(rot_pk_right)
+    quat_pin_right = matrix_to_quaternion(rot_pin_right)
     quat_rc_right = matrix_to_quaternion(rot_rc_right)
     
     beauty_print(f"Left Arm Quaternion xyzw (PyTorch Kinematics):")
     print(f"  quat = {beauty_print_array(quat_pk_left, precision=6)}")
+    beauty_print(f"Left Arm Quaternion xyzw (Pinocchio):")
+    print(f"  quat = {beauty_print_array(quat_pin_left, precision=6)}")
     beauty_print(f"Left Arm Quaternion xyzw (RoboCore):")
     print(f"  quat = {beauty_print_array(quat_rc_left, precision=6)}")
     
     beauty_print(f"Right Arm Quaternion xyzw (PyTorch Kinematics):")
     print(f"  quat = {beauty_print_array(quat_pk_right, precision=6)}")
+    beauty_print(f"Right Arm Quaternion xyzw (Pinocchio):")
+    print(f"  quat = {beauty_print_array(quat_pin_right, precision=6)}")
     beauty_print(f"Right Arm Quaternion xyzw (RoboCore):")
     print(f"  quat = {beauty_print_array(quat_rc_right, precision=6)}")
     
     # Position comparison
-    pos_diff_left = pos_pk_left - pos_rc_left
-    pos_diff_right = pos_pk_right - pos_rc_right
-    beauty_print("Left Arm Position Comparison (PyTorch Kinematics vs RoboCore):")
-    beauty_print(f"  Max difference:        {np.max(np.abs(pos_diff_left)):.3e} m")
-    beauty_print(f"  Euclidean norm:        {np.linalg.norm(pos_diff_left):.3e} m")
+    pos_diff_pk_rc_left = pos_pk_left - pos_rc_left
+    pos_diff_pin_rc_left = pos_pin_left - pos_rc_left
+    pos_diff_pk_pin_left = pos_pk_left - pos_pin_left
+    pos_diff_pk_rc_right = pos_pk_right - pos_rc_right
+    pos_diff_pin_rc_right = pos_pin_right - pos_rc_right
+    pos_diff_pk_pin_right = pos_pk_right - pos_pin_right
     
-    beauty_print("Right Arm Position Comparison (PyTorch Kinematics vs RoboCore):")
-    beauty_print(f"  Max difference:        {np.max(np.abs(pos_diff_right)):.3e} m")
-    beauty_print(f"  Euclidean norm:        {np.linalg.norm(pos_diff_right):.3e} m")
+    beauty_print("Left Arm Position Comparison:")
+    beauty_print("  PyTorch Kinematics vs RoboCore:")
+    beauty_print(f"    Max difference:        {np.max(np.abs(pos_diff_pk_rc_left)):.3e} m")
+    beauty_print(f"    Euclidean norm:        {np.linalg.norm(pos_diff_pk_rc_left):.3e} m")
+    beauty_print("  Pinocchio vs RoboCore:")
+    beauty_print(f"    Max difference:        {np.max(np.abs(pos_diff_pin_rc_left)):.3e} m")
+    beauty_print(f"    Euclidean norm:        {np.linalg.norm(pos_diff_pin_rc_left):.3e} m")
+    beauty_print("  PyTorch Kinematics vs Pinocchio:")
+    beauty_print(f"    Max difference:        {np.max(np.abs(pos_diff_pk_pin_left)):.3e} m")
+    beauty_print(f"    Euclidean norm:        {np.linalg.norm(pos_diff_pk_pin_left):.3e} m")
+    
+    beauty_print("Right Arm Position Comparison:")
+    beauty_print("  PyTorch Kinematics vs RoboCore:")
+    beauty_print(f"    Max difference:        {np.max(np.abs(pos_diff_pk_rc_right)):.3e} m")
+    beauty_print(f"    Euclidean norm:        {np.linalg.norm(pos_diff_pk_rc_right):.3e} m")
+    beauty_print("  Pinocchio vs RoboCore:")
+    beauty_print(f"    Max difference:        {np.max(np.abs(pos_diff_pin_rc_right)):.3e} m")
+    beauty_print(f"    Euclidean norm:        {np.linalg.norm(pos_diff_pin_rc_right):.3e} m")
+    beauty_print("  PyTorch Kinematics vs Pinocchio:")
+    beauty_print(f"    Max difference:        {np.max(np.abs(pos_diff_pk_pin_right)):.3e} m")
+    beauty_print(f"    Euclidean norm:        {np.linalg.norm(pos_diff_pk_pin_right):.3e} m")
     
     # Rotation comparison
-    rot_diff_left = rot_pk_left - rot_rc_left
-    rot_diff_right = rot_pk_right - rot_rc_right
-    beauty_print("Left Arm Rotation Matrix Comparison (PyTorch Kinematics vs RoboCore):")
-    beauty_print(f"  Max difference:        {np.max(np.abs(rot_diff_left)):.3e}")
-    beauty_print(f"  Frobenius norm:        {np.linalg.norm(rot_diff_left, 'fro'):.3e}")
+    rot_diff_pk_rc_left = rot_pk_left - rot_rc_left
+    rot_diff_pin_rc_left = rot_pin_left - rot_rc_left
+    rot_diff_pk_pin_left = rot_pk_left - rot_pin_left
+    rot_diff_pk_rc_right = rot_pk_right - rot_rc_right
+    rot_diff_pin_rc_right = rot_pin_right - rot_rc_right
+    rot_diff_pk_pin_right = rot_pk_right - rot_pin_right
     
-    beauty_print("Right Arm Rotation Matrix Comparison (PyTorch Kinematics vs RoboCore):")
-    beauty_print(f"  Max difference:        {np.max(np.abs(rot_diff_right)):.3e}")
-    beauty_print(f"  Frobenius norm:        {np.linalg.norm(rot_diff_right, 'fro'):.3e}")
+    beauty_print("Left Arm Rotation Matrix Comparison:")
+    beauty_print("  PyTorch Kinematics vs RoboCore:")
+    beauty_print(f"    Max difference:        {np.max(np.abs(rot_diff_pk_rc_left)):.3e}")
+    beauty_print(f"    Frobenius norm:        {np.linalg.norm(rot_diff_pk_rc_left, 'fro'):.3e}")
+    beauty_print("  Pinocchio vs RoboCore:")
+    beauty_print(f"    Max difference:        {np.max(np.abs(rot_diff_pin_rc_left)):.3e}")
+    beauty_print(f"    Frobenius norm:        {np.linalg.norm(rot_diff_pin_rc_left, 'fro'):.3e}")
+    beauty_print("  PyTorch Kinematics vs Pinocchio:")
+    beauty_print(f"    Max difference:        {np.max(np.abs(rot_diff_pk_pin_left)):.3e}")
+    beauty_print(f"    Frobenius norm:        {np.linalg.norm(rot_diff_pk_pin_left, 'fro'):.3e}")
+    
+    beauty_print("Right Arm Rotation Matrix Comparison:")
+    beauty_print("  PyTorch Kinematics vs RoboCore:")
+    beauty_print(f"    Max difference:        {np.max(np.abs(rot_diff_pk_rc_right)):.3e}")
+    beauty_print(f"    Frobenius norm:        {np.linalg.norm(rot_diff_pk_rc_right, 'fro'):.3e}")
+    beauty_print("  Pinocchio vs RoboCore:")
+    beauty_print(f"    Max difference:        {np.max(np.abs(rot_diff_pin_rc_right)):.3e}")
+    beauty_print(f"    Frobenius norm:        {np.linalg.norm(rot_diff_pin_rc_right, 'fro'):.3e}")
+    beauty_print("  PyTorch Kinematics vs Pinocchio:")
+    beauty_print(f"    Max difference:        {np.max(np.abs(rot_diff_pk_pin_right)):.3e}")
+    beauty_print(f"    Frobenius norm:        {np.linalg.norm(rot_diff_pk_pin_right, 'fro'):.3e}")
     
     # Performance comparison
     beauty_print("[2] Performance comparison", type="module", centered=False)
@@ -159,6 +261,24 @@ def main(args):
         m_l = tg_l.get_matrix()[0]
         m_r = tg_r.get_matrix()[0]
         return m_l, m_r
+    
+    def benchmark_pin():
+        q_full = np.zeros(pin_model.nq)
+        if n_dof_left <= pin_model.nq:
+            q_full[:n_dof_left] = q_left_np
+        if n_dof_right <= pin_model.nq - n_dof_left:
+            q_full[n_dof_left:n_dof_left+n_dof_right] = q_right_np
+        pinocchio.forwardKinematics(pin_model, pin_data, q_full)
+        pinocchio.updateFramePlacements(pin_model, pin_data)
+        if left_frame_id is not None:
+            T_l = pin_data.oMf[left_frame_id]
+        else:
+            T_l = pin_data.oMi[left_joint_id]
+        if right_frame_id is not None:
+            T_r = pin_data.oMf[right_frame_id]
+        else:
+            T_r = pin_data.oMi[right_joint_id]
+        return T_l, T_r
     
     def benchmark_rc():
         result = bimanual_forward_kinematics(
@@ -176,12 +296,16 @@ def main(args):
         return (time.perf_counter() - t0) / n_runs * 1000
     
     time_pk = benchmark(benchmark_pk)
+    time_pin = benchmark(benchmark_pin)
     time_rc = benchmark(benchmark_rc)
     
     beauty_print(f"PyTorch Kinematics:  {time_pk:.4f} ms")
+    beauty_print(f"Pinocchio:           {time_pin:.4f} ms")
     beauty_print(f"RoboCore:            {time_rc:.4f} ms")
-    speedup = time_pk / time_rc if time_rc > 0 else 0
-    beauty_print(f"Speedup:             {speedup:.2f}x", type="success" if speedup > 1 else "info")
+    speedup_pk_rc = time_pk / time_rc if time_rc > 0 else 0
+    speedup_pin_rc = time_pin / time_rc if time_rc > 0 else 0
+    beauty_print(f"Speedup (PK vs RC):  {speedup_pk_rc:.2f}x", type="success" if speedup_pk_rc > 1 else "info")
+    beauty_print(f"Speedup (Pin vs RC): {speedup_pin_rc:.2f}x", type="success" if speedup_pin_rc > 1 else "info")
     
     # Value comparison across random configurations
     beauty_print(f"[3] Value comparison across {args.samples} random configurations", type="module", centered=False)
@@ -266,7 +390,7 @@ if __name__ == '__main__':
     # Note: PyTorch Kinematics requires URDF format, not MJCF
     model_path = synriard.get_model_path("Bessica_D", version="v1_0", variant="covered", model_format="urdf")
 
-    parser = argparse.ArgumentParser(description="Bimanual Forward Kinematics validation with Pytorch Kinematics")
+    parser = argparse.ArgumentParser(description="Bimanual Forward Kinematics validation with Pytorch Kinematics and Pinocchio")
     parser.add_argument('--model-path', type=str, default=model_path,
                         help='Path to robot model file (default: Bessica-D)')
     parser.add_argument('--left-base-link', type=str, default='base_link', help='Left arm base link name')

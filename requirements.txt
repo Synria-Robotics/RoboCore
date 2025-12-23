@@ -17,6 +17,7 @@ mesh_to_sdf
 lxml
 torch
 tqdm
+pin==3.8.0
 
 # Git dependencies
 synriard @ git+https://github.com/Synria-Robotics/Synria-Robot-Descriptions.git
