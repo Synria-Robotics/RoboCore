@@ -4,7 +4,7 @@ Author: Synria Robotics Team
 License: GPL-3.0
 """
 from __future__ import annotations
-from robocore.utils.backend import get_backend
+from robocore.utils.backend import get_backend, set_backend
 from typing import Dict, Any, Optional, Sequence, List
 from dataclasses import dataclass
 import numpy as np
@@ -104,6 +104,7 @@ def bimanual_inverse_kinematics(
     q0_right=None,
     method: str = 'dls',
     coordination: str = 'indep',
+    backend: str | None = None,
     # Initial guess parameters (new system)
     num_initial_guesses: int = 1,
     initial_guess_strategy: str = 'random',
@@ -133,6 +134,10 @@ def bimanual_inverse_kinematics(
     :param q0_right: Initial right configuration (optional, used as base for strategies)
     :param method: 'dls'|'pinv'|'transpose'
     :param coordination: 'indep'|'relative_pose'|'relative_pos'|'relative_ori'|'mirror'
+    :param backend: Optional backend override ('numpy' or 'torch'). If provided,
+        this is forwarded to the global backend manager so that IK solvers run
+        on the requested backend (matches usage in higher-level helpers such as
+        ``BimanualRobotModel.ik`` and interactive demos).
     :param num_initial_guesses: Number of initial guesses to try (default: 1)
     :param initial_guess_strategy: Strategy - 'zero'|'random'|'sobol'|'latin'|'center'|'uniform'
     :param initial_guess_scale: Scale factor for joint limits (0.0 to 1.0)
@@ -145,6 +150,12 @@ def bimanual_inverse_kinematics(
     :param torch_dtype: Torch dtype (only for torch backend)
     :return: Result dict
     """
+    # Allow callers (e.g. InteractiveDualArmIK, BimanualRobotModel.ik) to
+    # explicitly select the backend. If backend is None we keep the existing
+    # global backend setting.
+    if backend is not None:
+        set_backend(backend)
+
     b = get_backend()
     # Prepare IK kwargs with new initial guess system
     ik_kwargs = {

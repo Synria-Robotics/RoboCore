@@ -54,29 +54,56 @@ class BiIndependentIKSolverNumpy:
         res_left = inverse_kinematics(self.left, tgt_left, q0_left, **ik_kwargs)
         res_right = inverse_kinematics(self.right, tgt_right, q0_right, **ik_kwargs)
 
+        # Helper to pick the best candidate from a list based on pose error
+        def _select_best(res, q_fallback, dof):
+            import numpy as np
+            if isinstance(res, list) and len(res) > 0:
+                # Choose entry with minimum (pos_err + ori_err); fall back to first
+                best_idx = 0
+                best_score = None
+                for i, r in enumerate(res):
+                    pos_err = float(r.get('pos_err', 0.0))
+                    ori_err = float(r.get('ori_err', 0.0))
+                    score = abs(pos_err) + abs(ori_err)
+                    if best_score is None or score < best_score:
+                        best_score = score
+                        best_idx = i
+                return res[best_idx]
+            elif isinstance(res, dict):
+                return res
+            else:
+                # Unexpected type – return a simple dummy dict
+                return {'q': q_fallback if q_fallback is not None else [0.0] * dof,
+                        'success': False, 'pos_err': np.inf, 'ori_err': np.inf}
+
         # Handle batch mode (returns list of dicts)
         if is_batch and isinstance(res_left, list) and isinstance(res_right, list):
             # Return list of combined results
             results = []
             for r_l, r_r in zip(res_left, res_right):
+                best_l = _select_best(r_l, q0_left, self.left.num_chain_dof) if isinstance(r_l, list) else r_l
+                best_r = _select_best(r_r, q0_right, self.right.num_chain_dof) if isinstance(r_r, list) else r_r
                 results.append({
-                    'q_left': r_l.get('q', q0_left if q0_left is not None else [0.0] * self.left.num_chain_dof),
-                    'q_right': r_r.get('q', q0_right if q0_right is not None else [0.0] * self.right.num_chain_dof),
-                    'success_left': bool(r_l.get('success', False)),
-                    'success_right': bool(r_r.get('success', False)),
-                    'res_left': r_l,
-                    'res_right': r_r,
+                    'q_left': best_l.get('q', q0_left if q0_left is not None else [0.0] * self.left.num_chain_dof),
+                    'q_right': best_r.get('q', q0_right if q0_right is not None else [0.0] * self.right.num_chain_dof),
+                    'success_left': bool(best_l.get('success', False)),
+                    'success_right': bool(best_r.get('success', False)),
+                    'res_left': best_l,
+                    'res_right': best_r,
                 })
             return results
 
-        # Single mode (returns dict)
+        # Single mode (returns dict) – select best candidate if lists were returned
+        best_left = _select_best(res_left, q0_left, self.left.num_chain_dof)
+        best_right = _select_best(res_right, q0_right, self.right.num_chain_dof)
+
         return {
-            'q_left': res_left.get('q', q0_left) if isinstance(res_left, dict) else (res_left[0].get('q', q0_left) if isinstance(res_left, list) and len(res_left) > 0 else [0.0] * self.left.num_chain_dof),
-            'q_right': res_right.get('q', q0_right) if isinstance(res_right, dict) else (res_right[0].get('q', q0_right) if isinstance(res_right, list) and len(res_right) > 0 else [0.0] * self.right.num_chain_dof),
-            'success_left': bool(res_left.get('success', False) if isinstance(res_left, dict) else (res_left[0].get('success', False) if isinstance(res_left, list) and len(res_left) > 0 else False)),
-            'success_right': bool(res_right.get('success', False) if isinstance(res_right, dict) else (res_right[0].get('success', False) if isinstance(res_right, list) and len(res_right) > 0 else False)),
-            'res_left': res_left,
-            'res_right': res_right,
+            'q_left': best_left.get('q', q0_left if q0_left is not None else [0.0] * self.left.num_chain_dof),
+            'q_right': best_right.get('q', q0_right if q0_right is not None else [0.0] * self.right.num_chain_dof),
+            'success_left': bool(best_left.get('success', False)),
+            'success_right': bool(best_right.get('success', False)),
+            'res_left': best_left,
+            'res_right': best_right,
         }
 
 

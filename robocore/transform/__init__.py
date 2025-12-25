@@ -29,7 +29,7 @@ from .so3 import (
     rpy_to_matrix, axis_angle_to_matrix, quaternion_to_matrix, euler_to_matrix,
     rotation_x, rotation_y, rotation_z,
     rotation_multiply, rotation_inverse, rotation_apply,
-    skew_symmetric, rotation_from_vectors,
+    skew_symmetric, rotation_from_vectors
 )
 
 from .conversions import (
@@ -39,6 +39,7 @@ from .conversions import (
     rpy_to_quaternion, rpy_to_axis_angle,
     axis_angle_to_quaternion, axis_angle_to_rpy,
     axis_angle_to_compact, compact_to_axis_angle,
+    quat2mat,
 )
 
 from .utils import (
