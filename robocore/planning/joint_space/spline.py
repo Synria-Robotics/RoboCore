@@ -106,27 +106,55 @@ class BSplinePlanner(BaseTrajectoryPlanner):
                 
                 # Use scipy's B-spline interpolation
                 try:
+                    # Adjust degree and boundary conditions based on number of waypoints
+                    # For natural boundary conditions, need at least degree+1 waypoints
+                    # For clamped, need at least degree+1 waypoints
+                    # For periodic, need at least degree+1 waypoints
+                    effective_degree = min(self.degree, n_waypoints - 1)
+                    
+                    # Choose boundary condition type based on waypoint count
+                    # Natural BC requires at least degree+1 points
+                    if n_waypoints > effective_degree + 1:
+                        # Enough points for natural boundary conditions
+                        bc_type = 'natural'
+                    elif n_waypoints == effective_degree + 1:
+                        # Exactly enough for clamped boundary conditions
+                        bc_type = 'clamped'
+                    else:
+                        # Not enough points, reduce degree further and use not-a-knot
+                        if n_waypoints <= 2:
+                            effective_degree = 1  # Linear
+                            bc_type = None  # Linear doesn't need BC
+                        elif n_waypoints == 3:
+                            effective_degree = 2  # Quadratic
+                            bc_type = 'not-a-knot'  # More lenient than natural
+                        else:
+                            bc_type = 'not-a-knot'
+                    
                     # Try to use make_interp_spline for better control
                     spline = make_interp_spline(
                         np.linspace(0, 1, n_waypoints),
                         waypoints[:, j],
-                        k=self.degree,
-                        bc_type='natural'
+                        k=effective_degree,
+                        bc_type=bc_type
                     )
                     
-                    # Evaluate
-                    q[:, j] = spline(u_normalized)
-                    qd[:, j] = spline.derivative(1)(u_normalized) / duration
-                    qdd[:, j] = spline.derivative(2)(u_normalized) / (duration ** 2)
-                except:
+                    # Evaluate at u (in [0, 1]) to ensure we pass through waypoints
+                    # u is already normalized to [0, 1] from t/duration
+                    q[:, j] = spline(u)
+                    qd[:, j] = spline.derivative(1)(u) / duration
+                    qdd[:, j] = spline.derivative(2)(u) / (duration ** 2)
+                except Exception as e:
                     # Fallback to manual B-spline evaluation
+
                     q[:, j], qd[:, j], qdd[:, j] = self._evaluate_bspline_manual(
-                        waypoints[:, j], u_normalized, knot_vector, self.degree, duration
+                        waypoints[:, j], u, knot_vector, self.degree, duration
                     )
             else:
                 # For torch, use manual evaluation
+                # Use u (in [0, 1]) since fallback also expects waypoints at np.linspace(0, 1, n_waypoints)
                 q[:, j], qd[:, j], qdd[:, j] = self._evaluate_bspline_manual(
-                    waypoints[:, j], u_normalized, knot_vector, self.degree, duration
+                    waypoints[:, j], u, knot_vector, self.degree, duration
                 )
         
         return {
@@ -201,8 +229,17 @@ class BSplinePlanner(BaseTrajectoryPlanner):
             # Map u to waypoint indices
             u_waypoints = np.linspace(0, 1, n_control)
             
-            # Use cubic interpolation as approximation
-            interp_func = interp1d(u_waypoints, control_points, kind='cubic', 
+            # Choose interpolation kind based on number of control points
+            # cubic requires at least 4 points, quadratic requires at least 3, linear requires at least 2
+            if n_control >= 4:
+                interp_kind = 'cubic'
+            elif n_control >= 3:
+                interp_kind = 'quadratic'
+            else:
+                interp_kind = 'linear'
+            
+            # Use appropriate interpolation
+            interp_func = interp1d(u_waypoints, control_points, kind=interp_kind, 
                                   bounds_error=False, fill_value='extrapolate')
             q = interp_func(u)
             
