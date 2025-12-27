@@ -40,6 +40,12 @@ setup(
     python_requires=">=3.8",
     packages=find_packages(exclude=("tests", "examples")),
     include_package_data=True,
+    package_data={
+        "robocore": [
+            "modeling/parser/mjcf_parser/*.xml",
+            "configs/*.yaml",
+        ],
+    },
     install_requires=install_requires,
     extras_require={
         "dev": ["black", "ruff", "pytest", "mypy"],

@@ -1,0 +1,7 @@
+# Include package data files
+include README.md
+include LICENSE
+recursive-include robocore *.xml
+recursive-include robocore *.yaml
+recursive-include robocore *.yml
+
