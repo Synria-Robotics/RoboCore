@@ -1,4 +1,4 @@
-"""High-Performance Robotics Kinematics Library
+"""Simulation bridge implementations.
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -18,18 +18,3 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
-
-__version__ = "1.0.0"
-__author__ = "Synria Robotics Team"
-__copyright__ = "Copyright (c) 2025 Synria Robotics Co., Ltd."
-__license__ = "GPL-3.0"
-
-from . import modeling
-from . import kinematics
-from . import transform
-from . import planning
-from . import analysis
-from . import configs
-from . import utils
-from . import bridge
-
