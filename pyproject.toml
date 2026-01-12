@@ -40,6 +40,7 @@ dependencies = [
     "mesh_to_sdf",
     "lxml",
     "tqdm",
+    "torch"
 ]
 
 # Optional dependencies
@@ -65,11 +66,14 @@ all = [
 Homepage = "https://github.com/Synria-Robotics/RoboCore"
 
 [tool.setuptools]
-packages = ["robocore"]
+# Automatically find all packages and subpackages, excluding tests and examples
+packages = {find = {exclude = ["tests", "examples", "tests.*", "examples.*"]}}
 include-package-data = true
 
 [tool.setuptools.package-data]
+# Include all XML, YAML, and YML files in the robocore package
 robocore = [
-    "modeling/parser/mjcf_parser/*.xml",
-    "configs/*.yaml",
+    "**/*.xml",
+    "**/*.yaml",
+    "**/*.yml",
 ]
