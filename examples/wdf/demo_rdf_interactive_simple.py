@@ -62,7 +62,7 @@ class SimpleRDFVisualizer:
         print("Model loaded successfully!")
         
         # Joint angles
-        self.num_joints = self.robot.num_joint
+        self.num_joints = self.robot.num_joints
         self.joint_angles = np.zeros(self.num_joints)
         
         # Use default joint limits (most robots use -pi to pi)

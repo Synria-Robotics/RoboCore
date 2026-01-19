@@ -19,7 +19,7 @@ except ImportError:
     MUJOCO_AVAILABLE = False
     print("⚠️  MuJoCo not available. Install with: pip install mujoco")
 
-from robocore.modeling.robot_model import BimanualRobotModel
+from robocore.modeling.robot_model import RobotModel
 
 
 class InteractiveDualArmIK:
@@ -44,20 +44,18 @@ class InteractiveDualArmIK:
         self.mj_data = mujoco.MjData(self.mj_model)
         print(f"✓ MuJoCo model loaded: {self.mj_model.nq} DOF")
         
-        # Gripper center offset (from link7 to gripper center, in link7 frame)
-        # Based on MJCF: gripper center at pos="0.14128 0 -0.00015" (both arms)
-        # Center is at 0.14128 m in X direction from link7
-        self.gripper_offset = np.array([0.14128, 0.0, -0.00015, 1.0])  # Homogeneous coordinates
+        # Load RoboCore robot model with unified configuration space
+        self.robot = RobotModel(str(self.mjcf_path))
+        self.left_end_link = left_end_link
+        self.right_end_link = right_end_link
         
-        # Load RoboCore bimanual model
-        self.robot = BimanualRobotModel(str(self.mjcf_path), left_end_link, right_end_link)
+        # Get gripper center offsets from MJCF sites (from link7 to gripper center, in link7 frame)
+        self.left_gripper_offset, self.right_gripper_offset = self._get_gripper_offsets()
+        # For backward compatibility, use left offset as default
+        self.gripper_offset = self.left_gripper_offset
         
-        self.left_model = self.robot.left_model
-        self.right_model = self.robot.right_model
-        
-        # Current joint configuration
-        self.q_left = np.zeros(self.left_model.num_chain_dof)
-        self.q_right = np.zeros(self.right_model.num_chain_dof)
+        # Current joint configuration (unified config space)
+        self.q_full = np.zeros(self.robot.num_dof)
         
         # Target poses
         self.T_left_target = None
@@ -91,6 +89,49 @@ class InteractiveDualArmIK:
         self.viewer = None
         self.reset_requested = False  # Flag for reset request
     
+    def _get_gripper_offsets(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Get gripper center offsets from MJCF site positions.
+        
+        Reads the gripper center site positions from the MJCF file for both arms.
+        
+        :return: Tuple of (left_gripper_offset, right_gripper_offset) as homogeneous coordinates [x, y, z, 1]
+        """
+        left_offset = None
+        right_offset = None
+
+        # Find gripper center sites
+        for site_id in range(self.mj_model.nsite):
+            site_name = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, site_id)
+            if site_name == 'left_gripper_center':
+                # Get site position relative to its parent body (link7)
+                site_pos = self.mj_model.site_pos[site_id].copy()
+                left_offset = site_pos
+            elif site_name == 'right_gripper_center':
+                site_pos = self.mj_model.site_pos[site_id].copy()
+                right_offset = site_pos
+
+        # Default offset (Bessica_D value)
+        default_offset = np.array([0.14128, 0.0, -0.00015])
+
+        # Set offsets, using default if not found
+        if left_offset is None:
+            left_offset = default_offset
+            print(f"⚠️  left_gripper_center site not found, using default: {left_offset}")
+        else:
+            print(f"✓ Left gripper offset: {left_offset} (from site)")
+
+        if right_offset is None:
+            right_offset = default_offset
+            print(f"⚠️  right_gripper_center site not found, using default: {right_offset}")
+        else:
+            print(f"✓ Right gripper offset: {right_offset} (from site)")
+
+        # Convert to homogeneous coordinates
+        left_homogeneous = np.array([left_offset[0], left_offset[1], left_offset[2], 1.0])
+        right_homogeneous = np.array([right_offset[0], right_offset[1], right_offset[2], 1.0])
+
+        return left_homogeneous, right_homogeneous
+
     def _initialize_mocap_ids(self):
         """Find mocap body IDs by name."""
         # Iterate through all bodies to find mocap bodies
@@ -111,19 +152,23 @@ class InteractiveDualArmIK:
     def _initialize_targets(self):
         """Initialize target poses from current FK."""
         # Get initial FK poses (at zero config, should be zero-config FK)
-        result_left = self.left_model.fk(self.q_left)
-        result_right = self.right_model.fk(self.q_right)
+        T_left_link7 = self.robot.fk(self.q_full, end_link=self.left_end_link, return_end=True)
+        T_right_link7 = self.robot.fk(self.q_full, end_link=self.right_end_link, return_end=True)
         
-        # Get link7 poses (FK returns dict with 'end' key)
-        T_left_link7 = result_left['end']
-        T_right_link7 = result_right['end']
+        # FK with return_end=True returns 4x4 matrix directly
+        if isinstance(T_left_link7, dict):
+            T_left_link7 = T_left_link7.get('end', T_left_link7)
+        if isinstance(T_right_link7, dict):
+            T_right_link7 = T_right_link7.get('end', T_right_link7)
         
         # Convert to gripper center poses (T_gripper = T_link7 @ T_offset)
-        T_offset = np.eye(4)
-        T_offset[0:3, 3] = self.gripper_offset[0:3]
+        T_left_offset = np.eye(4)
+        T_left_offset[0:3, 3] = self.left_gripper_offset[0:3]
+        T_right_offset = np.eye(4)
+        T_right_offset[0:3, 3] = self.right_gripper_offset[0:3]
         
-        self.T_left_target = T_left_link7 @ T_offset
-        self.T_right_target = T_right_link7 @ T_offset
+        self.T_left_target = T_left_link7 @ T_left_offset
+        self.T_right_target = T_right_link7 @ T_right_offset
         
         # Save initial poses for mirror mode reference
         self.T_left_initial = self.T_left_target.copy()
@@ -142,8 +187,8 @@ class InteractiveDualArmIK:
     def _initialize_relative_transform(self):
         """Initialize relative grasp transform from current poses."""
         # Convert gripper targets to link7 targets
-        T_left_link7 = self._gripper_to_link7(self.T_left_target)
-        T_right_link7 = self._gripper_to_link7(self.T_right_target)
+        T_left_link7 = self._gripper_to_link7(self.T_left_target, is_left=True)
+        T_right_link7 = self._gripper_to_link7(self.T_right_target, is_left=False)
         
         # Compute relative transform
         self.T_rel_grasp = np.linalg.inv(T_left_link7) @ T_right_link7
@@ -243,35 +288,40 @@ class InteractiveDualArmIK:
         
         return T_left, T_right, T_center
     
-    def _gripper_to_link7(self, T_gripper: np.ndarray) -> np.ndarray:
+    def _gripper_to_link7(self, T_gripper: np.ndarray, is_left: bool = True) -> np.ndarray:
         """Convert gripper center pose to link7 pose.
         
         T_link7 = T_gripper @ inv(T_offset)
+        
+        :param T_gripper: Gripper center pose (4x4 matrix)
+        :param is_left: Whether this is for left arm (True) or right arm (False)
+        :return: Link7 pose (4x4 matrix)
         """
+        offset = self.left_gripper_offset if is_left else self.right_gripper_offset
         T_offset = np.eye(4)
-        T_offset[0:3, 3] = self.gripper_offset[0:3]
+        T_offset[0:3, 3] = offset[0:3]
         return T_gripper @ np.linalg.inv(T_offset)
     
     def solve_ik_independent(self):
         """Solve IK for independent dual-arm control (Demo 1).
         
-        Uses separate IK solving for each arm to avoid coupling (like JS version).
+        Uses multi-chain IK with unified configuration space.
         """
-        # Use BimanualRobotModel.ik() with independent coordination
+        # Use unified multi-chain IK
         res = self.robot.ik(
-            target_left=self._gripper_to_link7(self.T_left_target),
-            target_right=self._gripper_to_link7(self.T_right_target),
-            q0_left=self.q_left,
-            q0_right=self.q_right,
+            targets={
+                self.left_end_link: self._gripper_to_link7(self.T_left_target, is_left=True),
+                self.right_end_link: self._gripper_to_link7(self.T_right_target, is_left=False),
+            },
+            end_links=[self.left_end_link, self.right_end_link],
+            q_initial=self.q_full,
             method='dls',
-            coordination='indep',
             max_iters=15,
             pos_tol=1e-2,
             ori_tol=1e-2,
         )
 
-        self.q_left = np.array(res['q_left'])
-        self.q_right = np.array(res['q_right'])
+        self.q_full = np.array(res['q'])
     
     def solve_ik_relative(self):
         """Solve IK for relative control with master-slave approach (Demo 2).
@@ -283,22 +333,22 @@ class InteractiveDualArmIK:
         When dragging green ball, T_rel_grasp should remain constant.
         When dragging red/blue balls, T_rel_grasp should be updated.
         """
-        # Use BimanualRobotModel.ik() with relative_pose coordination
+        # Use unified multi-chain IK (relative mode not yet fully supported, use independent for now)
+        # TODO: Implement relative mode with unified config space
         res = self.robot.ik(
-            target_left=self._gripper_to_link7(self.T_left_target),
-            target_right=None,  # right is constrained by T_rel_grasp
-            q0_left=self.q_left,
-            q0_right=self.q_right,
+            targets={
+                self.left_end_link: self._gripper_to_link7(self.T_left_target, is_left=True),
+                self.right_end_link: self._gripper_to_link7(self.T_right_target, is_left=False),
+            },
+            end_links=[self.left_end_link, self.right_end_link],
+            q_initial=self.q_full,
             method='dls',
-            coordination='relative_pose',
-            T_rel_grasp=self.T_rel_grasp,
             max_iters=15,
             pos_tol=1e-2,
             ori_tol=1e-2,
         )
 
-        self.q_left = np.array(res['q_left'])
-        self.q_right = np.array(res['q_right'])
+        self.q_full = np.array(res['q'])
     
     def solve_ik_mirror(self):
         """Solve IK for mirror symmetric control with independent solving (Demo 3).
@@ -313,35 +363,31 @@ class InteractiveDualArmIK:
         - Apply mirrored rotation to right initial orientation
         """
         # Convert gripper center targets to link7 targets and solve independently
-        T_left_link7 = self._gripper_to_link7(self.T_left_target)
-        T_right_link7 = self._gripper_to_link7(self.T_right_target)
+        T_left_link7 = self._gripper_to_link7(self.T_left_target, is_left=True)
+        T_right_link7 = self._gripper_to_link7(self.T_right_target, is_left=False)
 
-        # Use BimanualRobotModel.ik() with independent coordination
+        # Use unified multi-chain IK
         res = self.robot.ik(
-            target_left=T_left_link7,
-            target_right=T_right_link7,
-            q0_left=self.q_left,
-            q0_right=self.q_right,
+            targets={
+                self.left_end_link: T_left_link7,
+                self.right_end_link: T_right_link7,
+            },
+            end_links=[self.left_end_link, self.right_end_link],
+            q_initial=self.q_full,
             method='dls',
-            coordination='indep',
             max_iters=15,
             pos_tol=1e-2,
             ori_tol=1e-2,
         )
 
-        self.q_left = np.array(res['q_left'])
-        self.q_right = np.array(res['q_right'])
+        self.q_full = np.array(res['q'])
     
     def _update_robot_pose(self):
-        """Update MuJoCo robot joint positions."""
-        # Map RoboCore joint values to MuJoCo qpos
-        # MuJoCo model has: right arm (0-6), then left arm (7-13)
-        nq_left = self.left_model.num_chain_dof
-        nq_right = self.right_model.num_chain_dof
-        
-        # Right arm first, left arm second
-        self.mj_data.qpos[0:nq_right] = self.q_right
-        self.mj_data.qpos[nq_right:nq_right+nq_left] = self.q_left
+        """Update MuJoCo robot joint positions from unified config space."""
+        # Map unified config space to MuJoCo qpos
+        # MuJoCo model may have different joint order, but for now assume they match
+        nq = min(len(self.q_full), self.mj_model.nq)
+        self.mj_data.qpos[0:nq] = self.q_full[0:nq]
         
         # Forward kinematics in MuJoCo
         mujoco.mj_forward(self.mj_model, self.mj_data)
@@ -417,12 +463,11 @@ class InteractiveDualArmIK:
                 
                 # CRITICAL: Update relative transform when red/blue balls are dragged
                 # This redefines the relative grasp configuration
-                T_left_link7 = self._gripper_to_link7(self.T_left_target)
-                T_right_link7 = self._gripper_to_link7(self.T_right_target)
+                T_left_link7 = self._gripper_to_link7(self.T_left_target, is_left=True)
+                T_right_link7 = self._gripper_to_link7(self.T_right_target, is_left=False)
                 self.T_rel_grasp = np.linalg.inv(T_left_link7) @ T_right_link7
                 
-                print(
-                    f"🔄 relative grasp updated! Relative distance: {np.linalg.norm(self.T_rel_grasp[0:3, 3]):.3f}m")
+                print(f"🔄 relative grasp updated! Relative distance: {np.linalg.norm(self.T_rel_grasp[0:3, 3]):.3f}m")
 
                 # Update center to midpoint (position and average orientation)
                 self.T_center_target[0:3, 3] = 0.5 * (self.T_left_target[0:3, 3] + self.T_right_target[0:3, 3])
@@ -533,8 +578,8 @@ class InteractiveDualArmIK:
         self.T_center_target[0:3, 0:3] = self.T_left_target[0:3, 0:3].copy()
 
         # Reset relative grasp transform
-        T_left_link7 = self._gripper_to_link7(self.T_left_target)
-        T_right_link7 = self._gripper_to_link7(self.T_right_target)
+        T_left_link7 = self._gripper_to_link7(self.T_left_target, is_left=True)
+        T_right_link7 = self._gripper_to_link7(self.T_right_target, is_left=False)
         self.T_rel_grasp = np.linalg.inv(T_left_link7) @ T_right_link7
 
         # Update MuJoCo state

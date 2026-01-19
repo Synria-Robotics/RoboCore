@@ -124,7 +124,7 @@ class BBOPlannerBi:
         dist = sdf.mean(dim=1)
         cost = (sdf ** 2).mean(dim=1)
         grad = (2 * sdf.unsqueeze(-1).expand_as(joint_grad) * joint_grad).mean(dim=1)
-        return cost.reshape(batch_size, 1), grad.reshape(batch_size, 1, self.rdf_bp.robot.num_joint), dist.reshape(
+        return cost.reshape(batch_size, 1), grad.reshape(batch_size, 1, self.rdf_bp.robot.num_joints), dist.reshape(
             batch_size, 1)
 
     def collision_cost(self, joint_value, p, base_trans):
@@ -140,7 +140,7 @@ class BBOPlannerBi:
         grad = (2 * sdf.unsqueeze(-1).expand_as(joint_grad) * joint_grad).mean(dim=1)
         penetration = -sdf.sum(dim=1)
         return cost.reshape(batch_size, 1), grad.reshape(batch_size, 1,
-                                                         self.rdf_bp.robot.num_joint), penetration.reshape(batch_size,
+                                                         self.rdf_bp.robot.num_joints), penetration.reshape(batch_size,
                                                                                                            1)
 
     def normal_cost(self, joint_value, p, tgt_normal, base_trans):
@@ -153,7 +153,7 @@ class BBOPlannerBi:
         cosine_similarities = 1 - torch.sum(normal * tgt_normal, dim=-1)
         cost = cosine_similarities[:, :, 0].mean(dim=1)
         grad = ((cosine_similarities[:, :, 1:] - cosine_similarities[:, :, :1]) / delta).mean(dim=1)
-        return cost.reshape(batch_size, 1), grad.reshape(batch_size, 1, self.rdf_bp.robot.num_joint)
+        return cost.reshape(batch_size, 1), grad.reshape(batch_size, 1, self.rdf_bp.robot.num_joints)
 
     def limit_angles(self, joint_value):
         joint_value = joint_value % (2 * math.pi)  # Wrap angles between 0 and 2*pi
@@ -170,7 +170,7 @@ class BBOPlannerBi:
         cost = torch.sum((joint_value - theta_max).clamp(min=0) ** 2, dim=1) + torch.sum(
             (theta_min - joint_value).clamp(min=0) ** 2, dim=1)
         grad = 2 * ((joint_value - theta_max).clamp(min=0) - (theta_min - joint_value).clamp(min=0))
-        return cost.reshape(batch_size, 1), grad.reshape(batch_size, 1, self.rdf_bp.robot.num_joint)
+        return cost.reshape(batch_size, 1), grad.reshape(batch_size, 1, self.rdf_bp.robot.num_joints)
 
     def middle_joint_cost(self, joint_value, theta_mid):
         batch_size = joint_value.shape[0]
@@ -178,10 +178,10 @@ class BBOPlannerBi:
         cost = torch.sum((joint_value - theta_mid) ** 2, dim=1)
         grad = 2 * (joint_value - theta_mid)
         # grad = torch.nn.functional.normalize(grad,dim=1)
-        return cost.reshape(batch_size, 1), grad.reshape(batch_size, 1, self.rdf_bp.robot.num_joint)
+        return cost.reshape(batch_size, 1), grad.reshape(batch_size, 1, self.rdf_bp.robot.num_joints)
 
     def bi_optimizer(self, p_l, p_r, n_l, n_r, theta_mid, base_trans=None, batch=64):
-        joint_value = self.theta_min + torch.rand(batch, self.rdf_bp.robot.num_joint).to(self.device) * (
+        joint_value = self.theta_min + torch.rand(batch, self.rdf_bp.robot.num_joints).to(self.device) * (
                 self.theta_max - self.theta_min)
         valid_theta_list = []
         num_accept = 0
@@ -243,5 +243,5 @@ class BBOPlannerBi:
                 joint_value += d_theta_l
                 joint_value += d_theta_r  # Update state
                 joint_value = self.limit_angles(joint_value)
-        valid_theta_list = torch.cat(valid_theta_list, dim=0).reshape(-1, self.rdf_bp.robot.num_joint)
+        valid_theta_list = torch.cat(valid_theta_list, dim=0).reshape(-1, self.rdf_bp.robot.num_joints)
         return valid_theta_list

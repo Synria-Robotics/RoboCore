@@ -73,14 +73,14 @@ class IKSolverTorch:
         # 统一 dtype 默认 float64（用户可覆盖）
         self.dtype = dtype if dtype is not None else torch.float64
         # 关节数量
-        # NumPy 版使用 model._chain_actuated / model.num_chain_dof，这里保持一致
+        # NumPy 版使用 model._chain_dof_list / model.num_chain_dof，这里保持一致
         if hasattr(model, "num_chain_dof"):
             self.n = int(model.num_chain_dof)
-        elif hasattr(model, "_chain_actuated"):
-            self.n = len(model._chain_actuated)  # type: ignore[attr-defined]
+        elif hasattr(model, "_chain_dof_list"):
+            self.n = len(model._chain_dof_list)  # type: ignore[attr-defined]
         else:
             raise AttributeError(
-                "RobotModel instance missing 'num_chain_dof' / '_chain_actuated'; "
+                "RobotModel instance missing 'num_chain_dof' / '_chain_dof_list'; "
                 "expected recent RobotModel implementation."
             )
         # Initialize FK solver
@@ -452,7 +452,7 @@ class IKSolverTorch:
                         N = torch.eye(self.n, dtype=self.dtype, device=self.device) - J_pinv_eff @ J_eff
                         if joint_centering:
                             centers = []
-                            for js in self.model._chain_actuated:  # type: ignore[attr-defined]
+                            for js in self.model._chain_dof_list:  # type: ignore[attr-defined]
                                 lo, hi = -1.0, 1.0
                                 if js.limit_lower is not None:
                                     lo = js.limit_lower
@@ -610,7 +610,7 @@ class IKSolverTorch:
 
     def _apply_joint_limits(self, q: Tensor) -> Tensor:
         out = q.clone()
-        for js in self.model._chain_actuated:  # type: ignore[attr-defined]
+        for js in self.model._chain_dof_list:  # type: ignore[attr-defined]
             if js.limit_lower is not None or js.limit_upper is not None:
                 if js.limit_lower is not None:
                     out[js.index] = torch.clamp(out[js.index], min=float(js.limit_lower))
@@ -627,7 +627,7 @@ class IKSolverTorch:
         """
         if not torch.is_tensor(q):
             q = torch.tensor(q, dtype=self.dtype, device=self.device)
-        q_map = {js.name: q[js.index] for js in self.model._chain_actuated}  # type: ignore[attr-defined]
+        q_map = {js.name: q[js.index] for js in self.model._chain_dof_list}  # type: ignore[attr-defined]
         T_parent = torch.eye(4, dtype=self.dtype, device=self.device)
         for urdf_joint in self.model._chain_joints:  # type: ignore[attr-defined]
             R_origin = self.jacobian_solver._rpy_matrix_torch(
@@ -909,7 +909,7 @@ class IKSolverTorch:
                         N = torch.eye(n, dtype=self.dtype, device=self.device) - J_pinv_eff @ Jk
                         if joint_centering:
                             centers = []
-                            for js in self.model._chain_actuated:
+                            for js in self.model._chain_dof_list:
                                 lo, hi = -1.0, 1.0
                                 if js.limit_lower is not None:
                                     lo = js.limit_lower
@@ -949,7 +949,7 @@ class IKSolverTorch:
 
             # Update with joint limits
             q_new = q_sub + dq
-            for js in self.model._chain_actuated:
+            for js in self.model._chain_dof_list:
                 j = js.index
                 if js.limit_lower is not None:
                     q_new[:, j] = torch.clamp(q_new[:, j], min=float(js.limit_lower))

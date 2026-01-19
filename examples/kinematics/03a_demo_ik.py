@@ -142,7 +142,7 @@ if __name__ == "__main__":
     parser.add_argument('--base-link', type=str, default='base_link', help='Base link name')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
     parser.add_argument('--end-pose', type=float, nargs='+',
-                        default=[-0.17006, -0.01704, 0.20533, 0.828399, -0.041455, -0.552330, 0.083476],
+                        default=[0.16993, 0.01740, 0.20530, 0.041461, 0.828399, 0.083471, 0.552331],
                         help='Target end-effector pose as 7 floats (px, py, pz, qx, qy, qz, qw)')
     parser.add_argument('--num-inits', type=int, default=1,
                         help='Number of initial guesses to try per target (default: 1)')
@@ -159,20 +159,21 @@ if __name__ == "__main__":
     main(args)
 
     """_results_
-    [RoboCore:INFO] Initial Guess (radians):
-    q_init = [+0.86066, -0.19202, +1.12657, +0.62005, -1.27493, +1.49421]
     [RoboCore:INFO] IK Solution:
-    Success: True
-    Iterations: 18
-    Position Error: 2.956047e-05 m
-    Orientation Error: 6.537617e-05 rad
-    Total Error: 7.174863e-05
+      Success:  NumPy=True, Torch=True
+      Iterations:  NumPy=5, Torch=9
+      Position Error:  NumPy=4.704810e-07 m, Torch=7.463299e-05 m
+      Orientation Error:  NumPy=2.591603e-06 rad, Torch=1.938068e-05 rad
+      Total Error:  NumPy=3.062084e-06, Torch=7.710832e-05
     [RoboCore:INFO] Solved Joint Angles (radians):
-    q_ik = [+0.09731, +0.20009, -0.30000, +0.00510, +0.49988, -0.20344]
+      NumPy:  [+0.10000, +0.19996, -0.30000, +0.00000, +0.50004, -0.20000]
+      Torch:  [+0.10067, +0.20002, -0.30002, -0.00132, +0.49999, -0.19911]
+      Diff:   1.732748e-03
     [RoboCore:INFO] Solved Joint Angles (degrees):
-    q_ik = [+5.57562, +11.46407, -17.18848, +0.29194, +28.64080, -11.65611]
-    [RoboCore:INFO] Verification (FK of IK solution):
-    Position: [-0.17006, -0.01701, +0.20533]
-    Position Error: 2.956047e-05 m
-    [RoboCore:INFO] RoboCore IK Computation Time:  0.007680 seconds
+      NumPy:  [+5.72942, +11.45659, -17.18848, +0.00012, +28.65011, -11.45917]
+      Torch:  [+5.76814, +11.46026, -17.18997, -0.07550, +28.64727, -11.40804]
+    [RoboCore:INFO] Computation Time:
+      NumPy:  2.8539 ms
+      Torch:  61.7158 ms
+      Ratio:  21.63x
     """

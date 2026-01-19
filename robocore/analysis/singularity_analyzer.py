@@ -118,7 +118,7 @@ class SingularityAnalyzer:
         metrics = []
         for _ in range(n_samples):
             q = []
-            for js in self.model._chain_actuated:
+            for js in self.model._chain_dof_list:
                 lo, hi = -3.14, 3.14
                 if js.limit:
                     if js.limit[0] is not None:

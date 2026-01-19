@@ -26,20 +26,21 @@ import numpy as np
 
 import robocore as rc
 from robocore.modeling import RobotModel
-from robocore.kinematics.bimanual import bimanual_jacobian
+# Using unified interface - no need for bimanual_jacobian
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 from robocore.utils.backend import to_numpy
 
 
-def compute_jacobian_results(left_model, right_model, backend, q_left, q_right, mode='indep', device=None):
-    """Compute bimanual Jacobian results for given backend.
+def compute_jacobian_results(robot_model, backend, q_full, left_end_link, right_end_link, 
+                             base_link='base_link', device=None):
+    """Compute bimanual Jacobian using unified configuration space.
     
-    :param left_model: Left arm RobotModel
-    :param right_model: Right arm RobotModel
+    :param robot_model: RobotModel with unified config space
     :param backend: Backend name ('numpy' or 'torch')
-    :param q_left: Left joint configuration
-    :param q_right: Right joint configuration
-    :param mode: 'indep'|'relative'|'mirror'
+    :param q_full: Full joint configuration [nq]
+    :param left_end_link: Left arm end-effector link name
+    :param right_end_link: Right arm end-effector link name
+    :param base_link: Base link name
     :param device: Device for torch backend
     :return: Dictionary with Jacobian matrix and computation time
     """
@@ -50,7 +51,14 @@ def compute_jacobian_results(left_model, right_model, backend, q_left, q_right, 
         rc.set_backend('torch', device=str(device))
 
     start_time = time.perf_counter()
-    J = bimanual_jacobian(left_model, right_model, q_left, q_right, mode=mode, device=device)
+    
+    # Compute Jacobians for both arms
+    J_left = robot_model.jacobian(q_full, base_link=base_link, end_link=left_end_link)
+    J_right = robot_model.jacobian(q_full, base_link=base_link, end_link=right_end_link)
+    
+    # Stack into combined Jacobian [12, nq_full] (6 rows per arm)
+    J = np.vstack([J_left, J_right])
+    
     elapsed_time = (time.perf_counter() - start_time) * 1000
 
     return {
@@ -60,27 +68,38 @@ def compute_jacobian_results(left_model, right_model, backend, q_left, q_right, 
 
 
 def main(args):
-    left_model = RobotModel(args.model_path, base_link=args.left_base_link, end_link=args.left_end_link)
-    right_model = RobotModel(args.model_path, base_link=args.right_base_link, end_link=args.right_end_link)
+    # Load robot model with unified configuration space
+    robot_model = RobotModel(args.model_path, base_link=args.left_base_link)
     
-    beauty_print(f"Bimanual Jacobian Validation: {left_model.name} (Left: {left_model.num_chain_dof} DOF, Right: {right_model.num_chain_dof} DOF)", type="module")
-    beauty_print(f"Mode: {args.mode}", type="info")
+    beauty_print(f"Bimanual Jacobian Validation: {robot_model.name} (Total DOF: {robot_model.num_dof})", type="module")
 
+    # Build unified configuration vector
+    q_full = np.zeros(robot_model.num_dof)
+    left_indices = robot_model._get_joint_indices(args.left_base_link, args.left_end_link)
+    right_indices = robot_model._get_joint_indices(args.right_base_link, args.right_end_link)
+    
     q_left = np.array(args.q_left)
     q_right = np.array(args.q_right)
+    
+    if len(q_left) <= len(left_indices):
+        q_full[left_indices[:len(q_left)]] = q_left
+    if len(q_right) <= len(right_indices):
+        q_full[right_indices[:len(q_right)]] = q_right
 
     beauty_print(f"Left arm joint configuration (rad):")
     print(f"  q_left = {beauty_print_array(q_left)}")
     beauty_print(f"Right arm joint configuration (rad):")
     print(f"  q_right = {beauty_print_array(q_right)}")
+    beauty_print(f"Unified config space size: {robot_model.num_dof}")
 
     # Compute with both backends
-    results_np = compute_jacobian_results(left_model, right_model, 'numpy', q_left, q_right, mode=args.mode)
+    results_np = compute_jacobian_results(robot_model, 'numpy', q_full, 
+                                          args.left_end_link, args.right_end_link, args.left_base_link)
     import torch
     device = torch.device(args.device)
-    q_left_torch = torch.tensor(q_left, dtype=torch.float64, device=device)
-    q_right_torch = torch.tensor(q_right, dtype=torch.float64, device=device)
-    results_torch = compute_jacobian_results(left_model, right_model, 'torch', q_left_torch, q_right_torch, mode=args.mode, device=device)
+    q_full_torch = torch.tensor(q_full, dtype=torch.float64, device=device)
+    results_torch = compute_jacobian_results(robot_model, 'torch', q_full_torch,
+                                            args.left_end_link, args.right_end_link, args.left_base_link, device=device)
 
     # Convert to numpy for comparison
     J_np = to_numpy(results_np['J'])
@@ -133,11 +152,60 @@ if __name__ == '__main__':
                         help='Left joint angles in radians')
     parser.add_argument('--q-right', type=float, nargs='+', default=[-0.1, -0.2, 0.3, 0.0, -0.5, 0.2, 0.1],
                         help='Right joint angles in radians')
-    parser.add_argument('--mode', type=str, default='indep', choices=['indep', 'relative', 'mirror'],
-                        help='Jacobian mode: indep (independent), relative (relative transform), mirror (mirror mode)')
+    # Note: mode parameter removed - unified interface computes independent Jacobians for each arm
     parser.add_argument('--device', default='cpu', help='PyTorch device (if torch backend)')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     args = parser.parse_args()
 
     main(args)
+    
+    """_result_
+    [RoboCore:MODULE] [1] Jacobian Comparison (NumPy vs Torch)
+    [RoboCore:INFO] Jacobian shape: (12, 14)
+    [RoboCore:INFO] Condition number (NumPy): 1.33e+04
+    [RoboCore:INFO] Condition number (Torch): 1.33e+04
+    [RoboCore:INFO] Jacobian Matrix (NumPy, first 6 rows):
+    [
+      [+0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.555047  -0.009408  +0.018265  -0.083549  +0.014537  -0.010736  +0.000000]
+      [+0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  -0.000000  -0.557982  -0.001839  +0.282590  -0.002764  -0.054536  +0.000000]
+      [+0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.057174  +0.093768  +0.002207  -0.052441  +0.002022  -0.001395  +0.000000]
+      [+0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  -0.995004  +0.097843  +0.956425  +0.097843  -0.971230  -0.193349]
+      [+0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  -1.000000  +0.000000  -0.198669  +0.289629  -0.198669  +0.194709  -0.980853]
+      [+0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  -0.000000  -0.099833  -0.975170  +0.036957  -0.975170  -0.137116  -0.023300]
+    ]
+    [RoboCore:INFO] Jacobian Matrix (NumPy, last 6 rows):
+    [
+      [-0.547700  +0.013010  -0.018160  +0.094867  -0.014595  +0.008619  -0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000]
+      [-0.000000  +0.550669  -0.001752  +0.277383  -0.003052  -0.050108  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000]
+      [-0.057152  -0.129664  -0.001465  -0.060358  -0.000843  +0.022501  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000]
+      [+0.000000  +0.995004  +0.097843  +0.944703  +0.097843  -0.979111  +0.155247  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000]
+      [+1.000000  +0.000000  -0.198669  -0.289629  -0.198669  -0.194709  -0.901914  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000]
+      [-0.000000  +0.099833  -0.975170  +0.153792  -0.975170  -0.058571  +0.403050  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000]
+    ]
+    [RoboCore:INFO] Jacobian Matrix (Torch, first 6 rows):
+    [
+      [+0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.555047  -0.009408  +0.018265  -0.083549  +0.014537  -0.010736  +0.000000]
+      [+0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  -0.000000  -0.557982  -0.001839  +0.282590  -0.002764  -0.054536  +0.000000]
+      [+0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.057174  +0.093768  +0.002207  -0.052441  +0.002022  -0.001395  +0.000000]
+      [+0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  -0.995004  +0.097843  +0.956425  +0.097843  -0.971230  -0.193349]
+      [+0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  -1.000000  +0.000000  -0.198669  +0.289629  -0.198669  +0.194709  -0.980853]
+      [+0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  -0.000000  -0.099833  -0.975170  +0.036957  -0.975170  -0.137116  -0.023300]
+    ]
+    [RoboCore:INFO] Jacobian Matrix (Torch, last 6 rows):
+    [
+      [-0.547700  +0.013010  -0.018160  +0.094867  -0.014595  +0.008619  -0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000]
+      [-0.000000  +0.550669  -0.001752  +0.277383  -0.003052  -0.050108  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000]
+      [-0.057152  -0.129664  -0.001465  -0.060358  -0.000843  +0.022501  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000]
+      [+0.000000  +0.995004  +0.097843  +0.944703  +0.097843  -0.979111  +0.155247  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000]
+      [+1.000000  +0.000000  -0.198669  -0.289629  -0.198669  -0.194709  -0.901914  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000]
+      [-0.000000  +0.099833  -0.975170  +0.153792  -0.975170  -0.058571  +0.403050  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000  +0.000000]
+    ]
+    [RoboCore:INFO] NumPy vs Torch:
+    [RoboCore:INFO]   Max difference:        2.776e-17
+    [RoboCore:INFO]   Frobenius norm:        2.973e-17
+    [RoboCore:MODULE] [2] Performance Comparison
+    [RoboCore:INFO] NumPy:  0.6100 ms
+    [RoboCore:INFO] Torch:  35.5364 ms
+    [RoboCore:INFO] Ratio:  58.25x    
+    """
 

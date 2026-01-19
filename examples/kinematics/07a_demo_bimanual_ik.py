@@ -25,21 +25,24 @@ import time
 
 import robocore as rc
 from robocore.modeling import RobotModel
-from robocore.kinematics.bimanual import bimanual_inverse_kinematics
 from robocore.utils.beauty_logger import beauty_print_array, beauty_print
 from robocore.utils.backend import to_numpy
 from robocore.transform.conversions import *
 
 
-def compute_ik(left_model, right_model, backend, target_left, target_right, coordination='indep', num_initial_guesses=1, initial_guess_strategy='random', initial_guess_scale=1.0, random_seed=None):
-    """Compute bimanual inverse kinematics for given backend.
+def compute_ik(robot_model, backend, target_left, target_right, left_end_link, right_end_link,
+               base_link='base_link', q0=None, num_initial_guesses=1,
+               initial_guess_strategy='random', initial_guess_scale=1.0, random_seed=None):
+    """Compute bimanual inverse kinematics using unified configuration space.
     
-    :param left_model: Left arm RobotModel
-    :param right_model: Right arm RobotModel
+    :param robot_model: RobotModel with unified config space
     :param backend: Backend name ('numpy' or 'torch')
     :param target_left: Target left end-effector pose [px, py, pz, qx, qy, qz, qw] or 4x4 matrix
     :param target_right: Target right end-effector pose [px, py, pz, qx, qy, qz, qw] or 4x4 matrix
-    :param coordination: Coordination mode ('indep', 'relative_pose', 'relative_pos', 'relative_ori', 'mirror')
+    :param left_end_link: Left arm end-effector link name
+    :param right_end_link: Right arm end-effector link name
+    :param base_link: Base link name
+    :param q0: Initial full configuration [nq] (optional)
     :param num_initial_guesses: Number of initial guesses to try
     :param initial_guess_strategy: Strategy for generating initial guesses
     :param initial_guess_scale: Scale factor for joint limits
@@ -66,67 +69,77 @@ def compute_ik(left_model, right_model, backend, target_left, target_right, coor
     else:
         T_right = np.array(target_right)
 
-    ik_result = bimanual_inverse_kinematics(
-        left_model,
-        right_model,
-        target_left=T_left,
-        target_right=T_right,
+    # Use unified multi-chain IK
+    ik_result = robot_model.ik(
+        targets={
+            left_end_link: T_left,
+            right_end_link: T_right,
+        },
+        end_links=[left_end_link, right_end_link],
+        q_initial=q0,
         method='dls',
-        coordination=coordination,
-        use_analytic_jacobian=True,
+        max_iters=200,
+        pos_tol=1e-3,
+        ori_tol=1e-3,
         num_initial_guesses=num_initial_guesses,
         initial_guess_strategy=initial_guess_strategy,
         initial_guess_scale=initial_guess_scale,
         random_seed=random_seed,
+        base_link=base_link,
     )
 
     elapsed_time = time.time() - start_time
 
-    # Extract error information from res_left and res_right
-    res_left = ik_result['res_left']
-    res_right = ik_result['res_right']
+    # Extract results
+    q_full = np.array(ik_result['q'])
+    iters = ik_result.get('iters', 0)
+    success = ik_result.get('success', False)
+    pos_err = ik_result.get('pos_err', 0.0)
+    ori_err = ik_result.get('ori_err', 0.0)
     
-    # Handle case where res_left/res_right might be dict or list
-    if isinstance(res_left, list) and len(res_left) > 0:
-        res_left = res_left[0]
-    if isinstance(res_right, list) and len(res_right) > 0:
-        res_right = res_right[0]
+    # Extract left and right arm joint values from unified config
+    left_indices = robot_model._get_joint_indices(base_link, left_end_link)
+    right_indices = robot_model._get_joint_indices(base_link, right_end_link)
     
-    # Get iters (use max of both arms if available)
-    iters_left = res_left['iters']
-    iters_right = res_right['iters']
-    iters = max(iters_left, iters_right)
+    q_left = q_full[left_indices] if len(left_indices) > 0 else np.array([])
+    q_right = q_full[right_indices] if len(right_indices) > 0 else np.array([])
 
     return {
-        'success_left': ik_result['success_left'],
-        'success_right': ik_result['success_right'],
+        'success': success,
+        'success_left': success,  # For compatibility
+        'success_right': success,  # For compatibility
         'iters': iters,
-        'pos_err_left': res_left['pos_err'],
-        'pos_err_right': res_right['pos_err'],
-        'ori_err_left': res_left['ori_err'],
-        'ori_err_right': res_right['ori_err'],
-        'q_left': ik_result['q_left'],
-        'q_right': ik_result['q_right'],
+        'pos_err': pos_err,
+        'pos_err_left': pos_err,  # For compatibility
+        'pos_err_right': pos_err,  # For compatibility
+        'ori_err': ori_err,
+        'ori_err_left': ori_err,  # For compatibility
+        'ori_err_right': ori_err,  # For compatibility
+        'q_full': q_full,
+        'q_left': q_left,
+        'q_right': q_right,
         'time': elapsed_time
     }
 
 
 def main(args):
-    left_model = RobotModel(str(args.model_path), base_link=args.left_base_link, end_link=args.left_end_link)
-    right_model = RobotModel(str(args.model_path), base_link=args.right_base_link, end_link=args.right_end_link)
+    # Load robot model with unified configuration space
+    robot_model = RobotModel(str(args.model_path), base_link=args.left_base_link)
     
     # Compute with both backends
     results_np = compute_ik(
-        left_model, right_model, 'numpy', args.target_left, args.target_right,
-        coordination=args.coordination,
+        robot_model, 'numpy', args.target_left, args.target_right,
+        args.left_end_link, args.right_end_link, args.left_base_link,
+        q0=None,
         num_initial_guesses=args.num_inits,
         initial_guess_strategy=args.init_strategy,
         initial_guess_scale=args.init_scale,
         random_seed=args.seed
     )
     results_torch = compute_ik(
-        left_model, right_model, 'torch', args.target_left, args.target_right,
-        coordination=args.coordination,
+        robot_model, 'torch', args.target_left, args.target_right,
+        args.left_end_link, args.right_end_link, args.left_base_link,
+        q0=None,
         num_initial_guesses=args.num_inits,
         initial_guess_strategy=args.init_strategy,
         initial_guess_scale=args.init_scale,
@@ -183,9 +196,8 @@ if __name__ == "__main__":
     parser.add_argument('--target-right', type=float, nargs='+',
                         default=[0.05715, 0.12706, 0.46730, 0.385071, 0.387550, -0.485394, 0.682582],
                         help='Target right end-effector pose as 7 floats (px, py, pz, qx, qy, qz, qw)')
-    parser.add_argument('--coordination', type=str, default='indep',
-                        choices=['indep', 'relative_pose', 'relative_pos', 'relative_ori', 'mirror'],
-                        help='Coordination mode: indep (independent), relative_pose, relative_pos, relative_ori, mirror')
+    # Note: coordination parameter removed - unified interface uses independent multi-chain IK
+    # Relative and mirror modes can be implemented by constraining targets if needed
     parser.add_argument('--num-inits', type=int, default=1,
                         help='Number of initial guesses to try per target (default: 1)')
     parser.add_argument('--init-strategy', type=str, default='random',

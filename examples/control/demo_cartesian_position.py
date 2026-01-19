@@ -60,8 +60,8 @@ def demo_basic_position_control():
     print("  Control law: τ = J^T·[Kp·(xd - x) + Kd·(ẋd - ẋ)] + g(q)")
     
     # Current joint state
-    q = np.zeros(robot.num_chain_dof)
-    qd = np.zeros(robot.num_chain_dof)
+    q = np.zeros(robot.num_dof)
+    qd = np.zeros(robot.num_dof)
     
     # Get current end-effector pose
     T_current = forward_kinematics(robot, q, return_end=True)
@@ -114,8 +114,8 @@ def demo_orientation_control():
     )
     
     # Current state
-    q = np.zeros(robot.num_chain_dof)
-    qd = np.zeros(robot.num_chain_dof)
+    q = np.zeros(robot.num_dof)
+    qd = np.zeros(robot.num_dof)
     
     T_current = forward_kinematics(robot, q, return_end=True)
     pos_current = T_current[:3, 3]
@@ -167,8 +167,8 @@ def demo_different_gains():
     print(f"  Orientation gains (Kp[3:]): {np.diag(controller.Kp)[3:]}")
     print("  Note: Higher position gains for faster position response")
     
-    q = np.zeros(robot.num_chain_dof)
-    qd = np.zeros(robot.num_chain_dof)
+    q = np.zeros(robot.num_dof)
+    qd = np.zeros(robot.num_dof)
     
     T_current = forward_kinematics(robot, q, return_end=True)
     pos_current = T_current[:3, 3]

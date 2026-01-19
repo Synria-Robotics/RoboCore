@@ -41,8 +41,9 @@ from robocore.transform.conversions import quaternion_to_matrix, matrix_to_quate
 
 
 def solve_ik_pinocchio(pin_model, pin_data, target_pose, q_init, pin_q_indices, pin_v_indices,
-                       end_joint_id, end_frame_id, pos_tol, ori_tol, max_iters, damping, step_size):
-    """Solve IK using Pinocchio CLIK method.
+                       end_joint_id, end_frame_id, pos_tol, ori_tol, max_iters, damping, step_size,
+                       robot_model=None):
+    """Solve IK using Pinocchio CLIK method with joint limits and adaptive damping.
     
     :param pin_model: Pinocchio model
     :param pin_data: Pinocchio data
@@ -55,8 +56,9 @@ def solve_ik_pinocchio(pin_model, pin_data, target_pose, q_init, pin_q_indices, 
     :param pos_tol: Position tolerance
     :param ori_tol: Orientation tolerance
     :param max_iters: Maximum iterations
-    :param damping: Damping factor
+    :param damping: Base damping factor (will be adapted)
     :param step_size: Step size
+    :param robot_model: RobotModel instance for joint limits (optional)
     :return: Dictionary with solution results
     """
     # Map initial configuration to full pinocchio configuration
@@ -64,7 +66,25 @@ def solve_ik_pinocchio(pin_model, pin_data, target_pose, q_init, pin_q_indices, 
     for i, pin_idx in enumerate(pin_q_indices):
         if pin_idx < len(q_full):
             q_full[pin_idx] = q_init[i]
+
+    # Store initial configuration for joint limit checking
+    q_initial = q_full.copy()
+
+    # Get joint limits if robot_model is provided
+    joint_limits = None
+    if robot_model is not None:
+        chain_indices = robot_model._get_joint_indices(robot_model.base_link, robot_model.end_link)
+        joint_limits = []
+        for idx in chain_indices:
+            js = robot_model.joint_list[idx]
+            joint_limits.append((js.limit_lower, js.limit_upper))
+
     oMdes = pinocchio.SE3(target_pose[:3, :3], target_pose[:3, 3])
+
+    # Adaptive damping parameters (matching RoboCore)
+    min_damping = 1e-4
+    max_damping = 5e-2
+    base_damping = max(damping, min_damping)  # Use at least min_damping
 
     for i in range(max_iters):
         pinocchio.forwardKinematics(pin_model, pin_data, q_full)
@@ -110,10 +130,31 @@ def solve_ik_pinocchio(pin_model, pin_data, target_pose, q_init, pin_q_indices, 
         Jlog = pinocchio.Jlog6(iMd.inverse())
         J_se3 = -Jlog @ J
 
-        # Damped least squares
+        # Adaptive damping based on condition number and error
+        # Compute condition number using SVD
+        try:
+            U, s, Vt = np.linalg.svd(J_se3, full_matrices=False)
+            cond_num = s[0] / (s[-1] + 1e-10)
+            # Adaptive damping: larger damping for ill-conditioned Jacobians
+            if cond_num > 1e6:
+                adaptive_damping = max_damping
+            elif cond_num > 1e4:
+                adaptive_damping = min_damping + (max_damping - min_damping) * (cond_num - 1e4) / (1e6 - 1e4)
+            else:
+                adaptive_damping = min_damping
+        except:
+            adaptive_damping = base_damping
+
+        # Damped least squares with adaptive damping
         JJt = J_se3 @ J_se3.T
-        JJt += damping * np.eye(6)
+        JJt += adaptive_damping * np.eye(6)
         v = -J_se3.T @ solve(JJt, err)
+
+        # Limit step size to prevent large jumps
+        v_norm = norm(v)
+        max_v_norm = 0.5  # Maximum velocity norm
+        if v_norm > max_v_norm:
+            v = v * (max_v_norm / v_norm)
 
         # Map velocity to full configuration space
         v_full = np.zeros(pin_model.nv)
@@ -122,7 +163,19 @@ def solve_ik_pinocchio(pin_model, pin_data, target_pose, q_init, pin_q_indices, 
                 v_full[pin_v_idx] = v[i_v]
 
         # Update configuration on manifold
-        q_full = pinocchio.integrate(pin_model, q_full, v_full * step_size)
+        q_full_new = pinocchio.integrate(pin_model, q_full, v_full * step_size)
+
+        # Apply joint limits if available
+        if joint_limits is not None:
+            for j, (limit_lower, limit_upper) in enumerate(joint_limits):
+                pin_idx = pin_q_indices[j]
+                if pin_idx < len(q_full_new):
+                    if limit_lower is not None:
+                        q_full_new[pin_idx] = max(q_full_new[pin_idx], limit_lower)
+                    if limit_upper is not None:
+                        q_full_new[pin_idx] = min(q_full_new[pin_idx], limit_upper)
+
+        q_full = q_full_new
 
     # Final error check
     pinocchio.forwardKinematics(pin_model, pin_data, q_full)
@@ -169,7 +222,8 @@ def main(args):
     pin_data = pin_model.createData()
 
     # Map RoboCore actuated joints to Pinocchio joints
-    actuated_joint_names = [js.name for js in rc_model._chain_actuated]
+    chain_indices = rc_model._get_joint_indices(rc_model.base_link, rc_model.end_link)
+    actuated_joint_names = [rc_model.joint_list[idx].name for idx in chain_indices]
     pin_q_indices = []
     pin_v_indices = []
     for joint_name in actuated_joint_names:
@@ -200,7 +254,8 @@ def main(args):
     device = torch.device(args.device)
     dtype = torch.float64
     chain = chain.to(dtype=dtype, device=device)
-    joint_limits = torch.tensor([[js.limit_lower, js.limit_upper] for js in rc_model._chain_actuated], dtype=dtype, device=device)
+    # Get chain joint limits (already processed in robot_model, None values handled)
+    joint_limits = torch.tensor(rc_model.chain_joint_limit, dtype=dtype, device=device)
 
     # Build target pose from input
     target_pose = rc_model.random_pose(seed=args.seed, scale=args.scale)
@@ -251,7 +306,8 @@ def main(args):
         end_joint_id if end_frame_id is None else None,
         end_frame_id,
         args.pos_tol, args.ori_tol, args.max_iters,
-        args.damping, args.step_size
+        args.damping, args.step_size,
+        robot_model=rc_model
     )
 
     # Solve IK with RoboCore
@@ -352,7 +408,8 @@ def main(args):
             end_joint_id if end_frame_id is None else None,
             end_frame_id,
             args.pos_tol, args.ori_tol, args.max_iters,
-            args.damping, args.step_size
+            args.damping, args.step_size,
+            robot_model=rc_model
         )
 
     def benchmark_rc():
@@ -444,7 +501,8 @@ def main(args):
             end_joint_id if end_frame_id is None else None,
             end_frame_id,
             args.pos_tol, args.ori_tol, args.max_iters,
-            args.damping, args.step_size
+            args.damping, args.step_size,
+            robot_model=rc_model
         )
 
         # RoboCore IK - multiple initial guesses are handled automatically by inverse_kinematics()
@@ -527,19 +585,19 @@ if __name__ == '__main__':
     parser.add_argument('--base-link', type=str, default='base_link', help='Base link name')
     parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
     parser.add_argument('--end-pose', type=float, nargs='+',
-                        default=[0.17006, 0.01704, 0.20533, 0.042114, 0.828366, 0.083037, 0.552396],
+                        default=[0.16993, 0.01740, 0.20530, 0.041461, 0.828399, 0.083471, 0.552331],
                         help='Target end-effector pose as 7 floats (px, py, pz, qx, qy, qz, qw)')
     parser.add_argument('--q-init', type=float, nargs='+', default=None,
                         help='Initial guess (if None, uses random)')
     parser.add_argument('--max-iters', type=int, default=100, help='Maximum iterations')
     parser.add_argument('--pos-tol', type=float, default=1e-4, help='Position tolerance (m)')
     parser.add_argument('--ori-tol', type=float, default=1e-3, help='Orientation tolerance (rad)')
-    parser.add_argument('--damping', type=float, default=1e-9, help='Regularization factor for DLS (lambda^2, matches PyTorch Kinematics regularlization=1e-9)')
+    parser.add_argument('--damping', type=float, default=1e-4, help='Base regularization factor for DLS (will be adapted, default: 1e-4)')
     parser.add_argument('--step-size', type=float, default=0.2, help='Learning rate (default: 0.2 to match PyTorch Kinematics lr=0.2)')
     parser.add_argument('--device', default='cpu', help='PyTorch device (cpu, cuda)')
     parser.add_argument('--samples', type=int, default=50, help='Number of test configurations')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
-    parser.add_argument('--num-retries', type=int, default=1, help='Number of initial guesses to try (default: 10)')
+    parser.add_argument('--num-retries', type=int, default=5, help='Number of initial guesses to try (default: 5)')
     parser.add_argument('--num-configs', type=int, default=100, help='Number of random joint configurations to generate (default: 100)')
     parser.add_argument('--scale', type=float, default=0.8, help='Scaling factor for the joint range (default: 0.5)')
     args = parser.parse_args()

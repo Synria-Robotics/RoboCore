@@ -44,11 +44,12 @@ def compare_fk(model_a: RobotModel, model_b: RobotModel, q):
 	"""
 	beauty_print("Compute and compare FK", type="module", centered=True)
 	# Prepare q for each model: pad with zeros if needed, truncate if too long
-	q_a = np.zeros(model_a.num_chain_dof)
-	q_a[:min(len(q), model_a.num_chain_dof)] = q[:min(len(q), model_a.num_chain_dof)]
+	# Use unified config space size
+	q_a = np.zeros(model_a.nq)
+	q_a[:min(len(q), model_a.nq)] = q[:min(len(q), model_a.nq)]
 
-	q_b = np.zeros(model_b.num_chain_dof)
-	q_b[:min(len(q), model_b.num_chain_dof)] = q[:min(len(q), model_b.num_chain_dof)]
+	q_b = np.zeros(model_b.nq)
+	q_b[:min(len(q), model_b.nq)] = q[:min(len(q), model_b.nq)]
 
 	T_a = forward_kinematics(model_a, q_a, return_end=True)
 	T_b = forward_kinematics(model_b, q_b, return_end=True)
@@ -220,24 +221,24 @@ def main(args):
         urdf_model.print_tree(show_fixed=args.show_fixed)
         mjcf_model.print_tree(show_fixed=args.show_fixed)
 
-    if urdf_model.num_chain_dof != mjcf_model.num_chain_dof:
-        beauty_print("Chain DOF mismatch: using max chain DOF, shorter model will pad with zeros", type="warning")
+    if urdf_model.nq != mjcf_model.nq:
+        beauty_print(f"Unified config space size mismatch: URDF={urdf_model.nq}, MJCF={mjcf_model.nq}. Using max size.", type="warning")
 
     if args.random:
         q = np.array(urdf_model.random_q(seed=args.seed, scale=args.scale))
         beauty_print("Using random joint angles (middle range)")
-        # Use max chain DOF to accommodate both models
-        max_chain_dof = max(urdf_model.num_chain_dof, mjcf_model.num_chain_dof)
-        if len(q) < max_chain_dof:
-            q_padded = np.zeros(max_chain_dof)
+        # Use max unified config space size to accommodate both models
+        max_nq = max(urdf_model.nq, mjcf_model.nq)
+        if len(q) < max_nq:
+            q_padded = np.zeros(max_nq)
             q_padded[:len(q)] = q
             q = q_padded
-        elif len(q) > max_chain_dof:
-            q = q[:max_chain_dof]
+        elif len(q) > max_nq:
+            q = q[:max_nq]
     else:
-        # Use max chain DOF to accommodate both models
-        max_chain_dof = max(urdf_model.num_chain_dof, mjcf_model.num_chain_dof)
-        q = np.zeros(max_chain_dof)
+        # Use max unified config space size to accommodate both models
+        max_nq = max(urdf_model.nq, mjcf_model.nq)
+        q = np.zeros(max_nq)
         beauty_print("Using zero joint configuration")
 
     beauty_print("Joint angles (rad):")

@@ -22,7 +22,6 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
-import numpy as np
 import argparse
 import time
 
@@ -43,11 +42,11 @@ def main(args):
 
     # Generate random joint configurations
     num_batch = args.num_configs
-    beauty_print(f"Generating {num_batch} Random Joint Configurations", type="module", centered=True)
+    beauty_print(f"Generating {num_batch} Random Joint Configurations", type="info")
     q_left_batch = left_model.random_q_batch(num_batch, seed=args.seed, scale=args.scale)
     q_right_batch = right_model.random_q_batch(num_batch, seed=args.seed+1, scale=args.scale)
 
-    beauty_print(f"Processing {num_batch} joint configuration(s) using {backend} backend", type="module", centered=True)
+    beauty_print(f"Processing {num_batch} joint configuration(s) using {backend} backend", type="info")
 
     # Batch processing
     start_time = time.time()
@@ -112,4 +111,3 @@ if __name__ == "__main__":
                         help='Backend to use for computation (default: numpy)')
     args = parser.parse_args()
     main(args)
-

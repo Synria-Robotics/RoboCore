@@ -348,7 +348,7 @@ class IKSolverNumPy:
 
             # Update with joint limits - but also detect large jumps that might indicate discontinuity
             q_new = q_sub + dq
-            for js in self.model._chain_actuated:
+            for js in self.model._chain_dof_list:
                 j = js.index
                 if js.limit_lower is not None:
                     q_new[:, j] = np.maximum(q_new[:, j], js.limit_lower)
@@ -358,7 +358,7 @@ class IKSolverNumPy:
             # Detect and prevent large jumps near limits (indicates discontinuity)
             for k in range(Ba_sub):
                 orig_idx = act_idx[k]
-                for js in self.model._chain_actuated:
+                for js in self.model._chain_dof_list:
                     j = js.index
                     if js.limit_lower is not None and js.limit_upper is not None:
                         joint_range = js.limit_upper - js.limit_lower
@@ -640,7 +640,7 @@ class IKSolverNumPy:
                     N = np.eye(self.n) - J_pinv_eff @ J_eff
                     if joint_centering:
                         centers = []
-                        for js in self.model._chain_actuated:
+                        for js in self.model._chain_dof_list:
                             lo, hi = -1.0, 1.0
                             if js.limit:
                                 if js.limit[0] is not None:
@@ -683,7 +683,7 @@ class IKSolverNumPy:
             q_new = self._apply_joint_limits(q_new)
 
             # Detect and prevent large jumps near limits (indicates discontinuity)
-            for js in self.model._chain_actuated:
+            for js in self.model._chain_dof_list:
                 j = js.index
                 if js.limit_lower is not None and js.limit_upper is not None:
                     joint_range = js.limit_upper - js.limit_lower
@@ -837,7 +837,7 @@ class IKSolverNumPy:
 
         # First pass: detect joints that are at or very close to limits
         initially_blocked = np.zeros(len(q), dtype=bool)
-        for js in self.model._chain_actuated:
+        for js in self.model._chain_dof_list:
             j = js.index
             if js.limit_lower is not None and js.limit_upper is not None:
                 joint_range = js.limit_upper - js.limit_lower
@@ -875,7 +875,7 @@ class IKSolverNumPy:
 
             # Check which joints would be blocked
             newly_blocked = np.zeros(len(q), dtype=bool)
-            for js in self.model._chain_actuated:
+            for js in self.model._chain_dof_list:
                 j = js.index
                 if initially_blocked[j]:
                     continue  # Already blocked
@@ -911,7 +911,7 @@ class IKSolverNumPy:
         :return: clamped configuration.
         """
         q_clamped = q.copy()
-        for js in self.model._chain_actuated:
+        for js in self.model._chain_dof_list:
             if js.limit_lower is not None and js.limit_upper is not None:
                 if js.limit_lower is not None:
                     q_clamped[js.index] = max(js.limit_lower, q_clamped[js.index])

@@ -56,7 +56,8 @@ def main(args):
 
     # Map RoboCore actuated joints to Pinocchio joints
     # Get joint names from RoboCore
-    actuated_joint_names = [js.name for js in rc_model._chain_actuated]
+    chain_indices = rc_model._get_joint_indices(rc_model.base_link, rc_model.end_link)
+    actuated_joint_names = [rc_model.joint_list[idx].name for idx in chain_indices]
     pin_q_indices = []
     for joint_name in actuated_joint_names:
         if pin_model.existJointName(joint_name):

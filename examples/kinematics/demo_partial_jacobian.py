@@ -42,14 +42,14 @@ def main(args):
     print(J_pos)
 
     # 4. Subset of joints (e.g. last 3 joints as wrist)
-    if model.num_chain_dof >= 3:
-        wrist_idx = list(range(model.num_chain_dof-3, model.num_chain_dof))
+    if model.num_dof >= 3:
+        wrist_idx = list(range(model.num_dof-3, model.num_dof))
         J_wrist = model.jacobian(q, method='analytic', joint_indices=wrist_idx)
         beauty_print(f"Wrist subset Jacobian (6 x 3) indices={wrist_idx}:")
         print(J_wrist)
 
     # 5. Combined example: position-only for elbow over wrist joints
-    if args.elbow_link and model.num_chain_dof >= 3:
+    if args.elbow_link and model.num_dof >= 3:
         J_combo = model.jacobian(q, method='analytic', target_link=args.elbow_link, row_mask=[1,1,1,0,0,0], joint_indices=wrist_idx)
         beauty_print(f"Combined local+mask+subset Jacobian shape={J_combo.shape}:")
         print(J_combo)

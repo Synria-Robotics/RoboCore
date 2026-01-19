@@ -62,7 +62,10 @@ def format_array(arr: np.ndarray, precision: int = 5) -> str:
 def random_q(model, rng, scale=0.5):
     """Generate random joint configuration within limits."""
     q = [0.0] * model.num_dof
-    for js in model._chain_actuated:
+    # Get chain joint indices for the current chain
+    chain_indices = model._get_joint_indices(model.base_link, model.end_link)
+    for idx in chain_indices:
+        js = model.joint_list[idx]
         lo, hi = -1.0, 1.0
         if js.limit:
             if js.limit[0] is not None:
@@ -71,7 +74,7 @@ def random_q(model, rng, scale=0.5):
                 hi = js.limit[1]
         mid = 0.5 * (lo + hi)
         span = 0.5 * (hi - lo) * scale
-        q[js.index] = float(rng.uniform(mid - span, mid + span))
+        q[idx] = float(rng.uniform(mid - span, mid + span))
     return np.array(q)
 
 

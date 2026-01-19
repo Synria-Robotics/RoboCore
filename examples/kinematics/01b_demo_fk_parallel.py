@@ -67,7 +67,7 @@ def main(args):
     beauty_print(f"End-Effector Position: {beauty_print_array(position_single)}")
 
     # Batch processing example
-    beauty_print("Batch Processing Example", type="module", centered=True)
+    beauty_print(f"Batch Processing Example ({num_batch} Configurations)", type="module", centered=True)
     q_batch = np.array(joint_configs)
     start_time = time.time()
     T_batch = forward_kinematics(robot_model, q_batch, return_end=True)
@@ -80,28 +80,28 @@ def main(args):
         beauty_print(f"Effective speedup: {speedup:.2f}x")
 
     # Display results for each configuration
-    beauty_print("Results for Each Configuration", type="module", centered=True)
+    beauty_print("Results for Each Sample", type="module", centered=True)
     for i in range(num_batch):
         T_fk = T_batch[i] if T_batch.ndim == 3 else T_batch
         q_config = joint_configs[i]
         
-        beauty_print(f"\nConfiguration {i+1}:")
-        beauty_print(f"  Joint angles: {beauty_print_array(np.array(q_config))}")
+        beauty_print(f"Configuration {i+1}:", type="info")
+        print(f"  Joint angles: {beauty_print_array(np.array(q_config))}")
         
         position_fk = T_fk[:3, 3]
         rotation_fk = T_fk[:3, :3]
         euler_fk = matrix_to_euler(rotation_fk, seq='xyz')
         quat_fk = matrix_to_quaternion(rotation_fk)
 
-        beauty_print(f"  End-Effector Position (m):")
-        print(f"    p = {beauty_print_array(position_fk)}")
-        beauty_print(f"  End-Effector Orientation (Euler XYZ, degrees):")
-        print(f"    rpy = {beauty_print_array(np.rad2deg(euler_fk))}")
-        beauty_print(f"  End-Effector Orientation (Quaternion xyzw):")
-        print(f"    quat = {beauty_print_array(quat_fk, precision=6)}")
+        print(f"  End-Effector Position (m):")
+        print(f"     p = {beauty_print_array(position_fk)}")
+        print(f"  End-Effector Orientation (Euler XYZ, degrees):")
+        print(f"     rpy = {beauty_print_array(np.rad2deg(euler_fk))}")
+        print(f"  End-Effector Orientation (Quaternion xyzw):")
+        print(f"     quat = {beauty_print_array(quat_fk, precision=6)}")
         
         if args.show_matrices:
-            beauty_print(f"  Homogeneous Transformation Matrix:")
+            print(f"  Homogeneous Transformation Matrix:")
             print(beauty_print_array(T_fk, precision=6))
 
 

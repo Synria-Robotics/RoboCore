@@ -27,14 +27,17 @@ def bimanual_forward_kinematics(
 ):
     """Compute bimanual forward kinematics.
     
+    DEPRECATED: Use robot.fk(q_full, base_link=..., end_link=...) with unified config space instead.
+    This function is kept for backward compatibility with existing examples.
+    
     Supports both single and batch processing. Inputs are automatically detected:
     - Single: [n] -> single 4x4 matrix
     - Batch: [B, n] -> [B, 4, 4] array
     
-    :param left_model: Left arm RobotModel
-    :param right_model: Right arm RobotModel
-    :param q_left: Left joint configuration(s) - [n] or [B, n]
-    :param q_right: Right joint configuration(s) - [n] or [B, n]
+    :param left_model: Left arm RobotModel (or single RobotModel with left end_link)
+    :param right_model: Right arm RobotModel (or single RobotModel with right end_link)
+    :param q_left: Left joint configuration(s) - [n] or [B, n], or full config [num_dof] if using unified space
+    :param q_right: Right joint configuration(s) - [n] or [B, n], or full config [num_dof] if using unified space
     :param return_end: Return only end-effector poses
     :param mode: 'indep'|'relative'|'mirror'
     :param device: Torch device (only for torch backend)

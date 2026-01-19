@@ -61,27 +61,30 @@ def normalize_joint_angles(q_new, q_prev, robot_model):
     q_prev = np.asarray(q_prev)
     q_normalized = q_new.copy()
 
-    for js in robot_model._chain_actuated:
+    # Get chain joint indices
+    chain_indices = robot_model._get_joint_indices(robot_model.base_link, robot_model.end_link)
+    for idx in chain_indices:
+        js = robot_model.joint_list[idx]
         if js.joint_type == 'revolute':
             # For revolute joints, try to minimize the difference
-            diff = q_new[js.index] - q_prev[js.index]
+            diff = q_new[idx] - q_prev[idx]
 
             # If difference is large, try adding/subtracting 2π
             if abs(diff) > np.pi:
                 # Try subtracting 2π
-                q_candidate = q_new[js.index] - 2 * np.pi
+                q_candidate = q_new[idx] - 2 * np.pi
                 if js.limit_lower is not None and js.limit_upper is not None:
                     if js.limit_lower <= q_candidate <= js.limit_upper:
-                        if abs(q_candidate - q_prev[js.index]) < abs(diff):
-                            q_normalized[js.index] = q_candidate
+                        if abs(q_candidate - q_prev[idx]) < abs(diff):
+                            q_normalized[idx] = q_candidate
                             continue
 
                 # Try adding 2π
-                q_candidate = q_new[js.index] + 2 * np.pi
+                q_candidate = q_new[idx] + 2 * np.pi
                 if js.limit_lower is not None and js.limit_upper is not None:
                     if js.limit_lower <= q_candidate <= js.limit_upper:
-                        if abs(q_candidate - q_prev[js.index]) < abs(diff):
-                            q_normalized[js.index] = q_candidate
+                        if abs(q_candidate - q_prev[idx]) < abs(diff):
+                            q_normalized[idx] = q_candidate
 
     return q_normalized
 
@@ -254,7 +257,8 @@ def demo_linear_motion(robot_model, args):
             if len(joint_angles) > 0:
                 joint_angles.append(joint_angles[-1])
             else:
-                joint_angles.append(np.zeros(len(robot_model._chain_actuated)))
+                chain_indices = robot_model._get_joint_indices(robot_model.base_link, robot_model.end_link)
+                joint_angles.append(np.zeros(len(chain_indices)))
 
     joint_angles = np.array(joint_angles)
     beauty_print(f"IK Success Rate: {success_count}/{len(ik_results)} ({success_count/len(ik_results)*100:.1f}%)")
@@ -409,7 +413,8 @@ def demo_circular_motion(robot_model, args):
             if len(joint_angles) > 0:
                 joint_angles.append(joint_angles[-1])
             else:
-                joint_angles.append(np.zeros(len(robot_model._chain_actuated)))
+                chain_indices = robot_model._get_joint_indices(robot_model.base_link, robot_model.end_link)
+                joint_angles.append(np.zeros(len(chain_indices)))
 
     joint_angles = np.array(joint_angles)
     beauty_print(f"IK Success Rate: {success_count}/{len(ik_results)} ({success_count/len(ik_results)*100:.1f}%)")
@@ -440,7 +445,9 @@ def main(args):
 
     beauty_print(f"Robot Model: {args.model_path}")
     beauty_print(f"Base Link: {args.base_link}, End Link: {args.end_link}")
-    beauty_print(f"DOF: {len(robot_model._chain_actuated)}")
+    chain_indices = robot_model._get_joint_indices(args.base_link, args.end_link)
+    beauty_print(f"Total DOF (unified config space): {robot_model.num_dof}")
+    beauty_print(f"Chain DOF: {len(chain_indices)}")
 
     results = {}
 

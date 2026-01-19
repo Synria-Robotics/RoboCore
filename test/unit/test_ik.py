@@ -35,7 +35,9 @@ def random_q_in_limits(model, seed=42):
     rng = np.random.default_rng(seed)
     n = model.num_dof
     q = np.zeros(n)
-    for js in model._chain_actuated:
+    chain_indices = model._get_joint_indices(model.base_link, model.end_link)
+    for idx in chain_indices:
+        js = model.joint_list[idx]
         lo, hi = -1.0, 1.0
         if js.limit:
             if js.limit[0] is not None:
@@ -44,7 +46,7 @@ def random_q_in_limits(model, seed=42):
                 hi = js.limit[1]
         mid = 0.5 * (lo + hi)
         span = 0.5 * (hi - lo) * 0.5
-        q[js.index] = rng.uniform(mid - span, mid + span)
+        q[idx] = rng.uniform(mid - span, mid + span)
     return q
 
 

@@ -56,27 +56,30 @@ def normalize_joint_angles(q_new, q_prev, robot_model):
     q_prev = np.asarray(q_prev)
     q_normalized = q_new.copy()
 
-    for js in robot_model._chain_actuated:
+    # Get chain joint indices for the specified chain
+    chain_indices = robot_model._get_joint_indices(robot_model.base_link, robot_model.end_link)
+    for idx in chain_indices:
+        js = robot_model.joint_list[idx]
         if js.joint_type == 'revolute':
             # For revolute joints, try to minimize the difference
-            diff = q_new[js.index] - q_prev[js.index]
+            diff = q_new[idx] - q_prev[idx]
 
             # If difference is large, try adding/subtracting 2π
             if abs(diff) > np.pi:
                 # Try subtracting 2π
-                q_candidate = q_new[js.index] - 2 * np.pi
+                q_candidate = q_new[idx] - 2 * np.pi
                 if js.limit_lower is not None and js.limit_upper is not None:
                     if js.limit_lower <= q_candidate <= js.limit_upper:
-                        if abs(q_candidate - q_prev[js.index]) < abs(diff):
-                            q_normalized[js.index] = q_candidate
+                        if abs(q_candidate - q_prev[idx]) < abs(diff):
+                            q_normalized[idx] = q_candidate
                             continue
 
                 # Try adding 2π
-                q_candidate = q_new[js.index] + 2 * np.pi
+                q_candidate = q_new[idx] + 2 * np.pi
                 if js.limit_lower is not None and js.limit_upper is not None:
                     if js.limit_lower <= q_candidate <= js.limit_upper:
-                        if abs(q_candidate - q_prev[js.index]) < abs(diff):
-                            q_normalized[js.index] = q_candidate
+                        if abs(q_candidate - q_prev[idx]) < abs(diff):
+                            q_normalized[idx] = q_candidate
 
     return q_normalized
 
@@ -146,7 +149,9 @@ def main(args):
 
     beauty_print(f"Robot Model: {args.model_path}")
     beauty_print(f"Base Link: {args.base_link}, End Link: {args.end_link}")
-    beauty_print(f"DOF: {len(robot_model._chain_actuated)}")
+    beauty_print(f"Total DOF (unified config space): {robot_model.num_dof}")
+    chain_indices = robot_model._get_joint_indices(args.base_link, args.end_link)
+    beauty_print(f"Chain DOF: {len(chain_indices)}")
 
     # [1] Generate spline trajectory in Cartesian space
     beauty_print("[1] Generating Spline Trajectory", type="module", centered=False)
@@ -284,7 +289,8 @@ def main(args):
             if len(joint_angles) > 0:
                 joint_angles.append(joint_angles[-1])
             else:
-                joint_angles.append(np.zeros(len(robot_model._chain_actuated)))
+                # Use full config space size
+                joint_angles.append(np.zeros(robot_model.num_dof))
 
     joint_angles = np.array(joint_angles)  # Shape: (num_points, n_dof)
 

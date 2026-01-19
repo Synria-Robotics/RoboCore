@@ -154,7 +154,7 @@ def main(args):
     robot_model = RobotModel(args.model_path, base_link=args.base_link, end_link=args.end_link)
     beauty_print(f"Jacobian Validation: {robot_model.name} ({robot_model.num_dof} DOF)", type="module")
 
-    q = np.zeros(robot_model.num_chain_dof)
+    q = np.zeros(robot_model.num_dof)
 
     beauty_print(f"Joint configuration (rad):")
     print(f"  q = {beauty_print_array(q)}")
@@ -163,7 +163,7 @@ def main(args):
     results_np = compute_jacobian_results(robot_model, 'numpy', q)
     import torch
     device = torch.device(args.device)
-    q_torch = torch.zeros(robot_model.num_chain_dof, dtype=torch.float64, device=device)
+    q_torch = torch.zeros(robot_model.num_dof, dtype=torch.float64, device=device)
     results_torch = compute_jacobian_results(robot_model, 'torch', q_torch, device)
 
     # Convert to numpy for comparison
@@ -222,42 +222,47 @@ if __name__ == '__main__':
 
     """_results_
     ================================================================================
-            Jacobian Validation: Alicia_D_v5_6_gripper_100mm.urdf (10 DOF)         
+             Jacobian Validation: Alicia_D_v5_6_gripper_100mm.urdf (8 DOF)          
     ================================================================================
-    [RoboCore:INFO] Backend set to numpy on device cpu with dtype <class 'numpy.float64'>
-    [RoboCore:MODULE] [1] Analytic vs Numeric Jacobian (NumPy)
     [RoboCore:INFO] Joint configuration (rad):
-    q = [+0.00000, +0.00000, +0.00000, +0.00000, +0.00000, +0.00000]
-    [RoboCore:INFO] Jacobian shape: (6, 6)
-    [RoboCore:INFO] Condition number: 6.76e+02
-    [RoboCore:INFO] Jacobian Matrix (Analytic):
+      q = [+0.00000, +0.00000, +0.00000, +0.00000, +0.00000, +0.00000, +0.00000, +0.00000]
+    [RoboCore:INFO] Backend set to numpy on device cpu with dtype <class 'numpy.float64'>
+    [RoboCore:INFO] Backend set to torch on device cpu with dtype torch.float64
+    [RoboCore:MODULE] [1] Jacobian Comparison (NumPy vs Torch)
+    [RoboCore:INFO] Jacobian shape: (6, 8)
+    [RoboCore:INFO] Condition number (NumPy): 6.76e+02
+    [RoboCore:INFO] Condition number (Torch): 6.76e+02
+    [RoboCore:INFO] Analytic Jacobian (NumPy):
     [
-    [+0.000250  +0.027725  -0.195946  +0.000354  -0.037936  -0.000000]
-    [-0.220999  +0.000000  -0.000000  -0.003850  +0.000000  +0.000000]
-    [+0.000000  +0.220999  +0.198407  -0.000354  +0.043381  +0.000000]
-    [+0.000000  -0.000000  -0.000000  +0.707107  -0.000000  +0.707107]
-    [+0.000000  +1.000000  +1.000000  +0.000000  +1.000000  -0.000000]
-    [+1.000000  -0.000000  -0.000000  +0.707107  -0.000000  +0.707107]
+      [-0.000348  -0.027724  +0.195946  -0.000353  +0.037936  +0.000000  +0.000000  +0.000000]
+      [+0.220900  +0.000000  -0.000001  +0.003850  -0.000001  +0.000000  +0.000000  +0.000000]
+      [+0.000000  +0.220900  +0.198407  -0.000353  +0.043381  -0.000000  +0.000000  +0.000000]
+      [+0.000000  -0.000004  -0.000004  -0.707108  -0.000014  -0.707108  +0.000000  +0.000000]
+      [+0.000000  -1.000000  -1.000000  +0.000006  -1.000000  +0.000014  +0.000000  +0.000000]
+      [+1.000000  +0.000000  +0.000000  +0.707105  -0.000000  +0.707105  +0.000000  +0.000000]
     ]
-    [RoboCore:INFO] Jacobian Matrix (Numeric):
+    [RoboCore:INFO] Analytic Jacobian (Torch):
     [
-    [+0.000250  +0.027725  -0.195946  +0.000354  -0.037936  +0.000000]
-    [-0.220999  +0.000000  +0.000000  -0.003850  +0.000000  +0.000000]
-    [+0.000000  +0.220999  +0.198407  -0.000354  +0.043381  +0.000000]
-    [-0.000000  -0.000000  -0.000000  +0.707107  -0.000000  +0.707107]
-    [+0.000000  +1.000000  +1.000000  +0.000000  +1.000000  +0.000000]
-    [+1.000000  -0.000000  +0.000000  +0.707107  -0.000000  +0.707107]
+      [-0.000348  -0.027724  +0.195946  -0.000353  +0.037936  +0.000000  +0.000000  +0.000000]
+      [+0.220900  +0.000000  -0.000001  +0.003850  -0.000001  +0.000000  +0.000000  +0.000000]
+      [+0.000000  +0.220900  +0.198407  -0.000353  +0.043381  -0.000000  +0.000000  +0.000000]
+      [+0.000000  -0.000004  -0.000004  -0.707108  -0.000014  -0.707108  +0.000000  +0.000000]
+      [+0.000000  -1.000000  -1.000000  +0.000006  -1.000000  +0.000014  +0.000000  +0.000000]
+      [+1.000000  +0.000000  +0.000000  +0.707105  -0.000000  +0.707105  +0.000000  +0.000000]
     ]
-    [RoboCore:INFO] Analytic vs Numeric:
-    [RoboCore:INFO]   Max difference:        4.734e-08
-    [RoboCore:INFO]   Frobenius norm:        1.160e-07
-    [RoboCore:MODULE] [2] Performance comparison
-    [RoboCore:INFO] Analytic   0.3209 ms
-    [RoboCore:INFO] Numeric    2.2604 ms
-    [RoboCore:MODULE] [3] Condition number across 10 random configurations
-    [RoboCore:INFO] Condition number statistics:
-    [RoboCore:INFO]   Mean:   1.02e+02
-    [RoboCore:INFO]   Median: 5.21e+01
-    [RoboCore:INFO]   Max:    3.73e+02
-    [RoboCore:INFO]   Min:    2.11e+01
+    [RoboCore:INFO] NumPy vs Torch (Analytic):
+    [RoboCore:INFO]   Max difference:        4.337e-18
+    [RoboCore:INFO]   Frobenius norm:        5.554e-18
+    [RoboCore:INFO] NumPy vs Torch (Numeric):
+    [RoboCore:INFO]   Max difference:        2.209e-11
+    [RoboCore:INFO]   Frobenius norm:        4.218e-11
+    [RoboCore:MODULE] [2] Performance Comparison
+    [RoboCore:INFO] Analytic:
+      NumPy:  0.6775 ms
+      Torch:  68.9991 ms
+      Ratio:  101.84x
+    [RoboCore:INFO] Numeric:
+      NumPy:  10.2467 ms
+      Torch:  27.3747 ms
+      Ratio:  2.67x
     """

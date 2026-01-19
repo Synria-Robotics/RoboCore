@@ -68,7 +68,7 @@ class FKSolverTorch:
         self.model = model
         self.n = model.num_chain_dof
         self.joint_chain = model._chain_joints
-        self.actuated_joints = model._chain_actuated
+        self.actuated_joints = model._chain_dof_list
         self.base_link = model.base_link
         self.end_link = model.end_link
 

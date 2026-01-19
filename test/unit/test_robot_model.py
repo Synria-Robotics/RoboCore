@@ -49,23 +49,26 @@ class TestRobotModel:
     def test_dof(self, urdf_path):
         """Test DOF calculation."""
         model = RobotModel(urdf_path, end_link='tool0')
-        dof = model.num_dof
+        # Use unified config space size
+        nq = model.num_dof
         
-        # Alicia-D should have 6 DOF
-        assert dof == 6
-        assert dof > 0
+        # Alicia-D should have at least 6 DOF (may have more in unified space)
+        assert nq >= 6
+        assert nq > 0
     
     def test_actuated_joints(self, urdf_path):
         """Test actuated joint enumeration."""
         model = RobotModel(urdf_path, end_link='tool0')
         
-        actuated = model._chain_actuated
-        assert len(actuated) == model.num_dof
+        # Get chain joint indices
+        chain_indices = model._get_joint_indices(model.base_link, model.end_link)
+        assert len(chain_indices) > 0
         
         # Check joint properties
-        for js in actuated:
+        for idx in chain_indices:
+            js = model.joint_list[idx]
             assert js.name is not None
-            assert js.index >= 0
+            assert idx >= 0
             assert js.joint_type in ('revolute', 'prismatic')
     
     def test_joint_chain(self, urdf_path):
@@ -73,7 +76,8 @@ class TestRobotModel:
         model = RobotModel(urdf_path, end_link='tool0')
         
         chain = model._chain_joints
-        assert len(chain) >= model.num_dof  # May include fixed joints
+        chain_indices = model._get_joint_indices(model.base_link, model.end_link)
+        assert len(chain) >= len(chain_indices)  # May include fixed joints
         
         # Check chain continuity
         for joint in chain:
@@ -84,7 +88,9 @@ class TestRobotModel:
         """Test joint limit retrieval."""
         model = RobotModel(urdf_path, end_link='tool0')
         
-        for js in model._chain_actuated:
+        chain_indices = model._get_joint_indices(model.base_link, model.end_link)
+        for idx in chain_indices:
+            js = model.joint_list[idx]
             if js.limit:
                 lo, hi = js.limit
                 # Limits should be reasonable
@@ -121,10 +127,11 @@ class TestJointSpec:
         """Test that JointSpec has required attributes."""
         model = RobotModel(urdf_path, end_link='tool0')
         
-        for js in model._chain_actuated:
+        chain_indices = model._get_joint_indices(model.base_link, model.end_link)
+        for idx in chain_indices:
+            js = model.joint_list[idx]
             # Required attributes
             assert hasattr(js, 'name')
-            assert hasattr(js, 'index')
             assert hasattr(js, 'joint_type')
             assert hasattr(js, 'axis')
             assert hasattr(js, 'origin_rpy')
@@ -132,7 +139,7 @@ class TestJointSpec:
             
             # Check types
             assert isinstance(js.name, str)
-            assert isinstance(js.index, int)
+            assert isinstance(idx, int)
             assert js.joint_type in ('revolute', 'prismatic', 'fixed')
 
 

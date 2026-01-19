@@ -38,7 +38,9 @@ def skip_if_missing():
 def random_q_in_limits(model, seed=0):
     rng = np.random.default_rng(seed)
     q = np.zeros(model.num_dof)
-    for js in model._chain_actuated:  # type: ignore[attr-defined]
+    chain_indices = model._get_joint_indices(model.base_link, model.end_link)
+    for idx in chain_indices:
+        js = model.joint_list[idx]
         lo, hi = -1.0, 1.0
         if js.limit:
             if js.limit[0] is not None:
@@ -48,7 +50,7 @@ def random_q_in_limits(model, seed=0):
         # 取中间 50% 区间随机，避免极限导致条件数更差
         mid = 0.5 * (lo + hi)
         span = 0.25 * (hi - lo)
-        q[js.index] = rng.uniform(mid - span, mid + span)
+        q[idx] = rng.uniform(mid - span, mid + span)
     return q
 
 
@@ -66,8 +68,11 @@ def right_arm():
 
 class TestBessicaSevenDOF:
     def test_dof_counts(self, left_arm, right_arm):
-        assert left_arm.num_dof == 7, "Left arm should have 7 DOF"
-        assert right_arm.num_dof == 7, "Right arm should have 7 DOF"
+        # Check chain DOF (not unified config space)
+        left_indices = left_arm._get_joint_indices(left_arm.base_link, left_arm.end_link)
+        right_indices = right_arm._get_joint_indices(right_arm.base_link, right_arm.end_link)
+        assert len(left_indices) == 7, "Left arm should have 7 DOF"
+        assert len(right_indices) == 7, "Right arm should have 7 DOF"
 
     @pytest.mark.parametrize("method", ["pinv", "dls"])  # transpose 通常也行，可按需加入
     def test_fk_ik_fk_closure(self, left_arm, method):
@@ -124,14 +129,16 @@ class TestBessicaSevenDOF:
         # 计算与关节中心的平均偏差
         def avg_center_offset(model, q):
             acc = 0.0
-            for js in model._chain_actuated:  # type: ignore[attr-defined]
+            chain_indices = model._get_joint_indices(model.base_link, model.end_link)
+            for idx in chain_indices:
+                js = model.joint_list[idx]
                 lo, hi = -1.0, 1.0
                 if js.limit:
                     if js.limit[0] is not None: lo = js.limit[0]
                     if js.limit[1] is not None: hi = js.limit[1]
                 center = 0.5 * (lo + hi)
-                acc += abs(q[js.index] - center) / max(1e-9, (hi - lo))
-            return acc / model.num_dof
+                acc += abs(q[idx] - center) / max(1e-9, (hi - lo))
+            return acc / len(chain_indices)
         off_base = avg_center_offset(left_arm, np.asarray(base['q']))
         off_ns = avg_center_offset(left_arm, np.asarray(with_ns['q']))
         # nullspace 居中应不劣于基准（允许极小浮动）
@@ -151,7 +158,8 @@ class TestBessicaSevenDOF:
         from robocore.kinematics.jacobian import jacobian  # noqa: F401 (ensure import side effects if any)
         # 复用数值版逻辑（简化：复制 numpy 早停策略）
         def fk_until(model, q, link):
-            q_map = {js.name: q[js.index] for js in model._chain_actuated}  # type: ignore[attr-defined]
+            chain_indices = model._get_joint_indices(model.base_link, model.end_link)
+            q_map = {model.joint_list[idx].name: q[idx] for idx in chain_indices}
             import math as _m
             T = np.eye(4)
             for urdf_joint in model._chain_joints:  # type: ignore[attr-defined]

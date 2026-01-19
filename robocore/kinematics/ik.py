@@ -32,7 +32,7 @@ from robocore.utils.backend import get_backend
 
 def inverse_kinematics(
     model,
-    target_pose: Sequence[Sequence[float]] | np.ndarray,
+    target_pose: Sequence[Sequence[float]] | np.ndarray | Dict[str, Sequence[Sequence[float]] | np.ndarray] = None,
     q0: Optional[Sequence[float] | np.ndarray] = None,
     *,
     method: str = 'dls',
@@ -42,6 +42,11 @@ def inverse_kinematics(
     random_seed: Optional[int] = None,
     # Local / partial task options
     target_link: Optional[str] = None,
+    base_link: Optional[str] = None,
+    end_link: Optional[str] = None,
+    # Multi-chain options
+    targets: Optional[Dict[str, Sequence[Sequence[float]] | np.ndarray]] = None,
+    end_links: Optional[Sequence[str]] = None,
     row_mask: Optional[Sequence[int | bool]] = None,
     # Redundancy / nullspace parameters
     nullspace_gain: float = 0.0,
@@ -55,18 +60,81 @@ def inverse_kinematics(
 ) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
     """Compute inverse kinematics for single or batch of target poses.
     
+    Supports both single-chain and multi-chain modes:
+    - Single-chain: target_pose (4x4 or [B, 4, 4]), end_link (optional)
+    - Multi-chain: targets={end_link: pose}, end_links=[...], base_link (optional)
+    
     :param model: RobotModel instance
-    :param target_pose: Target pose(s) - 4x4 matrix or [B, 4, 4] array
-    :param q0: Initial configuration (optional, used as base for noise-based strategies)
+    :param target_pose: Target pose(s) - 4x4 matrix or [B, 4, 4] array (single-chain mode)
+    :param q0: Initial configuration - full config vector [num_dof] or chain config (optional)
     :param method: 'pinv'|'dls'|'transpose'
     :param num_initial_guesses: Number of initial guesses to try (default: 1)
     :param initial_guess_strategy: Strategy - 'zero'|'random'|'sobol'|'latin'|'center'|'uniform'
     :param initial_guess_scale: Scale factor for joint limits (0.0 to 1.0)
     :param random_seed: Seed for reproducibility
+    :param target_link: Target link name (legacy, use end_link instead)
+    :param base_link: Base link name (if specified, uses dynamic path and full config space)
+    :param end_link: End link name (single-chain mode, if specified, uses dynamic path and full config space)
+    :param targets: Multi-chain mode - dict mapping end_link to target pose {end_link: 4x4 or [B, 4, 4]}
+    :param end_links: Multi-chain mode - list of end link names
     :param solver_kwargs: Extra kwargs passed to solver
-    :return: IK result dict (single) or list of dicts (batch)
+    :return: IK result dict (single) or list of dicts (batch), with 'q' in full config space
     """
     backend = get_backend()
+    
+    # Check if multi-chain mode is requested
+    if targets is not None or end_links is not None:
+        # Multi-chain mode
+        if targets is None or end_links is None:
+            raise ValueError("Multi-chain mode requires both 'targets' and 'end_links' parameters")
+        
+        return _solve_multichain_ik(
+            model, targets, end_links, q0,
+            base_link=base_link,
+            method=method,
+            num_initial_guesses=num_initial_guesses,
+            initial_guess_strategy=initial_guess_strategy,
+            initial_guess_scale=initial_guess_scale,
+            random_seed=random_seed,
+            **solver_kwargs
+        )
+    
+    # Single-chain mode
+    if target_pose is None:
+        raise ValueError("Either 'target_pose' (single-chain) or 'targets' (multi-chain) must be provided")
+    
+    # Handle dynamic base_link/end_link
+    use_full_config = False
+    chain_indices = None
+    original_end = None
+    original_base = None
+    
+    if base_link is not None or end_link is not None:
+        # Dynamic path: extract chain joint values from full configuration
+        base = base_link or model.base_link
+        end = end_link or (target_link or model.end_link)
+        use_full_config = True
+        chain_indices = model._get_joint_indices(base, end)
+        
+        # Temporarily update model's end_link for IK computation
+        original_end = model.end_link
+        original_base = model.base_link
+        try:
+            model.end_link = end
+            model.base_link = base
+            # Rebuild chain for this path
+            model._build_chain()
+        except Exception:
+            model.end_link = original_end
+            model.base_link = original_base
+            raise
+        
+        # Extract chain joint values from full configuration if q0 is full config
+        if q0 is not None:
+            q0_arr = np.asarray(q0)
+            if len(q0_arr.flatten()) == model.num_dof:
+                q0_chain = q0_arr[chain_indices] if q0_arr.ndim == 1 else q0_arr[:, chain_indices]
+                q0 = q0_chain.tolist() if hasattr(q0_chain, 'tolist') else list(q0_chain)
 
     # Parse input dimensions
     target_arr = np.asarray(target_pose)
@@ -90,34 +158,61 @@ def inverse_kinematics(
     )
 
     # Route to backend
-    if backend == 'numpy':
-        return _solve_numpy(
-            model, target_arr, initial_guesses, is_batch,
-            method=method,
-            target_link=target_link,
-            row_mask=row_mask,
-            nullspace_gain=nullspace_gain,
-            joint_centering=joint_centering,
-            joint_center_gain=joint_center_gain,
-            joint_center_weights=joint_center_weights,
-            **solver_kwargs,
-        )
-    elif backend == 'torch':
-        return _solve_torch(
-            model, target_arr, initial_guesses, is_batch,
-            method=method,
-            target_link=target_link,
-            row_mask=row_mask,
-            nullspace_gain=nullspace_gain,
-            joint_centering=joint_centering,
-            joint_center_gain=joint_center_gain,
-            joint_center_weights=joint_center_weights,
-            torch_device=torch_device,
-            torch_dtype=torch_dtype,
-            **solver_kwargs,
-        )
-    else:
-        raise ValueError(f"Unsupported backend '{backend}'")
+    try:
+        if backend == 'numpy':
+            result = _solve_numpy(
+                model, target_arr, initial_guesses, is_batch,
+                method=method,
+                target_link=target_link or end_link,
+                row_mask=row_mask,
+                nullspace_gain=nullspace_gain,
+                joint_centering=joint_centering,
+                joint_center_gain=joint_center_gain,
+                joint_center_weights=joint_center_weights,
+                **solver_kwargs,
+            )
+        elif backend == 'torch':
+            result = _solve_torch(
+                model, target_arr, initial_guesses, is_batch,
+                method=method,
+                target_link=target_link or end_link,
+                row_mask=row_mask,
+                nullspace_gain=nullspace_gain,
+                joint_centering=joint_centering,
+                joint_center_gain=joint_center_gain,
+                joint_center_weights=joint_center_weights,
+                torch_device=torch_device,
+                torch_dtype=torch_dtype,
+                **solver_kwargs,
+            )
+        else:
+            raise ValueError(f"Unsupported backend '{backend}'")
+        
+        # Expand result to full configuration space if dynamic path was used
+        if use_full_config and chain_indices is not None:
+            if isinstance(result, list):
+                # Batch mode
+                for res in result:
+                    if 'q' in res:
+                        q_chain = np.array(res['q'])
+                        q_full = np.zeros(model.num_dof)
+                        q_full[chain_indices] = q_chain
+                        res['q'] = q_full.tolist()
+            else:
+                # Single mode
+                if 'q' in result:
+                    q_chain = np.array(result['q'])
+                    q_full = np.zeros(model.num_dof)
+                    q_full[chain_indices] = q_chain
+                    result['q'] = q_full.tolist()
+        
+        return result
+    finally:
+        # Restore original end_link and base_link if we modified them
+        if original_end is not None:
+            model.end_link = original_end
+            model.base_link = original_base
+            model._build_chain()
 
 
 def _solve_numpy(
@@ -457,3 +552,174 @@ def _solve_torch(
             candidates.append(res)
         results.append(best_result(candidates))
     return results
+
+
+def _solve_multichain_ik(
+    model: Any,
+    targets: Dict[str, Sequence[Sequence[float]] | np.ndarray],
+    end_links: Sequence[str],
+    q0: Optional[Sequence[float] | np.ndarray] = None,
+    *,
+    base_link: Optional[str] = None,
+    method: str = 'dls',
+    num_initial_guesses: int = 1,
+    initial_guess_strategy: str = 'random',
+    initial_guess_scale: float = 1.0,
+    random_seed: Optional[int] = None,
+    **solver_kwargs,
+) -> Dict[str, Any]:
+    """Solve multi-chain inverse kinematics using unified configuration space.
+    
+    :param model: RobotModel instance
+    :param targets: Dict mapping end_link to target pose {end_link: 4x4 or [B, 4, 4]}
+    :param end_links: List of end link names
+    :param q0: Initial full configuration vector [num_dof] (optional)
+    :param base_link: Base link name (if None, uses model.base_link)
+    :param method: IK method ('dls', 'pinv', 'transpose')
+    :param num_initial_guesses: Number of initial guesses
+    :param initial_guess_strategy: Strategy for generating guesses
+    :param initial_guess_scale: Scale factor for joint limits
+    :param random_seed: Random seed
+    :param solver_kwargs: Extra solver parameters
+    :return: IK result dict with 'q' in full config space
+    """
+    base = base_link or model.base_link
+    
+    # Create chain views for each end_link
+    chain_views = {}
+    for end_link in end_links:
+        try:
+            chain_views[end_link] = model.get_chain(end_link, base)
+        except ValueError as e:
+            raise ValueError(f"Cannot create chain for {end_link}: {e}")
+    
+    # Detect shared joints (joints that appear in all chains)
+    if len(chain_views) >= 2:
+        chain_joint_sets = [
+            set(chain_view._chain_joint_names)
+            for chain_view in chain_views.values()
+        ]
+        shared_joint_names = set.intersection(*chain_joint_sets)
+        shared_joint_indices = [
+            model._dof_name_to_index[j]
+            for j in shared_joint_names
+            if j in model._dof_name_to_index
+        ]
+    else:
+        shared_joint_names = set()
+        shared_joint_indices = []
+    
+    # Prepare initial configuration
+    if q0 is None:
+        q0 = np.zeros(model.num_dof)
+    else:
+        q0 = np.asarray(q0)
+        if len(q0) != model.num_dof:
+            raise ValueError(f"Expected q0 of length {model.num_dof} (unified config space), got {len(q0)}")
+    
+    # Extract solver parameters
+    max_iters = solver_kwargs.pop('max_iters', 200)
+    pos_tol = solver_kwargs.pop('pos_tol', 1e-3)
+    ori_tol = solver_kwargs.pop('ori_tol', 1e-3)
+    
+    # Multi-chain IK iteration
+    q = q0.copy()
+    
+    for it in range(max_iters):
+        # Compute current poses and errors
+        errors = []
+        jacobians = []
+        
+        for end_link in end_links:
+            chain_view = chain_views[end_link]
+            target = np.asarray(targets[end_link])
+            
+            # Current pose
+            T_cur = chain_view.forward_kinematics(q)
+            if hasattr(T_cur, 'detach'):
+                T_cur = T_cur.detach().cpu().numpy()
+            T_cur = np.asarray(T_cur)
+            
+            # Error (position + orientation)
+            e_pos = target[:3, 3] - T_cur[:3, 3]
+            
+            # Orientation error (axis-angle)
+            R_cur = T_cur[:3, :3]
+            R_tgt = target[:3, :3]
+            R_err = R_tgt @ R_cur.T
+            
+            trace = np.trace(R_err)
+            theta = np.arccos(np.clip((trace - 1) / 2, -1, 1))
+            
+            if theta < 1e-6:
+                e_ori = np.zeros(3)
+            else:
+                axis = np.array([
+                    R_err[2, 1] - R_err[1, 2],
+                    R_err[0, 2] - R_err[2, 0],
+                    R_err[1, 0] - R_err[0, 1]
+                ]) / (2 * np.sin(theta))
+                e_ori = theta * axis
+            
+            error = np.concatenate([e_pos, e_ori])
+            errors.append(error)
+            
+            # Jacobian (6 x nq_full)
+            J = chain_view.jacobian(q)
+            if hasattr(J, 'detach'):
+                J = J.detach().cpu().numpy()
+            J = np.asarray(J)
+            jacobians.append(J)
+        
+        # Stack errors and Jacobians
+        e_total = np.concatenate(errors)
+        J_total = np.vstack(jacobians)
+        
+        # Check convergence
+        if np.linalg.norm(e_total) < pos_tol + ori_tol:
+            return {
+                'q': q.tolist(),
+                'success': True,
+                'iters': it + 1,
+                'pos_err': np.linalg.norm(e_total[:3*len(end_links)]),
+                'ori_err': np.linalg.norm(e_total[3*len(end_links):]),
+            }
+        
+        # Solve for joint update
+        if method == 'dls':
+            # Damped least squares
+            damping = solver_kwargs.get('damping', 1e-3)
+            JT = J_total.T
+            A = J_total @ JT + (damping ** 2) * np.eye(J_total.shape[0])
+            dq = JT @ np.linalg.solve(A, e_total)
+        elif method == 'pinv':
+            # Pseudoinverse
+            dq = np.linalg.pinv(J_total) @ e_total
+        elif method == 'transpose':
+            # Transpose method
+            alpha = solver_kwargs.get('alpha', 0.1)
+            dq = alpha * J_total.T @ e_total
+        else:
+            raise ValueError(f"Unknown method '{method}'")
+        
+        # Step limit
+        step_limit = solver_kwargs.get('step_limit', 0.2)
+        dq_norm = np.linalg.norm(dq)
+        if dq_norm > step_limit:
+            dq = dq * (step_limit / dq_norm)
+        
+        # Update configuration
+        q = q + dq
+        
+        # Apply joint limits (use DOF limits for unified config space)
+        if hasattr(model, 'dof_limits_min') and hasattr(model, 'dof_limits_max'):
+            q = np.clip(q, model.dof_limits_min, model.dof_limits_max)
+    
+    # Max iterations reached
+    return {
+        'q': q.tolist(),
+        'success': False,
+        'iters': max_iters,
+        'pos_err': np.linalg.norm(e_total[:3*len(end_links)]),
+        'ori_err': np.linalg.norm(e_total[3*len(end_links):]),
+    }

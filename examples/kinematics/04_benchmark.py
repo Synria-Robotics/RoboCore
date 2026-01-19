@@ -73,6 +73,7 @@ def cmd_performance(args, model):
     """Run performance benchmark."""
     beauty_print("Performance Benchmark: FK/IK/Jacobian", type="module", centered=True)
     
+    # Use chain DOF for FK (not total DOF)
     q = [0.1, 0.2, -0.3, 0.0, 0.5, -0.2, 0.0][:model.num_chain_dof]
     
     beauty_print(f"FK runs: {args.fk_runs}", type="info")
@@ -169,18 +170,10 @@ def cmd_ik_compare(args, model):
         else:
             robocore.set_backend(backend)
 
-        # Use batch IK processing with smart initial guesses
-        # Generate initial guess (zero for single guess, or use strategy for multiple)
-        if args.num_inits == 1 and args.init_strategy == 'zero':
-            q0_batch = np.zeros((batch_size, model.num_chain_dof))
-        else:
-            # For multiple guesses, we'll use a single zero as base (the new system will generate the rest)
-            q0_batch = np.zeros((batch_size, model.num_chain_dof))
-
         t0 = time.perf_counter()
         try:
             results_batch = inverse_kinematics(
-                model, poses, q0_batch,
+                model, poses, q0_batch=None,
                 method=method,
                 pos_tol=args.pos_tol,
                 ori_tol=args.ori_tol,

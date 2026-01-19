@@ -111,11 +111,11 @@ def main(args):
         ori_err_left = res_left['ori_err']
         ori_err_right = res_right['ori_err']
         
-        beauty_print(f"Position error left: {pos_err_left:.6e} m")
-        beauty_print(f"Position error right: {pos_err_right:.6e} m")
-        beauty_print(f"Orientation error left: {ori_err_left:.6e} rad")
-        beauty_print(f"Orientation error right: {ori_err_right:.6e} rad")
-        beauty_print(f"Iterations: {iters}")
+        print(f"Position error left: {pos_err_left:.6e} m")
+        print(f"Position error right: {pos_err_right:.6e} m")
+        print(f"Orientation error left: {ori_err_left:.6e} rad")
+        print(f"Orientation error right: {ori_err_right:.6e} rad")
+        print(f"Iterations: {iters}")
 
     # Batch IK example
     beauty_print("Batch Bimanual IK Example", type="module", centered=True)
@@ -182,13 +182,13 @@ def main(args):
                 ori_err_left = res_left['ori_err'] if isinstance(res_left, dict) else 0.0
                 ori_err_right = res_right['ori_err'] if isinstance(res_right, dict) else 0.0
                 
-                beauty_print(f"  Left joint angles: {beauty_print_array(np.array(result['q_left']))}")
-                beauty_print(f"  Right joint angles: {beauty_print_array(np.array(result['q_right']))}")
-                beauty_print(f"  Position error left: {pos_err_left:.6e} m")
-                beauty_print(f"  Position error right: {pos_err_right:.6e} m")
-                beauty_print(f"  Orientation error left: {ori_err_left:.6e} rad")
-                beauty_print(f"  Orientation error right: {ori_err_right:.6e} rad")
-                beauty_print(f"  Iterations: {iters}")
+                print(f"  Left joint angles: {beauty_print_array(np.array(result['q_left']))}")
+                print(f"  Right joint angles: {beauty_print_array(np.array(result['q_right']))}")
+                print(f"  Position error left: {pos_err_left:.6e} m")
+                print(f"  Position error right: {pos_err_right:.6e} m")
+                print(f"  Orientation error left: {ori_err_left:.6e} rad")
+                print(f"  Orientation error right: {ori_err_right:.6e} rad")
+                print(f"  Iterations: {iters}")
 
 
 if __name__ == "__main__":

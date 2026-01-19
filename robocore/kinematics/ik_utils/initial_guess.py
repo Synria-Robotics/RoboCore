@@ -60,7 +60,7 @@ def generate_initial_guesses(
     # Get joint limits
     joint_lower = []
     joint_upper = []
-    for js in model._chain_actuated:
+    for js in model._chain_dof_list:
         lo = js.limit_lower if js.limit_lower is not None else -1.0
         hi = js.limit_upper if js.limit_upper is not None else 1.0
         joint_lower.append(lo)

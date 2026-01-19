@@ -1,18 +1,6 @@
 #!/bin/bash
 # Run MuJoCo interactive demos with mjpython (required on macOS)
 
-DEMO=$1
-
-if [ -z "$DEMO" ]; then
-    echo "Usage: $0 <demo_name>"
-    echo "Available demos:"
-    echo "  bi_independent     - Independent dual-arm control"
-    echo "  bi_independent_pure - Independent control (pure RobotModel)"
-    echo "  bi_relative        - Relative control with relative constraint"
-    echo "  bi_mirror          - Mirror symmetric control"
-    exit 1
-fi
-
 # Try to find mjpython in common locations
 MJPYTHON_PATH=""
 
@@ -35,7 +23,6 @@ if [ -z "$MJPYTHON_PATH" ]; then
     exit 1
 fi
 
-# Run the demo
+# Run the demo with all arguments passed through
 echo "Using mjpython: $MJPYTHON_PATH"
-echo "Running demo: $DEMO"
-"$MJPYTHON_PATH" examples/bridge/demo_mujoco_${DEMO}.py
+"$MJPYTHON_PATH" examples/bridge/demo_mujoco_bimanual.py "$@"

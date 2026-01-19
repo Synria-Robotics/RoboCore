@@ -57,8 +57,8 @@ def demo_velocity_control():
     print("  Control law: τ = J^T·Kp·(ẋd - ẋ) + g(q)")
     
     # Current joint state
-    q = np.zeros(robot.num_chain_dof)
-    qd = np.zeros(robot.num_chain_dof)
+    q = np.zeros(robot.num_dof)
+    qd = np.zeros(robot.num_dof)
     
     # Compute current end-effector velocity
     from robocore.kinematics.jacobian import jacobian
@@ -114,8 +114,8 @@ def demo_constant_velocity():
     print(f"  Target velocity: {xdd_desired}")
     
     # Simulate multiple steps
-    q = np.zeros(robot.num_chain_dof)
-    qd = np.zeros(robot.num_chain_dof)
+    q = np.zeros(robot.num_dof)
+    qd = np.zeros(robot.num_dof)
     
     from robocore.kinematics.jacobian import jacobian
     
@@ -157,8 +157,8 @@ def demo_angular_velocity():
         Kp=np.diag([50, 50, 50, 30, 30, 30])
     )
     
-    q = np.zeros(robot.num_chain_dof)
-    qd = np.zeros(robot.num_chain_dof)
+    q = np.zeros(robot.num_dof)
+    qd = np.zeros(robot.num_dof)
     
     # Desired: rotate around z-axis at 0.5 rad/s
     xdd_desired = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.5])

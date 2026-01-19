@@ -45,8 +45,8 @@ def rdf_from_robot_model(args):
 
     rdf_instant.create_surface_mesh(rdf_model, nbData=128, vis=False, save_mesh_name=model_name)
 
-    num_joint = rdf_instant.robot.num_joint
-    joint_value = torch.zeros(num_joint).to(args.device)
+    num_joints = rdf_instant.robot.num_joints
+    joint_value = torch.zeros(num_joints).to(args.device)
     base_trans = torch.tensor([[1, 0, 0, 0],
                                [0, 1, 0, 0],
                                [0, 0, 1, 0],
@@ -59,7 +59,7 @@ def rdf_from_robot_model(args):
     # batch_size = 1024
     # num_points = 64
     # x = torch.rand(batch_size, num_points, 3).to(args.device) * 2.0 - 1.0  # [B, N, 3]
-    # joint_value = torch.rand(batch_size, rdf_instant.robot.num_joint).to(args.device).float()  # [B, num_joint]
+    # joint_value = torch.rand(batch_size, rdf_instant.robot.num_joints).to(args.device).float()  # [B, num_joints]
     # base_trans = torch.eye(4, device=args.device).unsqueeze(0).expand(batch_size, 4, 4)  # [B, 4, 4]
 
     # start_time = time.time()
@@ -67,9 +67,9 @@ def rdf_from_robot_model(args):
     #                                                      use_derivative=True)
     # print('Time cost:', (time.time() - start_time))
     # print('sdf:', sdf.shape, 'gradient:', gradient.shape)
-    joint_value = np.zeros(num_joint)
-    # joint_value = torch.rand(num_joint).to(args.device).reshape((-1, num_joint))
-    joint_value = torch.rand(num_joint).reshape((-1, num_joint)).numpy()
+    joint_value = np.zeros(num_joints)
+    # joint_value = torch.rand(num_joints).to(args.device).reshape((-1, num_joints))
+    joint_value = torch.rand(num_joints).reshape((-1, num_joints)).numpy()
     joint_value = np.array(robot.random_q(scale=1))
     joint_value[-1] = 0.0  # keep the gripper closed
     joint_value[-2] = 0.0

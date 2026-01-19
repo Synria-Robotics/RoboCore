@@ -19,6 +19,7 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
+import numpy as np
 from robocore.utils.backend import get_backend_manager
 
 

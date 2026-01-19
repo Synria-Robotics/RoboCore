@@ -66,8 +66,9 @@ def main(args):
     dtype = torch.float64
     chain_left = chain_left.to(dtype=dtype, device=device)
     chain_right = chain_right.to(dtype=dtype, device=device)
-    joint_limits_left = torch.tensor([[js.limit_lower, js.limit_upper] for js in left_model._chain_actuated], dtype=dtype, device=device)
-    joint_limits_right = torch.tensor([[js.limit_lower, js.limit_upper] for js in right_model._chain_actuated], dtype=dtype, device=device)
+    # Get chain joint limits (already processed in robot_model, None values handled)
+    joint_limits_left = torch.tensor(left_model.chain_joint_limit, dtype=dtype, device=device)
+    joint_limits_right = torch.tensor(right_model.chain_joint_limit, dtype=dtype, device=device)
 
     # Build target poses from input
     joint_configs_left = left_model.random_q(seed=args.seed, scale=args.scale)

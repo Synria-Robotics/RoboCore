@@ -35,6 +35,8 @@ def jacobian(
     method: str = 'analytic',
     # Local / partial options
     target_link: Optional[str] = None,
+    base_link: Optional[str] = None,
+    end_link: Optional[str] = None,
     joint_indices: Optional[Sequence[int]] = None,
     row_mask: Optional[Sequence[int | bool]] = None,
     # Numeric Jacobian options
@@ -47,13 +49,15 @@ def jacobian(
     """Compute Jacobian matrix for single or batch of joint configurations.
     
     Supports both single and batch processing:
-    - Single: q [n] -> returns [6, n] matrix
-    - Batch: q [B, n] -> returns [B, 6, n] array
+    - Single: q [n] -> returns [6, n] matrix (or [6, nq_full] if base_link/end_link specified)
+    - Batch: q [B, n] -> returns [B, 6, n] array (or [B, 6, nq_full] if base_link/end_link specified)
     
     :param model: RobotModel instance
-    :param q: Joint configuration(s) - [n] or [B, n] array
+    :param q: Joint configuration(s) - [n] or [B, n] array, or full config [num_dof] if base_link/end_link specified
     :param method: 'analytic'|'numeric'|'autograd'
-    :param target_link: Target link name
+    :param target_link: Target link name (legacy, use end_link instead)
+    :param base_link: Base link name (if specified, uses dynamic path and returns full config space Jacobian)
+    :param end_link: End link name (if specified, uses dynamic path and returns full config space Jacobian)
     :param joint_indices: Selected joint indices
     :param row_mask: Row selection mask (len=6)
     :param epsilon: Finite-difference step (numeric)
@@ -61,9 +65,53 @@ def jacobian(
     :param device: Torch device when using torch backend (uses global backend setting)
     :param dtype: Torch dtype when using torch backend (uses global backend setting)
     :return: 
-        - Single mode: [6, n] Jacobian matrix
-        - Batch mode: [B, 6, n] Jacobian array
+        - Single mode: [6, n] or [6, nq_full] Jacobian matrix
+        - Batch mode: [B, 6, n] or [B, 6, nq_full] Jacobian array
     """
+    # Handle dynamic base_link/end_link
+    use_full_config = False
+    chain_indices = None
+    original_end = None
+    original_base = None
+    
+    # Check if q is full configuration (even without explicit base_link/end_link)
+    q_arr = np.array(q)
+    q_flat_len = len(q_arr.flatten()) if q_arr.ndim <= 2 else q_arr.shape[-1]
+    
+    if base_link is not None or end_link is not None:
+        # Dynamic path: extract chain joint values from full configuration
+        base = base_link or model.base_link
+        end = end_link or (target_link or model.end_link)
+        
+        # Check if q is full configuration
+        if hasattr(model, 'num_dof') and q_flat_len == model.num_dof:
+            use_full_config = True
+            chain_indices = model._get_joint_indices(base, end)
+            q_chain = q_arr[chain_indices] if q_arr.ndim == 1 else q_arr[:, chain_indices]
+            q = q_chain.tolist() if hasattr(q_chain, 'tolist') else list(q_chain)
+        
+        # Temporarily update model's end_link for jacobian computation
+        original_end = model.end_link
+        original_base = model.base_link
+        try:
+            model.end_link = end
+            model.base_link = base
+            # Rebuild chain for this path
+            model._build_chain()
+        except Exception:
+            model.end_link = original_end
+            model.base_link = original_base
+            raise
+    else:
+        # No dynamic path specified, but q might be full config
+        # If q length matches num_dof, extract chain config and mark for full config expansion
+        if hasattr(model, 'num_dof') and q_flat_len == model.num_dof:
+            use_full_config = True
+            # Extract chain joint values from full configuration
+            chain_indices = model._get_joint_indices(model.base_link, model.end_link)
+            q_chain = q_arr[chain_indices] if q_arr.ndim == 1 else q_arr[:, chain_indices]
+            q = q_chain.tolist() if hasattr(q_chain, 'tolist') else list(q_chain)
+    
     b = get_backend()
     method = method.lower()
 
@@ -100,6 +148,27 @@ def jacobian(
                 J = J[:, :, list(joint_indices)]
             else:
                 J = J[:, list(joint_indices)]
+
+        # Expand to full configuration space if dynamic path was used
+        if use_full_config and chain_indices is not None:
+            nq_full = model.num_dof
+            if J.ndim == 3:
+                # Batch mode: [B, 6, n_chain] -> [B, 6, nq_full]
+                batch_size = J.shape[0]
+                J_full = np.zeros((batch_size, 6, nq_full), dtype=J.dtype)
+                J_full[:, :, chain_indices] = J
+                J = J_full
+            else:
+                # Single mode: [6, n_chain] -> [6, nq_full]
+                J_full = np.zeros((6, nq_full), dtype=J.dtype)
+                J_full[:, chain_indices] = J
+                J = J_full
+        
+        # Restore original end_link and base_link if we modified them
+        if original_end is not None:
+            model.end_link = original_end
+            model.base_link = original_base
+            model._build_chain()
 
         return J
     elif b == 'torch':
@@ -147,6 +216,27 @@ def jacobian(
                 J = J[:, :, joint_tensor]
             else:
                 J = J[:, joint_tensor]
+
+        # Expand to full configuration space if dynamic path was used
+        if use_full_config and chain_indices is not None:
+            nq_full = model.num_dof
+            if J.ndim == 3:
+                # Batch mode: [B, 6, n_chain] -> [B, 6, nq_full]
+                batch_size = J.shape[0]
+                J_full = torch.zeros((batch_size, 6, nq_full), dtype=J.dtype, device=J.device)
+                J_full[:, :, chain_indices] = J
+                J = J_full
+            else:
+                # Single mode: [6, n_chain] -> [6, nq_full]
+                J_full = torch.zeros((6, nq_full), dtype=J.dtype, device=J.device)
+                J_full[:, chain_indices] = J
+                J = J_full
+        
+        # Restore original end_link and base_link if we modified them
+        if original_end is not None:
+            model.end_link = original_end
+            model.base_link = original_base
+            model._build_chain()
 
         # Convert to numpy for consistency
         if isinstance(J, torch.Tensor):

@@ -54,7 +54,7 @@ def demo_linear_trajectory():
     robot = RobotModel(model_path)
     
     # Get start and end poses
-    q_start = np.zeros(robot.num_chain_dof)
+    q_start = np.zeros(robot.num_dof)
     q_end = np.array([0.5, -0.3, 0.2, 0.0, 0.5, 0.0])
     
     T_start = forward_kinematics(robot, q_start, return_end=True)
@@ -92,7 +92,7 @@ def demo_linear_trajectory():
         poses[i] = make_transform(R, pos_result['positions'][i])
     
     # Generate joint trajectory using IK (simplified - use start and end)
-    q_traj = np.zeros((num_points, robot.num_chain_dof))
+    q_traj = np.zeros((num_points, robot.num_dof))
     q_traj[0] = q_start
     q_traj[-1] = q_end
     # Linear interpolation for intermediate points (simplified)
@@ -132,8 +132,8 @@ def demo_linear_trajectory():
     for t_current in time_points:
         # Current state (simulated)
         idx = int(t_current / t[-1] * (len(t) - 1))
-        q_current = q_traj[idx] + 0.01 * np.random.randn(robot.num_chain_dof)
-        qd_current = np.zeros(robot.num_chain_dof)  # Simplified
+        q_current = q_traj[idx] + 0.01 * np.random.randn(robot.num_dof)
+        qd_current = np.zeros(robot.num_dof)  # Simplified
         
         # Compute control torque
         tau = controller.compute(
@@ -162,7 +162,7 @@ def demo_circular_trajectory():
     robot = RobotModel(model_path)
     
     # Get initial pose
-    q_init = np.zeros(robot.num_chain_dof)
+    q_init = np.zeros(robot.num_dof)
     T_init = forward_kinematics(robot, q_init, return_end=True)
     center = T_init[:3, 3]
     
@@ -190,7 +190,7 @@ def demo_circular_trajectory():
     poses = result['poses']
     
     # Generate joint trajectory (simplified - linear interpolation)
-    q_traj = np.zeros((len(t), robot.num_chain_dof))
+    q_traj = np.zeros((len(t), robot.num_dof))
     q_traj[0] = q_init
     # For simplicity, use linear interpolation
     for i in range(1, len(t)):
@@ -220,7 +220,7 @@ def demo_circular_trajectory():
     for t_current in time_points:
         idx = int(t_current / t[-1] * (len(t) - 1))
         q_current = q_traj[idx]
-        qd_current = np.zeros(robot.num_chain_dof)
+        qd_current = np.zeros(robot.num_dof)
         
         tau = controller.compute(
             q=q_current,
@@ -255,8 +255,8 @@ def demo_direct_mode():
     )
     
     # Current state
-    q = np.zeros(robot.num_chain_dof)
-    qd = np.zeros(robot.num_chain_dof)
+    q = np.zeros(robot.num_dof)
+    qd = np.zeros(robot.num_dof)
     
     # Get current pose
     T_current = forward_kinematics(robot, q, return_end=True)
@@ -303,7 +303,7 @@ def demo_feedforward_benefit():
     
     robot = RobotModel(model_path)
     
-    q_start = np.zeros(robot.num_chain_dof)
+    q_start = np.zeros(robot.num_dof)
     q_end = np.array([0.5, -0.3, 0.2, 0.0, 0.5, 0.0])
     
     T_start = forward_kinematics(robot, q_start, return_end=True)
@@ -336,7 +336,7 @@ def demo_feedforward_benefit():
         R = quaternion_to_matrix(quat)
         poses[i] = make_transform(R, pos_result['positions'][i])
     
-    q_traj = np.zeros((num_points, robot.num_chain_dof))
+    q_traj = np.zeros((num_points, robot.num_dof))
     q_traj[0] = q_start
     q_traj[-1] = q_end
     for i in range(1, num_points - 1):
@@ -367,7 +367,7 @@ def demo_feedforward_benefit():
     
     idx = int(t_current / t[-1] * (len(t) - 1))
     q_current = q_traj[idx]
-    qd_current = np.zeros(robot.num_chain_dof)
+    qd_current = np.zeros(robot.num_dof)
     
     tau_ff = controller_ff.compute(q=q_current, qd=qd_current, t=t_current)
     tau_no_ff = controller_no_ff.compute(q=q_current, qd=qd_current, t=t_current)

@@ -154,7 +154,7 @@ class JacobianSolverTorch:
         
         # Build forward transforms
         T_parent = torch.eye(4, dtype=dtype, device=device)
-        q_map = {js.name: q[js.index] for js in self.model._chain_actuated}
+        q_map = {js.name: q[js.index] for js in self.model._chain_dof_list}
         
         p_list = [None] * self.n
         z_list = [None] * self.n
@@ -180,7 +180,7 @@ class JacobianSolverTorch:
             # Compute joint axis and position BEFORE applying joint motion
             # This matches numpy implementation and is correct for geometric Jacobian
             if urdf_joint.joint_type in ("revolute", "prismatic"):
-                js = next(js for js in self.model._chain_actuated if js.name == urdf_joint.name)
+                js = next(js for js in self.model._chain_dof_list if js.name == urdf_joint.name)
                 axis_local = torch.tensor(urdf_joint.axis, dtype=dtype, device=device)
                 axis_norm = torch.linalg.norm(axis_local)
                 if axis_norm > 1e-10:
@@ -231,7 +231,7 @@ class JacobianSolverTorch:
                     continue
                 raise RuntimeError("Internal error: missing joint axis or origin position")
 
-            js = self.model._chain_actuated[i]
+            js = self.model._chain_dof_list[i]
             if js.joint_type == "revolute":
                 J_geo[:3, i] = torch.linalg.cross(z_i, (p_end - p_i))
                 J_geo[3:6, i] = z_i
@@ -459,7 +459,7 @@ class JacobianSolverTorch:
 
             # Compute joint axis and position BEFORE applying joint motion
             if urdf_joint.joint_type in ("revolute", "prismatic"):
-                js = next(js for js in self.model._chain_actuated if js.name == urdf_joint.name)
+                js = next(js for js in self.model._chain_dof_list if js.name == urdf_joint.name)
                 axis_local = torch.tensor(urdf_joint.axis, dtype=dtype, device=device)  # [3]
                 axis_norm = torch.linalg.norm(axis_local)
                 if axis_norm > 1e-10:
@@ -510,7 +510,7 @@ class JacobianSolverTorch:
             if z_i_batch is None or p_i_batch is None:
                 raise RuntimeError("Internal error: missing joint axis or origin position")
 
-            js = self.model._chain_actuated[i]
+            js = self.model._chain_dof_list[i]
             if js.joint_type == "revolute":
                 # Linear part: z × (p_ee - p_i) [B, 3]
                 r_batch = p_ee_batch - p_i_batch  # [B, 3]
@@ -544,7 +544,7 @@ class JacobianSolverTorch:
         T_batch = torch.eye(4, device=device, dtype=dtype).unsqueeze(0).repeat(batch_size, 1, 1)
         
         # Get joints up to and including target
-        joint_specs = self.model._chain_actuated[:joint_idx + 1]
+        joint_specs = self.model._chain_dof_list[:joint_idx + 1]
         
         # Process each joint in the chain
         for js in joint_specs:

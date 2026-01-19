@@ -20,9 +20,9 @@ Website: https://synriarobotics.ai
 """
 
 from .robot_model import RobotModel
-from .robot_model import BimanualRobotModel
+from .chain_view import ChainView
 
 __all__ = [
     "RobotModel",
-    "BimanualRobotModel",
+    "ChainView",
 ]

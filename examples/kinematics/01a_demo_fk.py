@@ -130,27 +130,35 @@ if __name__ == "__main__":
     
     """_results_
     [RoboCore:INFO] End-Effector Position (m):
-    p = [-0.17003, -0.01731, +0.20533]
+      NumPy:  [+0.16993, +0.01740, +0.20530]
+      Torch:  [+0.16993, +0.01740, +0.20530]
+      Diff:   5.735672e-12
     [RoboCore:INFO] End-Effector Orientation (Euler XYZ, radians):
-    rpy = [+2.90030, -1.17327, -0.06082]
+      NumPy:  [-2.90034, +1.17327, +3.08082]
+      Torch:  [-2.90034, +1.17327, +3.08082]
+      Diff:   7.452386e-11
     [RoboCore:INFO] End-Effector Orientation (Euler XYZ, degrees):
-    rpy = [+166.17499, -67.22318, -3.48471]
+      NumPy:  [-166.17740, +67.22347, +176.51776]
+      Torch:  [-166.17740, +67.22347, +176.51776]
     [RoboCore:INFO] End-Effector Orientation (Quaternion xyzw):
-    quat = [+0.828399, -0.041455, -0.552330, +0.083476]
-    Note: q and -q represent the same rotation
-    -quat = [-0.828399, +0.041455, +0.552330, -0.083476] (equivalent)
-    [RoboCore:INFO] Rotation Matrix:
+      NumPy:  [+0.041461, +0.828399, +0.083471, +0.552331]
+      Torch:  [+0.041461, +0.828399, +0.083471, +0.552331]
+      Diff:   2.245356e-11
+    [RoboCore:INFO] Rotation Matrix (NumPy):
     [
-    [+0.386427  +0.023531  -0.922020]
-    [-0.160895  -0.982626  -0.092511]
-    [-0.908178  +0.184097  -0.375927]
+      [-0.386423  -0.023514  +0.922022]
+      [+0.160899  +0.982627  +0.092494]
+      [-0.908179  +0.184094  -0.375926]
     ]
-    [RoboCore:INFO] Homogeneous Transformation Matrix:
+    [RoboCore:INFO] Homogeneous Transformation Matrix (NumPy):
     [
-    [+0.386427  +0.023531  -0.922020  -0.170033]
-    [-0.160895  -0.982626  -0.092511  -0.017311]
-    [-0.908178  +0.184097  -0.375927  +0.205325]
-    [+0.000000  +0.000000  +0.000000  +1.000000]
+      [-0.386423  -0.023514  +0.922022  +0.169927]
+      [+0.160899  +0.982627  +0.092494  +0.017400]
+      [-0.908179  +0.184094  -0.375926  +0.205305]
+      [+0.000000  +0.000000  +0.000000  +1.000000]
     ]
-    [RoboCore:INFO] Computation Time:  0.219255 seconds
+    [RoboCore:INFO] Computation Time:
+      NumPy:  0.000655 seconds
+      Torch:  0.009248 seconds
+      Ratio:  14.12x    
     """
