@@ -917,6 +917,65 @@ class RobotModel:
 
         return q_batch
     
+    def random_q_full(self, seed: int = None, scale: float = 0.5):
+        """
+        Generate a random joint configuration for all DOF (full configuration space).
+        
+        This method generates random values for all joints in the robot model,
+        not just the chain DOF. Useful for multi-chain robots or when using
+        base_link and end_link parameters in FK/IK.
+        
+        :param seed: random seed for reproducibility (if None, uses random seed)
+        :param scale: scaling factor for the joint range (0.0 to 1.0, default: 0.5)
+                      0.5 means sample from middle 50% of each joint's range
+        :return: NumPy array of random joint values (length = num_dof)
+        """
+        rng = np.random.default_rng(seed)
+        q = np.zeros(self.num_dof)
+
+        for idx in range(self.num_dof):
+            js = self.joint_list[idx]
+            lo, hi = -1.0, 1.0
+            if js.limit_lower is not None:
+                lo = js.limit_lower
+            if js.limit_upper is not None:
+                hi = js.limit_upper
+            mid = 0.5 * (lo + hi)
+            span = 0.5 * (hi - lo) * scale
+            q[idx] = rng.uniform(mid - span, mid + span)
+
+        return q
+
+    def random_q_full_batch(self, batch_size: int, seed: int = None, scale: float = 0.5):
+        """
+        Generate a batch of random joint configurations for all DOF (full configuration space).
+        
+        This method generates random values for all joints in the robot model,
+        not just the chain DOF. Useful for multi-chain robots or when using
+        base_link and end_link parameters in FK/IK.
+        
+        :param batch_size: number of configurations to generate
+        :param seed: random seed for reproducibility (if None, uses random seed)
+        :param scale: scaling factor for the joint range (0.0 to 1.0, default: 0.5)
+        :return: NumPy array of shape (batch_size, num_dof)
+        """
+        rng = np.random.default_rng(seed)
+        q_batch = np.zeros((batch_size, self.num_dof))
+
+        for i in range(batch_size):
+            for idx in range(self.num_dof):
+                js = self.joint_list[idx]
+                lo, hi = -1.0, 1.0
+                if js.limit_lower is not None:
+                    lo = js.limit_lower
+                if js.limit_upper is not None:
+                    hi = js.limit_upper
+                mid = 0.5 * (lo + hi)
+                span = 0.5 * (hi - lo) * scale
+                q_batch[i, idx] = rng.uniform(mid - span, mid + span)
+
+        return q_batch
+
     def random_pose(self, seed: int = None, scale: float = 0.5):
         """
         Generate a random pose within the joint limits.

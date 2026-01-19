@@ -25,6 +25,6 @@ if __name__ == '__main__':
     parser.add_argument('--model', type=str, default="Bessica_M", choices=['Bessica_D', 'Bessica_M'],
                         help='Model: Bessica_D (bimanual), Bessica_M (bimanual with waist)')
     parser.add_argument('--version', type=str, default="v1_0", choices=['v1_0', 'v1_1'], help='Version: v1_0, v1_1')
-    parser.add_argument('--variant', type=str, default="covered_interactive")
+    parser.add_argument('--variant', type=str, default="interactive")
     args = parser.parse_args()
     main(args)
