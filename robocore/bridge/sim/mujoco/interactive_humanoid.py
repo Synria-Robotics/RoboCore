@@ -276,9 +276,8 @@ class InteractiveHumanoidIK:
         q_current = self.mj_data.qpos[0:nq].copy()
         
         # Use multi-chain IK with unified configuration space
-        # Use same parameters as 10a_demo_humanoid_ik.py for consistency
-        # For interactive use, we use current MuJoCo qpos as initial guess (better for continuous dragging)
-        # but also try a few random guesses as fallback if current guess fails
+        # For interactive dragging, use fast/loose parameters (like dual-arm demo)
+        # Current joint angles as initial guess usually works well for continuous dragging
         res = self.robot.ik(
             targets={
                 self.left_thumb_end_link: self.T_left_thumb_target,
@@ -294,12 +293,10 @@ class InteractiveHumanoidIK:
             ],
             q_initial=q_current,  # Use current MuJoCo joint angles for interactive continuity
             method='dls',
-            max_iters=200,  # Same as 10a_demo_humanoid_ik.py
-            pos_tol=1e-3,  # Same as 10a_demo_humanoid_ik.py (stricter)
-            ori_tol=1e-3,  # Same as 10a_demo_humanoid_ik.py (stricter)
-            num_initial_guesses=3,  # Try a few random guesses if current fails
-            initial_guess_strategy='random',
-            initial_guess_scale=1.0,
+            max_iters=30,  # Reduced for interactive performance (was 200)
+            pos_tol=1e-2,  # Looser tolerance for faster convergence (was 1e-3)
+            ori_tol=1e-2,  # Looser tolerance for faster convergence (was 1e-3)
+            # No num_initial_guesses - single attempt with current config is usually sufficient
             # No base_link specified - uses default (world coordinates)
         )
 
