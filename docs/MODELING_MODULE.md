@@ -76,8 +76,8 @@ class RobotModel:
     def spawn_chain(self, end_link, ...):
         """创建子链视图"""
     
-    def add_groups(self, groups):
-        """添加多链组"""
+    def available_leaf_links(self):
+        """查找所有叶子链接"""
 ```
 
 ---
@@ -414,16 +414,23 @@ def jacobian(
 
 ```python
 def random_q(
-    rng=None,
+    seed: int = None,
     scale: float = 0.5
 ) -> List[float]
 ```
 
 **参数**：
-- `rng`: NumPy随机数生成器（默认：创建新的）
+- `seed`: 随机种子（默认：None，使用随机种子）
 - `scale`: 关节范围缩放因子（0.0-1.0，默认0.5表示中间50%范围）
 
-**返回**：随机关节配置列表
+**返回**：随机关节配置列表（长度 = num_chain_dof）
+
+**相关方法**：
+- `random_q_batch(batch_size, seed, scale)` - 批量生成链配置
+- `random_q_full(seed, scale)` - 生成完整配置空间（所有DOF）
+- `random_q_full_batch(batch_size, seed, scale)` - 批量生成完整配置
+- `random_pose(seed, scale)` - 生成随机位姿
+- `random_pose_batch(batch_size, seed, scale)` - 批量生成随机位姿
 
 ---
 
@@ -431,7 +438,7 @@ def random_q(
 
 ### 概念
 
-对于复杂机器人（如双手机器人、移动机械臂），一个机器人模型可能包含多个运动学链。RoboCore支持通过`spawn_chain`和`add_groups`来管理多链。
+对于复杂机器人（如双手机器人、移动机械臂），一个机器人模型可能包含多个运动学链。RoboCore支持通过`spawn_chain`来创建子链视图，或使用统一配置空间进行多链协调求解。
 
 ### spawn_chain - 创建子链视图
 
@@ -467,111 +474,168 @@ q_right = [0.1, -0.2, 0.3, -0.4, 0.5, -0.6]
 T_right = right_arm.fk(q_right)
 ```
 
-### add_groups - 添加多链组
+### available_leaf_links - 查找叶子链接
 
-**功能**：批量创建多个子链并组织成组
+**功能**：查找机器人模型中的所有叶子链接（没有子链接的链接）
+
+**使用场景**：用于发现机器人的多个末端执行器（如左右手爪）
 
 **使用示例**：
 ```python
-# 添加多个链组
-groups = robot.add_groups({
-    'left_arm': 'left_end_effector',
-    'right_arm': 'right_end_effector',
-    'head': 'head_link'
-})
+# 查找所有叶子链接
+leaf_links = robot.available_leaf_links()
+print(f"Available end-effectors: {leaf_links}")
 
-# 访问组
-left_model = robot.group('left_arm')
-right_model = robot.group('right_arm')
+# 通常用于双手机器人
+left_end = next(l for l in leaf_links if 'left' in l.lower())
+right_end = next(l for l in leaf_links if 'right' in l.lower())
 
-# 获取所有组
-all_groups = robot.groups()
+# 创建子链
+left_arm = robot.spawn_chain(left_end)
+right_arm = robot.spawn_chain(right_end)
 ```
 
-### 多任务IK
+### 多链逆向运动学
 
-**功能**：同时满足多个链路的位姿约束
+**功能**：同时满足多个链路的位姿约束，使用统一配置空间
 
 **使用示例**：
 ```python
-# 定义多个任务
-tasks = [
-    {
-        'group': 'left_arm',
-        'target_pose': T_left_target,
-        'weight': 1.0
+import numpy as np
+
+# 加载完整机器人模型（包含多个运动链）
+robot = RobotModel("bimanual_robot.urdf")
+
+# 定义多个目标位姿
+T_left_target = np.eye(4)
+T_left_target[:3, 3] = [0.5, 0.3, 0.2]
+
+T_right_target = np.eye(4)
+T_right_target[:3, 3] = [0.5, -0.3, 0.2]
+
+# 使用多链模式求解（统一配置空间）
+result = robot.ik(
+    targets={
+        'left_end_effector': T_left_target,
+        'right_end_effector': T_right_target,
     },
-    {
-        'group': 'right_arm',
-        'target_pose': T_right_target,
-        'weight': 1.0
-    }
-]
-
-# 初始配置（按组）
-q0_by_group = {
-    'left_arm': [0.0] * left_model.num_chain_dof,
-    'right_arm': [0.0] * right_model.num_chain_dof
-}
-
-# 求解
-result = robot.ik_tasks(
-    tasks=tasks,
-    q0_by_group=q0_by_group,
-    max_iters=200
+    end_links=['left_end_effector', 'right_end_effector'],
+    base_link='base_link',
+    method='dls',
+    max_iters=200,
+    pos_tol=1e-3,
+    ori_tol=1e-3
 )
+
+if result['success']:
+    q_full = result['q']  # 完整配置空间 [num_dof]
+    print(f"Full configuration: {q_full}")
+    
+    # 提取各链的关节值
+    left_indices = robot._get_joint_indices('base_link', 'left_end_effector')
+    right_indices = robot._get_joint_indices('base_link', 'right_end_effector')
+    
+    q_left = q_full[left_indices]
+    q_right = q_full[right_indices]
+    print(f"Left arm: {q_left}")
+    print(f"Right arm: {q_right}")
 ```
 
 ---
 
 ## 双手机器人支持
 
-### BimanualRobotModel
+### 统一配置空间方法（推荐）
 
-**功能**：专门为双手机器人设计的模型类，自动管理左右臂
+**功能**：使用统一配置空间同时控制多个运动链
 
 **使用示例**：
 ```python
+import numpy as np
 from robocore.modeling import RobotModel
-from robocore.modeling.robot_model import BimanualRobotModel
 
-# 创建双手机器人模型
-bimanual = BimanualRobotModel(
-    model_path="bimanual_robot.urdf",
-    left_end_link="left_end_effector",
-    right_end_link="right_end_effector"
-)
+# 加载双手机器人模型
+robot = RobotModel("bimanual_robot.urdf")
 
-# 访问左右臂模型
-left_model = bimanual.left_model
-right_model = bimanual.right_model
+# 获取左右臂的关节索引
+left_indices = robot._get_joint_indices('base_link', 'left_end_effector')
+right_indices = robot._get_joint_indices('base_link', 'right_end_effector')
 
-# 同时计算左右臂前向运动学
+# 构建完整配置向量
 q_left = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 q_right = [0.1, -0.2, 0.3, -0.4, 0.5, -0.6]
+q_full = np.zeros(robot.num_dof)
+q_full[left_indices] = q_left
+q_full[right_indices] = q_right
 
-result = bimanual.fk(q_left, q_right, mode='indep')
-# 返回: {'left_end_effector': T_left, 'right_end_effector': T_right}
+# 同时计算左右臂前向运动学
+result = robot.fk(
+    q_full,
+    base_link='base_link',
+    end_link=None  # 返回所有链路的位姿
+)
+T_left = result['left_end_effector']
+T_right = result['right_end_effector']
 
 # 同时计算左右臂逆向运动学
-result = bimanual.ik(
-    target_left=T_left_target,
-    target_right=T_right_target
+ik_result = robot.ik(
+    targets={
+        'left_end_effector': T_left_target,
+        'right_end_effector': T_right_target,
+    },
+    end_links=['left_end_effector', 'right_end_effector'],
+    base_link='base_link',
+    method='dls',
+    max_iters=200
 )
 
-# 计算块雅可比矩阵
-J_block = bimanual.block_jacobian({
-    'left_arm': q_left,
-    'right_arm': q_right
-})
+if ik_result['success']:
+    q_full = ik_result['q']
+    q_left = q_full[left_indices]
+    q_right = q_full[right_indices]
 ```
 
-### 控制模式
+### 使用 bimanual 模块（兼容性接口）
 
-**模式**：
-- `indep`: 独立模式（默认），左右臂独立控制
-- `mirror`: 镜像模式，左右臂镜像运动
-- `relative`: 相对模式，控制相对位姿
+**功能**：提供便捷的双臂运动学接口（向后兼容）
+
+**使用示例**：
+```python
+from robocore.kinematics.bimanual import (
+    bimanual_forward_kinematics,
+    bimanual_inverse_kinematics,
+    bimanual_jacobian
+)
+
+# 创建子链视图
+left_arm = robot.spawn_chain("left_end_effector")
+right_arm = robot.spawn_chain("right_end_effector")
+
+# 前向运动学
+result = bimanual_forward_kinematics(
+    left_arm, right_arm,
+    q_left, q_right,
+    mode='indep'  # 'indep'|'relative'|'mirror'
+)
+
+# 逆向运动学
+ik_result = bimanual_inverse_kinematics(
+    left_arm, right_arm,
+    target_left=T_left_target,
+    target_right=T_right_target,
+    q0_left=q_left_init,
+    q0_right=q_right_init
+)
+
+# 雅可比矩阵
+J = bimanual_jacobian(
+    left_arm, right_arm,
+    q_left, q_right,
+    mode='indep'
+)
+```
+
+**注意**：`bimanual` 模块中的函数已标记为向后兼容接口，推荐使用统一配置空间方法。
 
 ---
 
@@ -677,38 +741,87 @@ print(f"Jacobian shape: {J.shape}")  # (6, n)
 ### 多链机器人使用
 
 ```python
-# 加载完整模型
+import numpy as np
+
+# 加载完整模型（包含多个运动链）
 robot = RobotModel("bimanual_robot.urdf")
 
-# 创建子链
+# 方式1: 创建子链视图（独立使用）
 left_arm = robot.spawn_chain("left_end_effector")
 right_arm = robot.spawn_chain("right_end_effector")
 
-# 或使用组
-robot.add_groups({
-    'left': 'left_end_effector',
-    'right': 'right_end_effector'
-})
+# 独立计算各链的前向运动学
+q_left = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
+q_right = [0.1, -0.2, 0.3, -0.4, 0.5, -0.6]
+T_left = left_arm.fk(q_left, return_end=True)
+T_right = right_arm.fk(q_right, return_end=True)
 
-left_model = robot.group('left')
+# 方式2: 使用统一配置空间（推荐用于多链协调）
+# 构建完整配置向量
+q_full = np.zeros(robot.num_dof)
+left_indices = robot._get_joint_indices('base_link', 'left_end_effector')
+right_indices = robot._get_joint_indices('base_link', 'right_end_effector')
+q_full[left_indices] = q_left
+q_full[right_indices] = q_right
+
+# 同时计算多个链的前向运动学
+result = robot.fk(
+    q_full,
+    base_link='base_link',
+    end_link=None  # None表示返回所有链路的位姿
+)
+T_left = result['left_end_effector']
+T_right = result['right_end_effector']
+
+# 多链逆向运动学
+ik_result = robot.ik(
+    targets={
+        'left_end_effector': T_left_target,
+        'right_end_effector': T_right_target,
+    },
+    end_links=['left_end_effector', 'right_end_effector'],
+    base_link='base_link'
+)
 ```
 
 ### 双手机器人使用
 
 ```python
-from robocore.modeling.robot_model import BimanualRobotModel
+import numpy as np
+from robocore.modeling import RobotModel
 
-bimanual = BimanualRobotModel(
-    "bimanual_robot.urdf",
-    left_end_link="left_end_effector",
-    right_end_link="right_end_effector"
-)
+# 加载双手机器人模型
+robot = RobotModel("bimanual_robot.urdf")
 
-# 同时控制左右臂
+# 获取左右臂的关节索引
+left_indices = robot._get_joint_indices('base_link', 'left_end_effector')
+right_indices = robot._get_joint_indices('base_link', 'right_end_effector')
+
+# 构建完整配置向量
 q_left = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]
 q_right = [0.1, -0.2, 0.3, -0.4, 0.5, -0.6]
+q_full = np.zeros(robot.num_dof)
+q_full[left_indices] = q_left
+q_full[right_indices] = q_right
 
-result = bimanual.fk(q_left, q_right)
+# 同时计算左右臂前向运动学
+result = robot.fk(
+    q_full,
+    base_link='base_link',
+    end_link=None  # 返回所有链路的位姿
+)
+T_left = result['left_end_effector']
+T_right = result['right_end_effector']
+
+# 同时计算左右臂逆向运动学
+ik_result = robot.ik(
+    targets={
+        'left_end_effector': T_left_target,
+        'right_end_effector': T_right_target,
+    },
+    end_links=['left_end_effector', 'right_end_effector'],
+    base_link='base_link'
+)
 ```
 
 ### 工作空间分析
@@ -776,10 +889,9 @@ print(f"Available end links: {leaf_links}")
 ### Phase 2: 多链支持（已完成 ✅）
 
 - [x] spawn_chain子链创建
-- [x] add_groups组管理
-- [x] 多任务IK
+- [x] available_leaf_links叶子链接查找
+- [x] 统一配置空间多链IK/FK
 - [x] 多链索引系统
-- [x] BimanualRobotModel双手机器人
 
 ### Phase 3: 高级功能（已完成 ✅）
 

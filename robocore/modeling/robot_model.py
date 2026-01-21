@@ -80,9 +80,6 @@ class RobotModel:
         self._workspace_kdtree = None  # KDTree for fast reachability checks
         self._workspace_bounds = None  # Bounding box
 
-        # Multi-link groups (name -> RobotModel via spawn_chain)
-        self._groups: Dict[str, "RobotModel"] = {}
-
         # Only print load message if this is not from spawn_chain (heuristic: explicit _parsed means spawned)
         if _parsed is None:
             beauty_print(f"📦 Loading robot model from: {self.model_path}")
@@ -1012,114 +1009,6 @@ class RobotModel:
         # Leaf = appears as child but never as parent
         return sorted(list(children - parents))
 
-    # -------- Multi-link groups and whole-body kinematics ---------
-    def add_groups(self, groups: Dict[str, str]) -> Dict[str, "RobotModel"]:
-        """
-        :param groups: Mapping group_name -> end_link
-        :return: Mapping group_name -> spawned RobotModel
-        """
-        for name, end in groups.items():
-            self._groups[name] = self.spawn_chain(end)
-        return dict(self._groups)
-
-    def group(self, name: str) -> Dict[str, Any]:
-        """
-        :param name: Group name
-        :return: Group info {joint_indices, end_link, model}
-        """
-        if not self._groups or name not in self._groups:
-            raise ValueError(f"Group '{name}' not found. Available: {list(self._groups.keys())}")
-
-        group_model = self._groups[name]
-        return {
-            'joint_indices': list(range(len(group_model.dof_names))),
-            'end_link': group_model.end_link,
-            'model': group_model
-        }
-
-    def groups(self) -> Dict[str, "RobotModel"]:
-        """
-        :return: Current group mapping name -> RobotModel
-        """
-        return dict(self._groups)
-
-    def ik_tasks(self, tasks: List[Union[Dict[str, Any], Any]], q0_by_group: Dict[str, Sequence[float]], *,
-                 mode: str = 'weighted', max_iters: int = 100, tol: float = 1e-3,
-                 damping: float = 1e-3, step_limit: float = 0.2,
-                 verbose: bool = False) -> Dict[str, Any]:
-        """
-        :param tasks: List of task dictionaries or Task objects
-        :param q0_by_group: Initial joint configurations by group
-        :param mode: 'weighted'|'hierarchical'
-        :param max_iters: Maximum iterations
-        :param tol: Convergence tolerance
-        :param damping: DLS damping factor
-        :param step_limit: Maximum step size
-        :param verbose: Print progress
-        :return: Solution results
-        """
-        if not self._groups:
-            raise ValueError("No groups defined. Call add_groups first.")
-
-        # Convert Task objects to dictionaries
-        task_dicts = []
-        for task in tasks:
-            if hasattr(task, 'type'):  # Task object
-                task_dict = {
-                    'type': task.type,
-                    'group': task.group,
-                    'group_a': task.group_a,
-                    'group_b': task.group_b,
-                    'target': task.target,
-                    'weight': task.weight,
-                    'priority': task.priority,
-                    'row_mask': task.row_mask,
-                    'joint_indices': task.joint_indices
-                }
-                task_dicts.append(task_dict)
-            else:  # Dictionary
-                task_dicts.append(task)
-
-        b = get_backend()
-        
-        # Use new multi-chain solver
-        from robocore.kinematics.solvers.multi_chain_solver import MultiChainIKSolver
-        from robocore.kinematics.task import Task
-        
-        # Convert dicts to Task objects
-        task_objs = []
-        for td in task_dicts:
-            task_objs.append(Task(
-                type=td.get('type'),
-                group=td.get('group'),
-                group_a=td.get('group_a'),
-                group_b=td.get('group_b'),
-                target=td.get('target'),
-                weight=td.get('weight', 1.0),
-                priority=td.get('priority', 0),
-                row_mask=td.get('row_mask'),
-                joint_indices=td.get('joint_indices')
-            ))
-        
-        solver = MultiChainIKSolver(self._groups)
-        
-        if mode == 'weighted':
-            return solver.solve_weighted(
-                task_objs, q0_by_group, max_iters=max_iters, tol=tol,
-                damping=damping, step_limit=step_limit, verbose=verbose
-            )
-        elif mode == 'hierarchical':
-            # Organize by priority
-            from robocore.kinematics.task import organize_by_priority
-            task_groups = organize_by_priority(task_objs)
-            
-            return solver.solve_hierarchical(
-                task_groups, q0_by_group, max_iters=max_iters, tol=tol,
-                damping=damping, step_limit=step_limit, verbose=verbose
-            )
-        else:
-            raise ValueError("Unknown mode, expected 'weighted'|'hierarchical'")
-
     @staticmethod
     def _pose_error_np(T_current: np.ndarray, T_target: np.ndarray) -> np.ndarray:
         """
@@ -1355,51 +1244,5 @@ class RobotModel:
             print("  Green = Active chain (links & joints) to selected end-effector")
         else:
             print("  Green = Active chain (links) to selected end-effector")
-
-    def block_jacobian(self, q_by_group: Dict[str, Sequence[float]]) -> np.ndarray:
-        """Compute block-diagonal Jacobian for multiple groups.
-        
-        :param q_by_group: Mapping name -> joint vector
-        :return: Block-diagonal Jacobian for all groups stacked as 6*k rows
-        """
-        if not self._groups:
-            raise ValueError("No groups defined. Call add_groups first.")
-
-        b = get_backend()
-        if b == 'numpy':
-            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_numpy import BiMultiLinkJacobianSolverNumpy
-            solver = BiMultiLinkJacobianSolverNumpy(self._groups)
-            return solver.block_jacobian(q_by_group)
-        elif b == 'torch':
-            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_torch import BiMultiLinkJacobianSolverTorch
-            solver = BiMultiLinkJacobianSolverTorch(self._groups)
-            return solver.block_jacobian(q_by_group)
-        else:
-            raise ValueError("Unsupported backend, expected 'numpy'|'torch'")
-    
-    def relative_jacobian_between(self, group_a: str, group_b: str,
-                                      q_a: Sequence[float], q_b: Sequence[float]) -> np.ndarray:
-        """
-        :param group_a: First group name
-        :param group_b: Second group name
-        :param q_a: Joint vector of group_a
-        :param q_b: Joint vector of group_b
-        :return: 6 x (n_a + n_b) relative Jacobian (pose)
-        """
-        if not self._groups:
-            raise ValueError("No groups defined. Call add_groups first.")
-
-        b = get_backend()
-        if b == 'numpy':
-            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_numpy import BiMultiLinkJacobianSolverNumpy
-            solver = BiMultiLinkJacobianSolverNumpy(self._groups)
-            return solver.relative_jacobian_between(group_a, group_b, q_a, q_b)
-        elif b == 'torch':
-            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_torch import BiMultiLinkJacobianSolverTorch
-            solver = BiMultiLinkJacobianSolverTorch(self._groups)
-            return solver.relative_jacobian_between(group_a, group_b, q_a, q_b)
-        else:
-            raise ValueError("Unsupported backend, expected 'numpy'|'torch'")
-
 
 __all__ = ["RobotModel", "JointSpec"]
