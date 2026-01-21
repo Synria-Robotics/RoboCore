@@ -22,7 +22,7 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
-from robocore.bridge.sim.mujoco.interactive_humanoid import InteractiveHumanoidIK
+from robocore.bridge.sim.mujoco.interactive_ik import InteractiveIK
 from openrd import get_model_path
 
 
@@ -35,23 +35,24 @@ def main(args):
         model_format="mjcf"
     )
 
-    # End-effector links for thumbs and toes
-    left_thumb_end = "left_hand_thumb_2_link"
-    right_thumb_end = "right_hand_thumb_2_link"
-    left_toe_end = "left_ankle_roll_link"
-    right_toe_end = "right_ankle_roll_link"
+    # Map target names to end-effector links
+    # The new interface auto-discovers targets from MJCF based on naming convention:
+    # - ik_target_left_thumb -> left_hand_thumb_2_link
+    # - ik_target_right_thumb -> right_hand_thumb_2_link
+    # - ik_target_left_toe -> left_ankle_roll_link
+    # - ik_target_right_toe -> right_ankle_roll_link
+    target_end_links = {
+        "left_thumb": "left_hand_thumb_2_link",
+        "right_thumb": "right_hand_thumb_2_link",
+        "left_toe": "left_ankle_roll_link",
+        "right_toe": "right_ankle_roll_link",
+    }
 
     # Create interactive IK controller
-    controller = InteractiveHumanoidIK(
-        mjcf_path, 
-        left_thumb_end, 
-        right_thumb_end,
-        left_toe_end,
-        right_toe_end
-    )
+    controller = InteractiveIK(mjcf_path, target_end_links=target_end_links)
 
     # Run interactive visualization
-    controller.run()
+    controller.run(mode=args.mode)
 
 
 if __name__ == '__main__':
@@ -63,5 +64,8 @@ if __name__ == '__main__':
                         help='Version (optional for most robots)')
     parser.add_argument('--variant', type=str, default="g1_body29_hand14_interactive",
                         help='Variant: g1_body29_hand14_interactive (with draggable targets)')
+    parser.add_argument('--mode', type=str, default='independent',
+                        choices=['independent', 'relative', 'mirror'],
+                        help='Mode: independent (independent mode), relative (relative mode), mirror (mirror mode)')
     args = parser.parse_args()
     main(args)

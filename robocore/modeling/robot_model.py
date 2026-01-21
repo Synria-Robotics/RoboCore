@@ -267,7 +267,6 @@ class RobotModel:
         self.num_chain_dof = len(self.chain_joint_list)
         # Build joint_limit array shape (n,2)
         # Handle None values with defaults: -π to π for revolute, -inf to inf for prismatic
-        import numpy as _np
         if self.num_chain_dof > 0:
             limits = []
             for j in self._chain_dof_list:
@@ -275,17 +274,17 @@ class RobotModel:
                 upper = j.limit_upper
                 # Handle None values with defaults
                 if lower is None:
-                    lower = -_np.pi if j.joint_type == 'revolute' else -_np.inf
+                    lower = -np.pi if j.joint_type == 'revolute' else -np.inf
                 if upper is None:
-                    upper = _np.pi if j.joint_type == 'revolute' else _np.inf
+                    upper = np.pi if j.joint_type == 'revolute' else np.inf
                 limits.append([lower, upper])
-            self.chain_joint_limit = _np.array(limits, dtype=float)
+            self.chain_joint_limit = np.array(limits, dtype=float)
             self.chain_joint_limit_max = self.chain_joint_limit[:, 1]
             self.chain_joint_limit_min = self.chain_joint_limit[:, 0]
         else:
-            self.chain_joint_limit = _np.zeros((0, 2))
-            self.chain_joint_limit_max = _np.array([])
-            self.chain_joint_limit_min = _np.array([])
+            self.chain_joint_limit = np.zeros((0, 2))
+            self.chain_joint_limit_max = np.array([])
+            self.chain_joint_limit_min = np.array([])
 
     def _linearize_chain(self, base: str, end_link: Optional[str]) -> List[JointSpec]:
         if end_link is None:
@@ -533,7 +532,6 @@ class RobotModel:
         :param base_trans: transformation matrix of the base pose, [batch_size, 4, 4]
         :return: transformed vertices and normals for complex meshes, and transformed parameters for simple shapes.
         """
-        batch_size = 1
         trans_dict = self.get_trans_dict(joint_value, base_trans)
         self.meshname_link_map = {}
         for link, meshnames in self.link_meshname_map.items():
@@ -604,14 +602,12 @@ class RobotModel:
             link_name = self.meshname_link_map[mesh_name]
             if shape_info['type'] == 'sphere':
                 radius = shape_info['params']['radius']
-                center = np.zeros(batch_size, 3)
                 center = trans_dict[link_name][:, :3, 3].clone()
                 center += np.array(shape_info['params']['position'])
                 center += np.array([0, 0, shape_info['params']['radius']])
                 transformed_shapes[mesh_name] = {'type': 'sphere', 'radius': radius, 'center': center}
             elif shape_info['type'] == 'box':
                 extents = shape_info['params']['extents']
-                center = np.zeros(batch_size, 3)
                 center = trans_dict[link_name][:, :3, 3].clone()
                 center +=  np.array(shape_info['params']['position'])
                 transformed_shapes[mesh_name] = {'type': 'box', 'extents': extents, 'center': center}
@@ -619,7 +615,6 @@ class RobotModel:
                 # 获取圆柱体的半径和高度
                 radius = shape_info['params']['radius']
                 height = shape_info['params']['height']
-                center = np.zeros(batch_size, 3)
                 center = trans_dict[link_name][:, :3, 3].clone()
                 center += np.array(shape_info['params']['position'])
                 transformed_shapes[mesh_name] = {'type': 'cylinder', 'radius': radius, 'height': height,
@@ -629,7 +624,6 @@ class RobotModel:
                 # 获取胶囊体的半径和高度
                 radius = shape_info['params']['radius']
                 height = shape_info['params']['height']
-                center = np.zeros(batch_size, 3)
                 center = trans_dict[link_name][:, :3, 3].clone()
                 center += np.array(shape_info['params']['position'])
                 transformed_shapes[mesh_name] = {'type': 'capsule', 'radius': radius, 'height': height,
@@ -646,7 +640,6 @@ class RobotModel:
         :param base_trans: transformation matrix of the base pose, [batch_size, 4, 4]
         :return: list of trimesh objects, one per batch
         """
-        batch_size = 1
         outputs, transformed_shapes, trans_dict = self.forward(joint_value, base_trans)
 
         # 处理复杂网格和简单形状的 mesh
@@ -1014,8 +1007,8 @@ class RobotModel:
 
         Useful to discover multiple end-effectors (e.g., left/right grippers) for spawn_chain.
         """
-        parents = set(j.parent for j in self._raw_joints)
-        children = set(j.child for j in self._raw_joints)
+        parents = set(j.parent for j in self.parsed_model.joints)
+        children = set(j.child for j in self.parsed_model.joints)
         # Leaf = appears as child but never as parent
         return sorted(list(children - parents))
 
@@ -1126,132 +1119,6 @@ class RobotModel:
             )
         else:
             raise ValueError("Unknown mode, expected 'weighted'|'hierarchical'")
-
-    def multi_task_ik_weighted(self,
-                               tasks: List[Dict[str, Any]],
-                               q0_by_group: Dict[str, Sequence[float]],
-                               *,
-                               max_iters: int = 100,
-                               tol: float = 1e-3,
-                               damping: float = 1e-3,
-                               step_limit: float = 0.2,
-                               verbose: bool = False) -> Dict[str, Any]:
-        """
-        :param tasks: List of task dicts. Absolute: {'type':'absolute','group':name,'target':T,'weight':w,'row_mask':[...]} Relative: {'type':'relative','group_a':A,'group_b':B,'target':T_rel,'weight':w,'row_mask':[...]}
-        :param q0_by_group: Mapping name -> initial q
-        :param max_iters: Max iterations
-        :param tol: Convergence tolerance
-        :param damping: DLS damping
-        :param step_limit: Joint step limit
-        :param verbose: Print iteration logs
-        :return: {'q_by_group', 'success', 'iters', 'residual'}
-        """
-        if not self._groups:
-            raise ValueError("No groups defined. Call add_groups first.")
-        names = list(self._groups.keys())
-        # Build concatenated q vector
-        q_by = {k: np.array(q0_by_group[k], dtype=float) for k in names}
-        n_by = {k: len(q_by[k]) for k in names}
-        idx_by = {}
-        offset = 0
-        for k in names:
-            idx_by[k] = (offset, offset + n_by[k])
-            offset += n_by[k]
-        n_total = offset
-        q = np.concatenate([q_by[k] for k in names])
-
-        def slice_group(vec, name):
-            i0, i1 = idx_by[name]
-            return vec[i0:i1]
-
-        def assign_group(vec, name, part):
-            i0, i1 = idx_by[name]
-            vec[i0:i1] = part
-
-        for it in range(max_iters):
-            errs = []
-            Jrows = []
-            for task in tasks:
-                if task.get('type') == 'absolute':
-                    g = task['group']
-                    model = self._groups[g]
-                    qg = slice_group(q, g)
-                    T_cur = model.fk(qg, return_end=True)
-                    T_cur = T_cur.detach().cpu().numpy() if hasattr(T_cur, 'detach') else np.array(T_cur)
-                    e = self._pose_error_np(T_cur, np.array(task['target']))
-                    Jg = jacobian(model, qg)
-                    Jg = Jg.detach().cpu().numpy() if hasattr(Jg, 'detach') else np.array(Jg)
-                    # pad into whole vector
-                    Jpad = np.zeros((6, n_total))
-                    i0, i1 = idx_by[g]
-                    Jpad[:, i0:i1] = Jg
-                    # row mask
-                    mask = task.get('row_mask')
-                    if mask is not None:
-                        m = np.array([bool(x) for x in mask])
-                        e = e[m]
-                        Jpad = Jpad[m, :]
-                    w = float(task.get('weight', 1.0)) ** 0.5
-                    errs.append(w * e)
-                    Jrows.append(w * Jpad)
-                elif task.get('type') == 'relative':
-                    ga = task['group_a']
-                    gb = task['group_b']
-                    ma = self._groups[ga]
-                    mb = self._groups[gb]
-                    qa = slice_group(q, ga)
-                    qb = slice_group(q, gb)
-                    Ta = ma.fk(qa, return_end=True)
-                    Tb = mb.fk(qb, return_end=True)
-                    if hasattr(Ta, 'detach'):
-                        Ta = Ta.detach().cpu().numpy()
-                        Tb = Tb.detach().cpu().numpy()
-                    Ta = np.array(Ta)
-                    Tb = np.array(Tb)
-                    e = relative_pose_error(Ta, Tb, np.array(task['target']))
-                    Jr = relative_jacobian(ma, mb, qa, qb)
-                    Jr = Jr.detach().cpu().numpy() if hasattr(Jr, 'detach') else np.array(Jr)
-                    # place Jr into columns of a+b
-                    Jpad = np.zeros((Jr.shape[0], n_total))
-                    i0a, i1a = idx_by[ga]
-                    i0b, i1b = idx_by[gb]
-                    Jpad[:, i0a:i1a] = Jr[:, :n_by[ga]]
-                    Jpad[:, i0b:i1b] = Jr[:, n_by[ga]:]
-                    mask = task.get('row_mask')
-                    if mask is not None:
-                        m = np.array([bool(x) for x in mask])
-                        e = e[m]
-                        Jpad = Jpad[m, :]
-                    w = float(task.get('weight', 1.0)) ** 0.5
-                    errs.append(w * e)
-                    Jrows.append(w * Jpad)
-                else:
-                    raise ValueError("Unknown task type")
-
-            e_total = np.concatenate(errs) if errs else np.zeros(0)
-            if e_total.size == 0:
-                break
-            J_total = np.vstack(Jrows)
-            JT = J_total.T
-            A = J_total @ JT + (damping ** 2) * np.eye(J_total.shape[0])
-            dq = JT @ np.linalg.solve(A, e_total)
-            dq = np.clip(dq, -step_limit, step_limit)
-            q += dq
-            if verbose:
-                print(f"Iter {it+1}: residual={np.linalg.norm(e_total):.6f}, |dq|={np.linalg.norm(dq):.6f}")
-            if np.linalg.norm(e_total) < tol:
-                break
-
-        # Split back
-        q_out = {}
-        for name in names:
-            q_out[name] = slice_group(q, name).tolist()
-        return {
-            'q_by_group': q_out,
-            'success': True,
-            'iters': it + 1,
-            'residual': float(np.linalg.norm(e_total)) if e_total.size else 0.0,
-        }
 
     @staticmethod
     def _pose_error_np(T_current: np.ndarray, T_target: np.ndarray) -> np.ndarray:

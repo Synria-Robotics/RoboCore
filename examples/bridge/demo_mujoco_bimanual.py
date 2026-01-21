@@ -1,4 +1,4 @@
-from robocore.bridge.sim.mujoco.interactive_dual_arm import InteractiveDualArmIK
+from robocore.bridge.sim.mujoco.interactive_ik import InteractiveIK
 from synriard import get_model_path
 
 
@@ -6,14 +6,19 @@ def main(args):
     # Model path (Bessica is a dual-arm robot)
     mjcf_path = get_model_path(args.model, version=args.version, variant=args.variant, model_format="mjcf")
 
-    # End-effector links
-    left_end = "left_arm_link7"
-    right_end = "right_arm_link7"
+    # Map target names to end-effector links
+    # The new interface auto-discovers targets from MJCF based on naming convention:
+    # - ik_target_left_gripper -> left_arm_link7
+    # - ik_target_right_gripper -> right_arm_link7
+    target_end_links = {
+        "left_gripper": "left_arm_link7",
+        "right_gripper": "right_arm_link7",
+    }
 
     # Create interactive IK controller
-    controller = InteractiveDualArmIK(mjcf_path, left_end, right_end)
+    controller = InteractiveIK(mjcf_path, target_end_links=target_end_links)
 
-    # Run in independent mode
+    # Run in specified mode
     controller.run(mode=args.mode)
 
 

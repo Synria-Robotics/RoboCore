@@ -19,7 +19,7 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
-__version__ = "2.0.0alpha1"
+__version__ = "2.5.0"
 __author__ = "Synria Robotics Team"
 __copyright__ = "Copyright (c) 2025 Synria Robotics Co., Ltd."
 __license__ = "GPL-3.0"
