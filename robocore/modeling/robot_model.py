@@ -69,8 +69,17 @@ class RobotModel:
         # Track if base_link was explicitly set
         self._base_link_explicitly_set = base_link is not None
         self.base_link = base_link or self.real_link[0]
-        self.end_link = end_link or self.real_link[-1]
+
+        # Build graph first to identify links that are part of kinematic chain
         self._build_graph()
+
+        # For auto-detecting end_link, exclude mocap bodies and other non-kinematic links
+        # Mocap bodies don't have joints, so they won't be in the graph
+        if end_link is None:
+            self.end_link = self._auto_detect_end_link()
+        else:
+            self.end_link = end_link
+
         self._build_chain()
         self._build_multi_chain_index()  # Build multi-chain indexing system
 
@@ -347,6 +356,51 @@ class RobotModel:
         """
         chain_joints = self._get_chain_joints(base_link, end_link)
         return [self._dof_name_to_index[j.name] for j in chain_joints if j.name in self._dof_name_to_index]
+
+    def _auto_detect_end_link(self) -> str:
+        """Auto-detect end link by finding leaf links and sorting them for consistency.
+        
+        :return: Selected end link name
+        """
+        # Get all links that are part of the kinematic chain (have joints connected to them)
+        # A link is kinematic if it's the base_link or if it's a child of some joint
+        kinematic_links = []
+        joint_children = {j.child for j in self.parsed_model.joints}
+
+        for link in self.real_link:
+            # Skip if link name suggests it's a mocap/target body
+            if any(keyword in link.lower() for keyword in ['target', 'mocap', 'ik_target']):
+                continue
+            # Include if it's the base_link or if it's a child of some joint (part of kinematic chain)
+            if link == self.base_link or link in joint_children:
+                kinematic_links.append(link)
+
+        # Find leaf links (end effectors) and sort them for consistent selection
+        # Build set of links with children
+        links_with_children = set()
+        for link_name in self._graph:
+            if link_name in self.real_link:
+                for joint in self._graph[link_name]:
+                    if joint.child in self.real_link:
+                        links_with_children.add(link_name)
+
+        # Leaf links are real links that are not parents of any other real link
+        leaf_links = []
+        for link_name in self.real_link:
+            if link_name != self.base_link and link_name not in links_with_children:
+                # Skip mocap/target bodies
+                if not any(keyword in link_name.lower() for keyword in ['target', 'mocap', 'ik_target']):
+                    leaf_links.append(link_name)
+
+        # Sort leaf links to ensure consistent selection across different formats
+        if leaf_links:
+            leaf_links.sort()
+            return leaf_links[0]  # Use first after sorting for consistency
+        elif kinematic_links:
+            # Fallback: use last kinematic link if no leaf links found
+            return kinematic_links[-1]
+        else:
+            return self.real_link[-1]
 
     def _find_leaf_links(self) -> List[str]:
         """Find all leaf links (links with no children in real_link) in the kinematic tree.
@@ -1207,9 +1261,14 @@ class RobotModel:
                 else:
                     children_print = [j for j in children_all if j.joint_type in ("revolute", "prismatic")]
 
+                # Hidden (filtered-out) joints
+                hidden = [j for j in children_all if j not in children_print]
+
                 # Print visible joints
                 for i, joint in enumerate(children_print):
-                    is_last_child = (i == len(children_print) - 1)
+                    # Check if this is the last child overall (last visible AND no hidden joints)
+                    is_last_visible = (i == len(children_print) - 1)
+                    is_last_child = is_last_visible and len(hidden) == 0
                     joint_symbol = "⚙" if joint.joint_type in ("revolute", "prismatic") else "⊗"
                     joint_prefix = prefix + extension
                     joint_connector = "└── " if is_last_child else "├── "
@@ -1218,14 +1277,18 @@ class RobotModel:
                     if in_chain:
                         joint_line = f"{GREEN}{joint_line}{RESET}"
                     print(joint_line)
-                    child_prefix = prefix + extension + ("    " if is_last_child else "│   ")
+                    # For child prefix: if there are hidden joints after, use │   ; otherwise use spaces if last
+                    has_more_siblings = not is_last_visible or len(hidden) > 0
+                    child_prefix = prefix + extension + ("│   " if has_more_siblings else "    ")
                     print_subtree(joint.child, child_prefix, True)
 
                 # Recurse through hidden (filtered-out) joints so deeper actuated joints are not lost
-                hidden = [j for j in children_all if j not in children_print]
-                for hidden_joint in hidden:
-                    # Do not alter prefix depth since no joint line printed
-                    print_subtree(hidden_joint.child, prefix + extension, False)
+                for i, hidden_joint in enumerate(hidden):
+                    # Determine if this is the last child overall
+                    is_last_child = (i == len(hidden) - 1)
+                    # Do not alter prefix depth since no joint line printed, but use correct connector
+                    hidden_prefix = prefix + extension
+                    print_subtree(hidden_joint.child, hidden_prefix, is_last_child)
             else:
                 # Link-only view: consider all joints to derive child links (including fixed)
                 child_links = [j.child for j in children_all]
