@@ -78,7 +78,11 @@ class MJCFParser:
         """
         joints = []
         idx = 0
+        
+        # Track which bodies have joints
+        bodies_with_joints = set()
 
+        # First, parse all bodies that have explicit joints
         for i in range(self.model.njnt):
             # Get joint name
             joint_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, i)
@@ -92,6 +96,7 @@ class MJCFParser:
             # Get body IDs
             body_id = self.model.jnt_bodyid[i]
             parent_body_id = self.model.body_parentid[body_id]
+            bodies_with_joints.add(body_id)
 
             # Get body names
             child = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, body_id)
@@ -138,6 +143,61 @@ class MJCFParser:
             )
 
             joints.append(joint)
+            idx += 1
+        
+        # Now, find bodies that have a parent but no joint (fixed connections)
+        for body_id in range(self.model.nbody):
+            # Skip world body (body_id == 0)
+            if body_id == 0:
+                continue
+            
+            # Skip bodies that already have joints
+            if body_id in bodies_with_joints:
+                continue
+            
+            # Check if this body has a parent (not world)
+            parent_body_id = self.model.body_parentid[body_id]
+            if parent_body_id < 0:  # No parent
+                continue
+            
+            # Get body names
+            child = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+            if child is None:
+                child = f"body_{body_id}"
+
+            parent = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, parent_body_id)
+            if parent is None:
+                parent = f"body_{parent_body_id}"
+            
+            # Skip if parent is world
+            if parent == "world":
+                continue
+
+            # Get body's position and orientation relative to parent
+            pos = self.model.body_pos[body_id].copy()
+            origin_xyz = pos.tolist()
+
+            quat = self.model.body_quat[body_id].copy()
+            origin_rpy = quaternion_to_rpy(quaternion_reorder(quat))
+
+            # Create a fixed joint for this connection
+            joint_name = f"{child}_fixed_joint"
+            joint = JointSpec(
+                name=joint_name,
+                index=idx,
+                joint_type="fixed",
+                parent=parent,
+                child=child,
+                axis=[0, 0, 1],  # Default axis for fixed joints
+                origin_xyz=origin_xyz,
+                origin_rpy=origin_rpy,
+                limit_lower=None,
+                limit_upper=None
+            )
+
+            joints.append(joint)
+            idx += 1
+        
         return joints
 
     def get_joint_names(self) -> List[JointSpec]:
