@@ -24,7 +24,7 @@ from __future__ import annotations
 import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -266,6 +266,35 @@ class URDFParser:
         :return: Number of joints
         """
         return len(self.joints)
+
+    def get_link_inertials(self) -> Dict[str, Tuple[float, List[float], List[float], np.ndarray]]:
+        """Get inertia data per link for dynamics.
+
+        :return: Dict mapping link name to (mass, origin_xyz, origin_rpy, inertia_3x3).
+            Inertia is 3x3 in link frame at COM. If link has no <inertial>, uses
+            mass=0, origin_xyz=[0,0,0], origin_rpy=[0,0,0], inertia=zeros(3,3).
+        """
+        robot = URDFRobot.from_xml_file(str(self.urdf_path))
+        out: Dict[str, Tuple[float, List[float], List[float], np.ndarray]] = {}
+        for link in robot.links:
+            name = link.name
+            if getattr(link, "inertial", None) is not None:
+                inv = link.inertial
+                mass = float(inv.mass) if inv.mass is not None else 0.0
+                if inv.origin is not None:
+                    xyz = list(inv.origin.xyz) if inv.origin.xyz is not None else [0.0, 0.0, 0.0]
+                    rpy = list(inv.origin.rpy) if inv.origin.rpy is not None else [0.0, 0.0, 0.0]
+                else:
+                    xyz = [0.0, 0.0, 0.0]
+                    rpy = [0.0, 0.0, 0.0]
+                if inv.inertia is not None:
+                    I = np.array(inv.inertia.to_matrix(), dtype=np.float64)
+                else:
+                    I = np.zeros((3, 3), dtype=np.float64)
+                out[name] = (mass, xyz, rpy, I)
+            else:
+                out[name] = (0.0, [0.0, 0.0, 0.0], [0.0, 0.0, 0.0], np.zeros((3, 3), dtype=np.float64))
+        return out
 
     def to_dict(self) -> Dict[str, object]:
         """

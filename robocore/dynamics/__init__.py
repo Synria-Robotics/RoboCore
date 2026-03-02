@@ -1,4 +1,4 @@
-"""High-Performance Robotics Kinematics Library
+"""Dynamics module: inverse/forward dynamics, mass matrix, gravity, etc.
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -19,35 +19,28 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
-__version__ = "2.5.0"
-__author__ = "Synria Robotics Team"
-__copyright__ = "Copyright (c) 2025 Synria Robotics Co., Ltd."
-__license__ = "GPL-3.0"
-
-from . import modeling
-from . import kinematics
-from . import dynamics
-from . import transform
-from . import planning
-from . import analysis
-from . import configs
-from . import utils
-from . import control
-
-# Export backend management functions
-from .utils.backend import set_backend, get_backend
+from robocore.dynamics.api import (
+    inverse_dynamics,
+    forward_dynamics,
+    mass_matrix,
+    mass_matrix_inverse,
+    gravity,
+    nonlinear_effects,
+    coriolis_matrix,
+    static_torque,
+)
+from robocore.dynamics.model import DynamicsModel, DynamicsBody, build_dynamics_model
 
 __all__ = [
-    'set_backend',
-    'get_backend',
-    'modeling',
-    'kinematics',
-    'dynamics',
-    'transform',
-    'planning',
-    'analysis',
-    'configs',
-    'utils',
-    'control',
+    "inverse_dynamics",
+    "forward_dynamics",
+    "mass_matrix",
+    "mass_matrix_inverse",
+    "gravity",
+    "nonlinear_effects",
+    "coriolis_matrix",
+    "static_torque",
+    "DynamicsModel",
+    "DynamicsBody",
+    "build_dynamics_model",
 ]
-

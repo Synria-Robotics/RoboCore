@@ -394,6 +394,24 @@ class MJCFParser:
     def num_joints(self) -> int:
         return len(self.joints)
 
+    def get_link_inertials(self):
+        """Get inertia data per link for dynamics (stub for MJCF).
+
+        MJCF dynamics support is not fully implemented; returns zero inertia
+        for all links. For full dynamics use URDF.
+        :return: Dict mapping link name to (mass, origin_xyz, origin_rpy, inertia_3x3).
+        """
+        import numpy as np
+        out = {}
+        for name in self.get_link_names():
+            out[name] = (
+                0.0,
+                [0.0, 0.0, 0.0],
+                [0.0, 0.0, 0.0],
+                np.zeros((3, 3), dtype=np.float64),
+            )
+        return out
+
     def to_dict(self) -> Dict[str, object]:
         """
         :return: Dictionary with 'name', 'joints', and 'base_links' keys
