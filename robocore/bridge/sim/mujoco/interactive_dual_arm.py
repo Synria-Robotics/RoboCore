@@ -43,17 +43,35 @@ class InteractiveDualArmIK:
         self.mj_model = mujoco.MjModel.from_xml_path(str(self.mjcf_path))
         self.mj_data = mujoco.MjData(self.mj_model)
         print(f"✓ MuJoCo model loaded: {self.mj_model.nq} DOF")
-        
-        # Gripper center offset (from link7 to gripper center, in link7 frame)
-        # Based on MJCF: gripper center at pos="0.14128 0 -0.00015" (both arms)
-        # Center is at 0.14128 m in X direction from link7
-        self.gripper_offset = np.array([0.14128, 0.0, -0.00015, 1.0])  # Homogeneous coordinates
-        
+
+        # Resolve requested end-effector references. The interactive demos may
+        # pass site names, while RoboCore kinematics works on body/link names.
+        self.left_end_name = left_end_link
+        self.right_end_name = right_end_link
+        self.left_end_body, self.left_end_offset = self._resolve_end_reference(left_end_link)
+        self.right_end_body, self.right_end_offset = self._resolve_end_reference(right_end_link)
+        self.left_end_offset_inv = np.linalg.inv(self.left_end_offset)
+        self.right_end_offset_inv = np.linalg.inv(self.right_end_offset)
+
+        # Infer a shared base from the MuJoCo tree so Alicia-style world roots
+        # and Bessica-style base links both work.
+        self.base_link = self._infer_common_base(self.left_end_body, self.right_end_body)
+
         # Load RoboCore bimanual model
-        self.robot = BimanualRobotModel(str(self.mjcf_path), left_end_link, right_end_link)
+        self.robot = BimanualRobotModel(
+            str(self.mjcf_path),
+            self.left_end_body,
+            self.right_end_body,
+            base_link=self.base_link,
+        )
         
         self.left_model = self.robot.left_model
         self.right_model = self.robot.right_model
+
+        # Map RoboCore chain joints to MuJoCo qpos indices instead of assuming
+        # a fixed left/right ordering in qpos.
+        self.left_qpos_indices = self._joint_qpos_indices(self.left_model)
+        self.right_qpos_indices = self._joint_qpos_indices(self.right_model)
         
         # Current joint configuration
         self.q_left = np.zeros(self.left_model.num_chain_dof)
@@ -93,17 +111,21 @@ class InteractiveDualArmIK:
     
     def _initialize_mocap_ids(self):
         """Find mocap body IDs by name."""
+        left_aliases = {'left_target', 'ik_target_left_gripper'}
+        right_aliases = {'right_target', 'ik_target_right_gripper'}
+        center_aliases = {'center_target', 'ik_target_center'}
+
         # Iterate through all bodies to find mocap bodies
         for body_id in range(self.mj_model.nbody):
             # Check if this body is a mocap body
             mocap_id = self.mj_model.body_mocapid[body_id]
             if mocap_id >= 0:
                 body_name = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, body_id)
-                if body_name == 'left_target':
+                if body_name in left_aliases:
                     self.left_marker_id = mocap_id
-                elif body_name == 'right_target':
+                elif body_name in right_aliases:
                     self.right_marker_id = mocap_id
-                elif body_name == 'center_target':
+                elif body_name in center_aliases:
                     self.center_marker_id = mocap_id
         
         print(f"✓ Mocap markers found: left={self.left_marker_id}, right={self.right_marker_id}, center={self.center_marker_id}")
@@ -113,17 +135,15 @@ class InteractiveDualArmIK:
         # Get initial FK poses (at zero config, should be zero-config FK)
         result_left = self.left_model.fk(self.q_left)
         result_right = self.right_model.fk(self.q_right)
-        
-        # Get link7 poses (FK returns dict with 'end' key)
-        T_left_link7 = result_left['end']
-        T_right_link7 = result_right['end']
-        
-        # Convert to gripper center poses (T_gripper = T_link7 @ T_offset)
-        T_offset = np.eye(4)
-        T_offset[0:3, 3] = self.gripper_offset[0:3]
-        
-        self.T_left_target = T_left_link7 @ T_offset
-        self.T_right_target = T_right_link7 @ T_offset
+
+        # Convert from the IK body pose to the requested end-effector reference
+        # (body or site). For Alicia this maps tool0_l/tool0_r bodies to the
+        # requested tool sites; for Bessica it maps link7 to gripper-center sites.
+        T_left_body = result_left['end']
+        T_right_body = result_right['end']
+
+        self.T_left_target = T_left_body @ self.left_end_offset
+        self.T_right_target = T_right_body @ self.right_end_offset
         
         # Save initial poses for mirror mode reference
         self.T_left_initial = self.T_left_target.copy()
@@ -141,9 +161,9 @@ class InteractiveDualArmIK:
     
     def _initialize_relative_transform(self):
         """Initialize relative grasp transform from current poses."""
-        # Convert gripper targets to link7 targets
-        T_left_link7 = self._gripper_to_link7(self.T_left_target)
-        T_right_link7 = self._gripper_to_link7(self.T_right_target)
+        # Convert requested target frames back to the underlying IK body frames.
+        T_left_link7 = self._target_to_ik_link(self.T_left_target, arm='left')
+        T_right_link7 = self._target_to_ik_link(self.T_right_target, arm='right')
         
         # Compute relative transform
         self.T_rel_grasp = np.linalg.inv(T_left_link7) @ T_right_link7
@@ -171,6 +191,38 @@ class InteractiveDualArmIK:
         if self.center_marker_id is not None:
             self.mj_data.mocap_pos[self.center_marker_id] = self.T_center_target[0:3, 3]
             self.mj_data.mocap_quat[self.center_marker_id] = self._mat2quat(self.T_center_target[0:3, 0:3])
+
+    def _debug_marker_state(self, prefix: str = "Marker debug"):
+        """Print current target, mocap, and body poses for startup debugging."""
+        marker_info = [
+            ("left", self.left_marker_id, self.T_left_target),
+            ("right", self.right_marker_id, self.T_right_target),
+            ("center", self.center_marker_id, self.T_center_target),
+        ]
+
+        print(f"\n[{prefix}]")
+        for label, mocap_id, target in marker_info:
+            if mocap_id is None:
+                print(f"  {label}: mocap not found")
+                continue
+
+            body_name = None
+            for body_id in range(self.mj_model.nbody):
+                if self.mj_model.body_mocapid[body_id] == mocap_id:
+                    body_name = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+                    break
+
+            body_pos = None
+            if body_name is not None:
+                body_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+                body_pos = self.mj_data.xpos[body_id].copy()
+
+            target_pos = target[0:3, 3] if target is not None else None
+            mocap_pos = self.mj_data.mocap_pos[mocap_id].copy()
+            print(
+                f"  {label}: body={body_name}, "
+                f"target={target_pos}, mocap={mocap_pos}, body_xpos={body_pos}"
+            )
     
     def _mat2quat(self, R: np.ndarray) -> np.ndarray:
         """Convert rotation matrix to quaternion [w, x, y, z]."""
@@ -243,14 +295,66 @@ class InteractiveDualArmIK:
         
         return T_left, T_right, T_center
     
-    def _gripper_to_link7(self, T_gripper: np.ndarray) -> np.ndarray:
-        """Convert gripper center pose to link7 pose.
-        
-        T_link7 = T_gripper @ inv(T_offset)
-        """
+    def _resolve_end_reference(self, end_name: str) -> Tuple[str, np.ndarray]:
+        """Resolve a body/site end-effector reference to an IK body and offset."""
+        body_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, end_name)
+        if body_id != -1:
+            return end_name, np.eye(4)
+
+        site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, end_name)
+        if site_id == -1:
+            raise ValueError(f"End-effector '{end_name}' is neither a MuJoCo body nor site")
+
+        body_id = self.mj_model.site_bodyid[site_id]
+        body_name = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+        if body_name is None:
+            raise ValueError(f"Could not resolve parent body for site '{end_name}'")
+
         T_offset = np.eye(4)
-        T_offset[0:3, 3] = self.gripper_offset[0:3]
-        return T_gripper @ np.linalg.inv(T_offset)
+        T_offset[0:3, 3] = self.mj_model.site_pos[site_id]
+        if hasattr(self.mj_model, 'site_quat'):
+            T_offset[0:3, 0:3] = self._quat2mat(self.mj_model.site_quat[site_id])
+        return body_name, T_offset
+
+    def _infer_common_base(self, left_body: str, right_body: str) -> str:
+        """Infer the deepest common ancestor body of two end-effectors."""
+        def body_ancestors(body_name: str):
+            body_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+            ancestors = []
+            while body_id != -1:
+                name = mujoco.mj_id2name(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+                if name is not None:
+                    ancestors.append(name)
+                parent_id = self.mj_model.body_parentid[body_id]
+                if parent_id == body_id:
+                    break
+                body_id = parent_id
+            return ancestors
+
+        left_ancestors = body_ancestors(left_body)
+        right_ancestors = set(body_ancestors(right_body))
+        for name in left_ancestors:
+            if name in right_ancestors:
+                return name
+        return left_ancestors[-1]
+
+    def _joint_qpos_indices(self, model) -> np.ndarray:
+        """Map a RoboCore chain's actuated joints to MuJoCo qpos addresses."""
+        indices = []
+        for js in model._chain_actuated:
+            joint_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, js.name)
+            if joint_id == -1:
+                raise ValueError(f"MuJoCo joint '{js.name}' not found in model")
+            indices.append(self.mj_model.jnt_qposadr[joint_id])
+        return np.asarray(indices, dtype=np.int32)
+
+    def _target_to_ik_link(self, T_target: np.ndarray, arm: str) -> np.ndarray:
+        """Convert requested end-effector pose to the IK body pose."""
+        if arm == 'left':
+            return T_target @ self.left_end_offset_inv
+        if arm == 'right':
+            return T_target @ self.right_end_offset_inv
+        raise ValueError(f"Unknown arm '{arm}'")
     
     def solve_ik_independent(self):
         """Solve IK for independent dual-arm control (Demo 1).
@@ -259,8 +363,8 @@ class InteractiveDualArmIK:
         """
         # Use BimanualRobotModel.ik() with independent coordination
         res = self.robot.ik(
-            target_left=self._gripper_to_link7(self.T_left_target),
-            target_right=self._gripper_to_link7(self.T_right_target),
+            target_left=self._target_to_ik_link(self.T_left_target, arm='left'),
+            target_right=self._target_to_ik_link(self.T_right_target, arm='right'),
             q0_left=self.q_left,
             q0_right=self.q_right,
             method='dls',
@@ -285,7 +389,7 @@ class InteractiveDualArmIK:
         """
         # Use BimanualRobotModel.ik() with relative_pose coordination
         res = self.robot.ik(
-            target_left=self._gripper_to_link7(self.T_left_target),
+            target_left=self._target_to_ik_link(self.T_left_target, arm='left'),
             target_right=None,  # right is constrained by T_rel_grasp
             q0_left=self.q_left,
             q0_right=self.q_right,
@@ -312,9 +416,9 @@ class InteractiveDualArmIK:
         - Mirror this rotation change across XZ plane
         - Apply mirrored rotation to right initial orientation
         """
-        # Convert gripper center targets to link7 targets and solve independently
-        T_left_link7 = self._gripper_to_link7(self.T_left_target)
-        T_right_link7 = self._gripper_to_link7(self.T_right_target)
+        # Convert requested target frames to the underlying IK body frames.
+        T_left_link7 = self._target_to_ik_link(self.T_left_target, arm='left')
+        T_right_link7 = self._target_to_ik_link(self.T_right_target, arm='right')
 
         # Use BimanualRobotModel.ik() with independent coordination
         res = self.robot.ik(
@@ -340,8 +444,8 @@ class InteractiveDualArmIK:
         nq_right = self.right_model.num_chain_dof
         
         # Right arm first, left arm second
-        self.mj_data.qpos[0:nq_right] = self.q_right
-        self.mj_data.qpos[nq_right:nq_right+nq_left] = self.q_left
+        self.mj_data.qpos[self.left_qpos_indices[:nq_left]] = self.q_left
+        self.mj_data.qpos[self.right_qpos_indices[:nq_right]] = self.q_right
         
         # Forward kinematics in MuJoCo
         mujoco.mj_forward(self.mj_model, self.mj_data)
@@ -417,8 +521,8 @@ class InteractiveDualArmIK:
                 
                 # CRITICAL: Update relative transform when red/blue balls are dragged
                 # This redefines the relative grasp configuration
-                T_left_link7 = self._gripper_to_link7(self.T_left_target)
-                T_right_link7 = self._gripper_to_link7(self.T_right_target)
+                T_left_link7 = self._target_to_ik_link(self.T_left_target, arm='left')
+                T_right_link7 = self._target_to_ik_link(self.T_right_target, arm='right')
                 self.T_rel_grasp = np.linalg.inv(T_left_link7) @ T_right_link7
                 
                 print(
@@ -533,8 +637,8 @@ class InteractiveDualArmIK:
         self.T_center_target[0:3, 0:3] = self.T_left_target[0:3, 0:3].copy()
 
         # Reset relative grasp transform
-        T_left_link7 = self._gripper_to_link7(self.T_left_target)
-        T_right_link7 = self._gripper_to_link7(self.T_right_target)
+        T_left_link7 = self._target_to_ik_link(self.T_left_target, arm='left')
+        T_right_link7 = self._target_to_ik_link(self.T_right_target, arm='right')
         self.T_rel_grasp = np.linalg.inv(T_left_link7) @ T_right_link7
 
         # Update MuJoCo state
@@ -591,6 +695,7 @@ class InteractiveDualArmIK:
                 # This prevents the initial huge displacement that causes shaking
                 self._update_markers()
                 mujoco.mj_forward(self.mj_model, self.mj_data)
+                self._debug_marker_state(prefix="Startup marker state before viewer sync")
                 
                 # Sync viewer AFTER setting mocap positions
                 viewer.sync()
