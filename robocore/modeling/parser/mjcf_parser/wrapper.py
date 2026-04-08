@@ -55,8 +55,12 @@ class MJCFParser:
         self.model = mujoco.MjModel.from_xml_path(str(self.mjcf_path))
         self.data = mujoco.MjData(self.model)
 
-        # Parse joint information (requires self.model to be loaded)
-        self.joints = self._parse_joints()
+        # Parse joint information (requires self.model to be loaded).
+        # Keep two views:
+        # - actuated_joints: true MuJoCo joints that consume q entries
+        # - joints: full body-to-body kinematic tree including fixed segments
+        self.actuated_joints = self._parse_actuated_joints()
+        self.joints = self._build_kinematic_joints()
         self.link_mesh_map = {}
 
     def _get_joint_type(self, jnt_type: int) -> str:
@@ -72,85 +76,115 @@ class MJCFParser:
         }
         return type_map.get(jnt_type, "fixed")
 
-    def _parse_joints(self) -> List[JointSpec]:
+    def _body_name(self, body_id: int) -> str:
+        body_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, body_id)
+        if body_name is None:
+            return f"body_{body_id}"
+        return body_name
+
+    def _body_origin(self, body_id: int) -> tuple[list[float], list[float]]:
+        # MuJoCo stores a body's pose relative to its parent body.
+        origin_xyz = self.model.body_pos[body_id].copy().tolist()
+        quat = self.model.body_quat[body_id].copy()
+        origin_rpy = quaternion_to_rpy(quaternion_reorder(quat))
+        return origin_xyz, origin_rpy
+
+    def _parse_actuated_joints(self) -> List[JointSpec]:
         """
-        :return: List of JointSpec objects
+        :return: List of MuJoCo joints that contribute configuration DOF
         """
-        joints = []
-        idx = 0
+        joints: List[JointSpec] = []
 
         for i in range(self.model.njnt):
-            # Get joint name
             joint_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT, i)
             if joint_name is None:
                 joint_name = f"joint_{i}"
 
-            # Get joint type
             jnt_type = self.model.jnt_type[i]
             joint_type = self._get_joint_type(jnt_type)
 
-            # Get body IDs
             body_id = self.model.jnt_bodyid[i]
             parent_body_id = self.model.body_parentid[body_id]
 
-            # Get body names
-            child = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, body_id)
-            if child is None:
-                child = f"body_{body_id}"
+            parent = self._body_name(parent_body_id)
+            child = self._body_name(body_id)
+            axis = self.model.jnt_axis[i].copy().tolist()
+            origin_xyz, origin_rpy = self._body_origin(body_id)
 
-            parent = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, parent_body_id)
-            if parent is None:
-                parent = f"body_{parent_body_id}"
-
-            # Get joint axis (in body frame)
-            axis = self.model.jnt_axis[i].copy()
-            axis = axis.tolist()
-
-            # Get body's position and orientation relative to parent
-            # MuJoCo stores body_pos as position relative to parent body
-            # and body_quat as quaternion relative to parent body
-            pos = self.model.body_pos[body_id].copy()
-            origin_xyz = pos.tolist()
-
-            # Get body's relative quaternion and convert to RPY
-            # MuJoCo uses [w, x, y, z] format
-            quat = self.model.body_quat[body_id].copy()
-            origin_rpy = quaternion_to_rpy(quaternion_reorder(quat))
-
-            # Get joint limits
             limit_lower = None
             limit_upper = None
             if self.model.jnt_limited[i]:
                 limit_lower = float(self.model.jnt_range[i, 0])
                 limit_upper = float(self.model.jnt_range[i, 1])
 
-            joint = JointSpec(
-                name=joint_name,
-                index=idx,
-                joint_type=joint_type,
-                parent=parent,
-                child=child,
-                axis=axis,
-                origin_xyz=origin_xyz,
-                origin_rpy=origin_rpy,
-                limit_lower=limit_lower,
-                limit_upper=limit_upper
+            joints.append(
+                JointSpec(
+                    name=joint_name,
+                    index=len(joints),
+                    joint_type=joint_type,
+                    parent=parent,
+                    child=child,
+                    axis=axis,
+                    origin_xyz=origin_xyz,
+                    origin_rpy=origin_rpy,
+                    limit_lower=limit_lower,
+                    limit_upper=limit_upper,
+                )
             )
 
-            joints.append(joint)
+        return joints
+
+    def _build_kinematic_joints(self) -> List[JointSpec]:
+        """
+        :return: Full kinematic tree including fixed body-to-body segments
+        """
+        joints: List[JointSpec] = []
+        body_to_actuated: Dict[int, List[JointSpec]] = {}
+
+        for joint in self.actuated_joints:
+            body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, joint.child)
+            body_to_actuated.setdefault(body_id, []).append(joint)
+
+        # Skip body 0 ("world"), add one edge per child body.
+        for body_id in range(1, self.model.nbody):
+            parent_body_id = self.model.body_parentid[body_id]
+            parent = self._body_name(parent_body_id)
+            child = self._body_name(body_id)
+
+            explicit_joints = body_to_actuated.get(body_id)
+            if explicit_joints:
+                joints.extend(explicit_joints)
+                continue
+
+            origin_xyz, origin_rpy = self._body_origin(body_id)
+            joints.append(
+                JointSpec(
+                    name=f"{parent}_to_{child}_fixed",
+                    index=-1,
+                    joint_type="fixed",
+                    parent=parent,
+                    child=child,
+                    axis=[0.0, 0.0, 0.0],
+                    origin_xyz=origin_xyz,
+                    origin_rpy=origin_rpy,
+                    limit_lower=None,
+                    limit_upper=None,
+                )
+            )
+
         return joints
 
     def get_joint_names(self) -> List[JointSpec]:
         """
         :return: List of JointSpec objects
         """
-        return self.joints
+        return self.actuated_joints
 
     def get_joint_limits(self) -> np.ndarray:
         """
         :return: Array of joint limits with shape (n_joints, 2) where each row is [lower, upper]
         """
-        return np.array([(j.limit_lower, j.limit_upper) for j in self.joints])
+        return np.array([(j.limit_lower, j.limit_upper) for j in self.actuated_joints])
 
     def get_link_names(self) -> List[str]:
         """

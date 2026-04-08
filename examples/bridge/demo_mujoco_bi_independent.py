@@ -15,12 +15,25 @@ def main():
     """Demo 1: Independent dual-arm IK control."""
     
     # Model path (Bessica is a dual-arm robot)
-    mjcf_path = get_model_path("Bessica_D", version="v1_1", variant="skeleton_interactive", model_format="mjcf")
-    # mjcf_path = get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="mjcf")
+    mjcf_path = get_model_path("Alicia_M", version="v1_1", variant="bimanual_interactive", model_format="mjcf")
+    # mjcf_path = get_model_path("Bessica_D", version="v1_1", variant="covered_interactive", model_format="mjcf")
+    
     
     # End-effector links
-    left_end = "left_arm_link7"
-    right_end = "right_arm_link7"
+    # left_end = "left_arm_link7"
+    # right_end = "right_arm_link7"
+
+    left_end = "tool0_site_l"
+    right_end = "tool0_site_r"
+
+
+    # # Model path (Bessica is a dual-arm robot)
+    # mjcf_path = get_model_path("Bessica_D", version="v1_1", variant="skeleton_interactive", model_format="mjcf")
+    # # mjcf_path = get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="mjcf")
+    
+    # # End-effector links
+    # left_end = "left_arm_link7"
+    # right_end = "right_arm_link7"
     
     # Create interactive IK controller
     controller = InteractiveDualArmIK(mjcf_path, left_end, right_end)

@@ -16,7 +16,8 @@ def main():
     """Demo 3: Mirror symmetric dual-arm control."""
     
     # Model path (Bessica is a dual-arm robot)
-    mjcf_path = get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="mjcf")
+    mjcf_path = get_model_path("Bessica_D", version="v1_1", variant="skeleton_interactive", model_format="mjcf")
+    # mjcf_path = get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="mjcf")
     
     # End-effector links
     left_end = "left_arm_link7"
