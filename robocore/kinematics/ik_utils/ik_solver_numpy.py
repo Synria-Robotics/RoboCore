@@ -140,6 +140,8 @@ class IKSolverNumPy:
         if target_pose.shape[0] != q0.shape[0]:
             raise ValueError(f"Batch size mismatch: target_pose {target_pose.shape[0]} vs q0 {q0.shape[0]}")
 
+        q0 = self._apply_joint_limits_batch(q0)
+
         result = self._solve_batch(
             target_pose, q0,
             pos_weight=pos_weight,
@@ -467,6 +469,8 @@ class IKSolverNumPy:
         
         if q0.shape[0] != self.n:
             raise ValueError(f"Expected q0 with {self.n} elements, got {q0.shape[0]}")
+
+        q0 = self._apply_joint_limits(q0)
         
         # Extract target position and rotation
         R_target = target_pose[:3, :3]
@@ -917,4 +921,14 @@ class IKSolverNumPy:
                     q_clamped[js.index] = max(js.limit_lower, q_clamped[js.index])
                 if js.limit_upper is not None:
                     q_clamped[js.index] = min(js.limit_upper, q_clamped[js.index])
+        return q_clamped
+
+    def _apply_joint_limits_batch(self, q_batch: np.ndarray) -> np.ndarray:
+        """Clamp a batch of joint configurations to limits."""
+        q_clamped = q_batch.copy()
+        for js in self.model._chain_actuated:
+            if js.limit_lower is not None:
+                q_clamped[:, js.index] = np.maximum(js.limit_lower, q_clamped[:, js.index])
+            if js.limit_upper is not None:
+                q_clamped[:, js.index] = np.minimum(js.limit_upper, q_clamped[:, js.index])
         return q_clamped

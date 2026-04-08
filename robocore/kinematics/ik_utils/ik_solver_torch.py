@@ -166,6 +166,8 @@ class IKSolverTorch:
         if target_pose.shape[0] != q0.shape[0]:
             raise ValueError(f"Batch size mismatch: target_pose {target_pose.shape[0]} vs q0 {q0.shape[0]}")
 
+        q0 = self._apply_joint_limits(q0)
+
         # Common kwargs for _solve_single
         single_kwargs = dict(
             method=method,
@@ -259,6 +261,7 @@ class IKSolverTorch:
             torch.manual_seed(random_seed)
 
         base_q0 = q0.clone() if torch.is_tensor(q0) else torch.tensor(q0, dtype=self.dtype, device=self.device)
+        base_q0 = self._apply_joint_limits(base_q0)
         if base_q0.numel() != self.n:
             raise ValueError(f"q0 size {base_q0.numel()} != dof {self.n}")
 
@@ -612,10 +615,16 @@ class IKSolverTorch:
         out = q.clone()
         for js in self.model._chain_actuated:  # type: ignore[attr-defined]
             if js.limit_lower is not None or js.limit_upper is not None:
-                if js.limit_lower is not None:
-                    out[js.index] = torch.clamp(out[js.index], min=float(js.limit_lower))
-                if js.limit_upper is not None:
-                    out[js.index] = torch.clamp(out[js.index], max=float(js.limit_upper))
+                if out.ndim == 1:
+                    if js.limit_lower is not None:
+                        out[js.index] = torch.clamp(out[js.index], min=float(js.limit_lower))
+                    if js.limit_upper is not None:
+                        out[js.index] = torch.clamp(out[js.index], max=float(js.limit_upper))
+                else:
+                    if js.limit_lower is not None:
+                        out[:, js.index] = torch.clamp(out[:, js.index], min=float(js.limit_lower))
+                    if js.limit_upper is not None:
+                        out[:, js.index] = torch.clamp(out[:, js.index], max=float(js.limit_upper))
         return out
 
     # ==================== Partial FK (single) ====================
@@ -695,7 +704,7 @@ class IKSolverTorch:
         :return: dict with q, success, iters, method, pos_err, ori_err
         """
         B, n = q_init_batch.shape
-        q = q_init_batch.clone()
+        q = self._apply_joint_limits(q_init_batch.clone())
         best_q = q.clone()
         best_err = torch.full((B,), float('inf'), dtype=self.dtype, device=self.device)
         success = torch.zeros(B, dtype=torch.bool, device=self.device)
