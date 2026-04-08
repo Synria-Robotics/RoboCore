@@ -17,6 +17,25 @@ if str(REPO_ROOT) not in sys.path:
 from robocore.bridge.sim.mujoco.interactive_dual_arm import InteractiveDualArmIK
 from synriard import get_model_path
 
+INITIAL_JOINT_STATE = {
+    "joint1_l": 1.57,
+    "joint2_l": 0.785,
+    "joint3_l": -1.57,
+    "joint4_l": 0,#-1.18,
+    "joint5_l": 0.0,
+    "joint6_l": 0.0,
+    "joint7_l": 0.0,
+    "joint8_l": 0.0,
+    "joint1_r": -1.57,#1.21,
+    "joint2_r": 0.785,
+    "joint3_r": -1.57,
+    "joint4_r": 0.0,
+    "joint5_r": 0.0,
+    "joint6_r": 0.0,
+    "joint7_r": 0.0,
+    "joint8_r": 0.0,
+}
+
 
 def main():
     """Demo 2: Cooperative dual-arm control with relative constraint."""
@@ -33,7 +52,12 @@ def main():
     left_end = "tool0_site_l"
     right_end = "tool0_site_r"
     # Create interactive IK controller
-    controller = InteractiveDualArmIK(mjcf_path, left_end, right_end)
+    controller = InteractiveDualArmIK(
+        mjcf_path,
+        left_end,
+        right_end,
+        initial_joint_state=INITIAL_JOINT_STATE,
+    )
     
     # Run in cooperative mode
     controller.run(mode='relative')

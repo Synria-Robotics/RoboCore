@@ -30,7 +30,13 @@ class InteractiveDualArmIK:
     :param right_end_link: Right arm end-effector link name
     """
     
-    def __init__(self, mjcf_path: str, left_end_link: str, right_end_link: str):
+    def __init__(
+        self,
+        mjcf_path: str,
+        left_end_link: str,
+        right_end_link: str,
+        initial_joint_state: Optional[Dict[str, float]] = None,
+    ):
         if not MUJOCO_AVAILABLE:
             raise ImportError("MuJoCo is required. Install with: pip install mujoco")
         
@@ -73,9 +79,11 @@ class InteractiveDualArmIK:
         self.left_qpos_indices = self._joint_qpos_indices(self.left_model)
         self.right_qpos_indices = self._joint_qpos_indices(self.right_model)
         
+        # Optional startup joint configuration (joint name -> value in qpos units).
+        self.initial_joint_state = dict(initial_joint_state or {})
+
         # Current joint configuration
-        self.q_left = np.zeros(self.left_model.num_chain_dof)
-        self.q_right = np.zeros(self.right_model.num_chain_dof)
+        self.q_left, self.q_right = self._build_initial_joint_configuration()
         
         # Target poses
         self.T_left_target = None
@@ -104,10 +112,32 @@ class InteractiveDualArmIK:
         # T_rel = T_left^-1 @ T_right
         self.T_rel_grasp = None
         self._initialize_relative_transform()
+
+        # Save startup joint values for reset behavior.
+        self.q_left_initial = self.q_left.copy()
+        self.q_right_initial = self.q_right.copy()
         
         self.is_running = False
         self.viewer = None
         self.reset_requested = False  # Flag for reset request
+
+    def _build_initial_joint_configuration(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Build initial left/right chain vectors from optional joint-name map."""
+        q_left = np.zeros(self.left_model.num_chain_dof)
+        q_right = np.zeros(self.right_model.num_chain_dof)
+
+        for i, js in enumerate(self.left_model._chain_actuated):
+            if js.name in self.initial_joint_state:
+                q_left[i] = float(self.initial_joint_state[js.name])
+        for i, js in enumerate(self.right_model._chain_actuated):
+            if js.name in self.initial_joint_state:
+                q_right[i] = float(self.initial_joint_state[js.name])
+
+        # Keep MuJoCo state aligned with IK startup state.
+        self.mj_data.qpos[self.left_qpos_indices[: self.left_model.num_chain_dof]] = q_left
+        self.mj_data.qpos[self.right_qpos_indices[: self.right_model.num_chain_dof]] = q_right
+        mujoco.mj_forward(self.mj_model, self.mj_data)
+        return q_left, q_right
     
     def _initialize_mocap_ids(self):
         """Find mocap body IDs by name."""
@@ -624,9 +654,9 @@ class InteractiveDualArmIK:
         """
         print("\n🔄 Resetting to initial state...")
 
-        # Reset joint angles to zero
-        self.q_left = np.zeros(self.left_model.num_chain_dof)
-        self.q_right = np.zeros(self.right_model.num_chain_dof)
+        # Reset joint angles to startup configuration
+        self.q_left = self.q_left_initial.copy()
+        self.q_right = self.q_right_initial.copy()
 
         # Reset target poses to initial values
         self.T_left_target = self.T_left_initial.copy()
