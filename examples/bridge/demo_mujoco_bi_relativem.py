@@ -56,6 +56,7 @@ def main():
         left_end,
         right_end,
         initial_joint_state=INITIAL_JOINT_STATE,
+        enable_gripper_ui=True,
     )
     
     # Run in cooperative mode

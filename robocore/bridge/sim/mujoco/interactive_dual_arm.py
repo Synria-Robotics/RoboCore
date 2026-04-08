@@ -12,6 +12,15 @@ from typing import Optional, Dict, Tuple
 import time
 
 try:
+    import tkinter as tk
+    from tkinter import ttk
+    TK_AVAILABLE = True
+except ImportError:
+    tk = None
+    ttk = None
+    TK_AVAILABLE = False
+
+try:
     import mujoco
     import mujoco.viewer
     MUJOCO_AVAILABLE = True
@@ -36,6 +45,8 @@ class InteractiveDualArmIK:
         left_end_link: str,
         right_end_link: str,
         initial_joint_state: Optional[Dict[str, float]] = None,
+        initial_gripper_values: Optional[Dict[str, Optional[float]]] = None,
+        enable_gripper_ui: bool = False,
     ):
         if not MUJOCO_AVAILABLE:
             raise ImportError("MuJoCo is required. Install with: pip install mujoco")
@@ -82,6 +93,12 @@ class InteractiveDualArmIK:
         # Optional startup joint configuration (joint name -> value in qpos units).
         self.initial_joint_state = dict(initial_joint_state or {})
 
+        # Optional startup gripper configuration.
+        self._initialize_gripper_controls(
+            initial_gripper_values=initial_gripper_values,
+            enable_gripper_ui=enable_gripper_ui,
+        )
+
         # Current joint configuration
         self.q_left, self.q_right = self._build_initial_joint_configuration()
         
@@ -121,6 +138,258 @@ class InteractiveDualArmIK:
         self.viewer = None
         self.reset_requested = False  # Flag for reset request
 
+    def _initialize_gripper_controls(
+        self,
+        initial_gripper_values: Optional[Dict[str, Optional[float]]],
+        enable_gripper_ui: bool,
+    ):
+        """Prepare gripper state for visualization and optional SDK streaming."""
+        initial_gripper_values = dict(initial_gripper_values or {})
+
+        self.left_gripper_value = self._sanitize_gripper_value(
+            initial_gripper_values.get("left", 0.0)
+        )
+        self.right_gripper_value = self._sanitize_gripper_value(
+            initial_gripper_values.get("right", 0.0)
+        )
+        self.left_gripper_active = initial_gripper_values.get("left") is not None
+        self.right_gripper_active = initial_gripper_values.get("right") is not None
+
+        self.left_gripper_initial = self.left_gripper_value
+        self.right_gripper_initial = self.right_gripper_value
+        self.left_gripper_initial_active = self.left_gripper_active
+        self.right_gripper_initial_active = self.right_gripper_active
+
+        self.enable_gripper_ui = bool(enable_gripper_ui and TK_AVAILABLE)
+        if enable_gripper_ui and not TK_AVAILABLE:
+            print("⚠️  tkinter not available, gripper UI disabled")
+
+        self.gripper_ui_root = None
+        self.left_gripper_var = None
+        self.right_gripper_var = None
+        self.left_gripper_value_label = None
+        self.right_gripper_value_label = None
+        self._updating_gripper_ui = False
+
+        self.left_gripper_entries = self._resolve_gripper_joint_entries(
+            ("left_finger_l", "joint7_l"),
+            ("right_finger_l", "joint8_l"),
+        )
+        self.right_gripper_entries = self._resolve_gripper_joint_entries(
+            ("left_finger_r", "joint7_r"),
+            ("right_finger_r", "joint8_r"),
+        )
+
+        if self.left_gripper_entries or self.right_gripper_entries:
+            print("✓ Gripper joints found for interactive finger control")
+        else:
+            print("⚠️  No gripper joints found in MuJoCo model; gripper UI will only affect SDK streaming")
+
+    def _sanitize_gripper_value(self, value: Optional[float]) -> float:
+        """Clamp gripper command to the SDK's 0..1000 range."""
+        if value is None:
+            return 0.0
+        return float(np.clip(float(value), 0.0, 1000.0))
+
+    def _resolve_gripper_joint_entries(self, *joint_alias_groups) -> list:
+        """Resolve one arm's finger joints to qpos entries and open/closed limits."""
+        entries = []
+        for aliases in joint_alias_groups:
+            joint_id = -1
+            for name in aliases:
+                joint_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_JOINT, name)
+                if joint_id != -1:
+                    break
+
+            if joint_id == -1:
+                continue
+
+            lo, hi = sorted(self.mj_model.jnt_range[joint_id].tolist())
+            if lo <= 0.0 <= hi:
+                closed_pos = 0.0
+            else:
+                closed_pos = lo if abs(lo) <= abs(hi) else hi
+            open_pos = lo if abs(lo - closed_pos) >= abs(hi - closed_pos) else hi
+
+            entries.append(
+                {
+                    "qpos_index": int(self.mj_model.jnt_qposadr[joint_id]),
+                    "closed_pos": float(closed_pos),
+                    "open_pos": float(open_pos),
+                }
+            )
+        return entries
+
+    def _gripper_value_to_qpos(self, gripper_value: float, joint_entry: Dict[str, float]) -> float:
+        """Map SDK gripper command 0..1000 to one MuJoCo finger slide joint."""
+        openness = self._sanitize_gripper_value(gripper_value) / 1000.0
+        return joint_entry["closed_pos"] + openness * (
+            joint_entry["open_pos"] - joint_entry["closed_pos"]
+        )
+
+    def _apply_gripper_targets_to_mujoco(self):
+        """Apply the current left/right gripper commands to MuJoCo finger joints."""
+        for entry in self.left_gripper_entries:
+            self.mj_data.qpos[entry["qpos_index"]] = self._gripper_value_to_qpos(
+                self.left_gripper_value, entry
+            )
+        for entry in self.right_gripper_entries:
+            self.mj_data.qpos[entry["qpos_index"]] = self._gripper_value_to_qpos(
+                self.right_gripper_value, entry
+            )
+
+    def _set_gripper_target(self, arm: str, value: float, activate: bool = True):
+        """Update one gripper target from the UI or reset flow."""
+        sanitized = self._sanitize_gripper_value(value)
+        if arm == "left":
+            self.left_gripper_value = sanitized
+            self.left_gripper_active = activate
+        elif arm == "right":
+            self.right_gripper_value = sanitized
+            self.right_gripper_active = activate
+        else:
+            raise ValueError(f"Unknown arm '{arm}'")
+
+    def get_gripper_targets_for_streaming(self) -> Tuple[Optional[int], Optional[int]]:
+        """Return SDK gripper targets, keeping inactive sides untouched."""
+        left_value = int(round(self.left_gripper_value)) if self.left_gripper_active else None
+        right_value = int(round(self.right_gripper_value)) if self.right_gripper_active else None
+        return left_value, right_value
+
+    def _create_gripper_slider_row(self, parent, title: str, initial_value: float, callback):
+        """Create one slider row for the sidecar gripper window."""
+        row = ttk.Frame(parent)
+        row.pack(fill="x", pady=6)
+
+        ttk.Label(row, text=title, width=12).pack(side="left")
+        value_var = tk.DoubleVar(value=initial_value)
+        slider = ttk.Scale(
+            row,
+            from_=0.0,
+            to=1000.0,
+            orient="horizontal",
+            variable=value_var,
+            command=callback,
+        )
+        slider.pack(side="left", fill="x", expand=True, padx=8)
+        value_label = ttk.Label(row, width=12)
+        value_label.pack(side="left")
+
+        return value_var, value_label
+
+    def _refresh_gripper_ui_labels(self):
+        """Refresh the textual value labels in the sidecar gripper window."""
+        if self.left_gripper_value_label is not None:
+            suffix = "" if self.left_gripper_active else " (idle)"
+            self.left_gripper_value_label.config(
+                text=f"{int(round(self.left_gripper_value))}{suffix}"
+            )
+        if self.right_gripper_value_label is not None:
+            suffix = "" if self.right_gripper_active else " (idle)"
+            self.right_gripper_value_label.config(
+                text=f"{int(round(self.right_gripper_value))}{suffix}"
+            )
+
+    def _sync_gripper_ui_values(self):
+        """Push internal gripper state back into the UI without re-triggering control."""
+        if self.gripper_ui_root is None:
+            return
+
+        self._updating_gripper_ui = True
+        try:
+            if self.left_gripper_var is not None:
+                self.left_gripper_var.set(self.left_gripper_value)
+            if self.right_gripper_var is not None:
+                self.right_gripper_var.set(self.right_gripper_value)
+            self._refresh_gripper_ui_labels()
+        finally:
+            self._updating_gripper_ui = False
+
+    def _on_gripper_slider_change(self, arm: str, value: str):
+        """Handle one gripper slider move from the sidecar window."""
+        if self._updating_gripper_ui:
+            return
+        self._set_gripper_target(arm, float(value), activate=True)
+        self._refresh_gripper_ui_labels()
+
+    def _close_gripper_ui(self):
+        """Destroy the sidecar gripper window if it exists."""
+        root = self.gripper_ui_root
+        self.gripper_ui_root = None
+        self.left_gripper_var = None
+        self.right_gripper_var = None
+        self.left_gripper_value_label = None
+        self.right_gripper_value_label = None
+        if root is not None:
+            try:
+                root.destroy()
+            except Exception:
+                pass
+
+    def _create_gripper_ui(self):
+        """Create a small sidecar window for left/right gripper control."""
+        if not self.enable_gripper_ui or self.gripper_ui_root is not None:
+            return
+
+        try:
+            root = tk.Tk()
+        except Exception as exc:
+            print(f"⚠️  Failed to create gripper UI: {exc}")
+            self.enable_gripper_ui = False
+            return
+
+        root.title("MuJoCo Dual Gripper Control")
+        root.geometry("430x170")
+        root.protocol("WM_DELETE_WINDOW", self._close_gripper_ui)
+
+        frame = ttk.Frame(root, padding=10)
+        frame.pack(fill="both", expand=True)
+
+        ttk.Label(
+            frame,
+            text="Grippers: 0 = closed, 1000 = open",
+        ).pack(anchor="w", pady=(0, 8))
+
+        self.left_gripper_var, self.left_gripper_value_label = self._create_gripper_slider_row(
+            frame,
+            "Left gripper",
+            self.left_gripper_value,
+            lambda value: self._on_gripper_slider_change("left", value),
+        )
+        self.right_gripper_var, self.right_gripper_value_label = self._create_gripper_slider_row(
+            frame,
+            "Right gripper",
+            self.right_gripper_value,
+            lambda value: self._on_gripper_slider_change("right", value),
+        )
+
+        ttk.Button(
+            frame,
+            text="Reset grippers",
+            command=self._reset_gripper_targets,
+        ).pack(anchor="e", pady=(10, 0))
+
+        self.gripper_ui_root = root
+        self._sync_gripper_ui_values()
+
+    def _pump_gripper_ui(self):
+        """Keep the sidecar gripper window responsive during the MuJoCo loop."""
+        if self.gripper_ui_root is None:
+            return
+        try:
+            self.gripper_ui_root.update_idletasks()
+            self.gripper_ui_root.update()
+        except Exception:
+            self._close_gripper_ui()
+
+    def _reset_gripper_targets(self):
+        """Restore startup gripper values and activation flags."""
+        self.left_gripper_value = self.left_gripper_initial
+        self.right_gripper_value = self.right_gripper_initial
+        self.left_gripper_active = self.left_gripper_initial_active
+        self.right_gripper_active = self.right_gripper_initial_active
+        self._sync_gripper_ui_values()
+
     def _build_initial_joint_configuration(self) -> Tuple[np.ndarray, np.ndarray]:
         """Build initial left/right chain vectors from optional joint-name map."""
         q_left = np.zeros(self.left_model.num_chain_dof)
@@ -136,6 +405,7 @@ class InteractiveDualArmIK:
         # Keep MuJoCo state aligned with IK startup state.
         self.mj_data.qpos[self.left_qpos_indices[: self.left_model.num_chain_dof]] = q_left
         self.mj_data.qpos[self.right_qpos_indices[: self.right_model.num_chain_dof]] = q_right
+        self._apply_gripper_targets_to_mujoco()
         mujoco.mj_forward(self.mj_model, self.mj_data)
         return q_left, q_right
     
@@ -476,6 +746,7 @@ class InteractiveDualArmIK:
         # Right arm first, left arm second
         self.mj_data.qpos[self.left_qpos_indices[:nq_left]] = self.q_left
         self.mj_data.qpos[self.right_qpos_indices[:nq_right]] = self.q_right
+        self._apply_gripper_targets_to_mujoco()
         
         # Forward kinematics in MuJoCo
         mujoco.mj_forward(self.mj_model, self.mj_data)
@@ -657,6 +928,7 @@ class InteractiveDualArmIK:
         # Reset joint angles to startup configuration
         self.q_left = self.q_left_initial.copy()
         self.q_right = self.q_right_initial.copy()
+        self._reset_gripper_targets()
 
         # Reset target poses to initial values
         self.T_left_target = self.T_left_initial.copy()
@@ -707,11 +979,17 @@ class InteractiveDualArmIK:
         
         print(f"\n  - Press SPACE to reset")
         print(f"  - Press ESC to exit\n")
+        if self.enable_gripper_ui:
+            print("  - Side window sliders: left/right gripper control")
+            print("    Move a slider once to start streaming that gripper")
+            print("")
         
         # Try passive viewer first, fallback on macOS mjpython error
         import platform
         
         try:
+            self._create_gripper_ui()
+
             # Launch viewer
             with mujoco.viewer.launch_passive(self.mj_model, self.mj_data) as viewer:
                 self.viewer = viewer
@@ -739,6 +1017,7 @@ class InteractiveDualArmIK:
 
                 while viewer.is_running() and self.is_running:
                     step_start = time.time()
+                    self._pump_gripper_ui()
                     
                     # Check for reset: either time went backwards OR qpos was reset to zero
                     current_time = self.mj_data.time
@@ -781,5 +1060,7 @@ class InteractiveDualArmIK:
                 raise
             else:
                 raise
+        finally:
+            self._close_gripper_ui()
         
         print("\n✓ Visualization closed")
