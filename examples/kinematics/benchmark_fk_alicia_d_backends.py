@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 
 import robocore as rc
+from robocore.utils.backend import get_backend_manager
 from robocore.kinematics.fk_utils.fk_solver_numpy import FKSolverNumPy
 from robocore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
 from robocore.kinematics.fk_utils.fk_solver_cpp import FKSolverCpp
@@ -90,7 +91,11 @@ def main() -> None:
     parser.add_argument("--repeats", type=int, default=7)
     parser.add_argument("--inner-single", type=int, default=2000, help="FK calls per trial (batch=1).")
     parser.add_argument("--inner-batch", type=int, default=200, help="FK calls per trial (batch=100).")
-    parser.add_argument("--device", default="cpu", help="Torch device (e.g. cpu, cuda).")
+    parser.add_argument(
+        "--device",
+        default=None,
+        help="Torch device (cpu, cuda, cuda:0, …). Default: auto (CUDA if available, else CPU).",
+    )
     args = parser.parse_args()
 
     urdf = args.urdf or _default_urdf()
@@ -99,13 +104,11 @@ def main() -> None:
         print("Pass --urdf or clone Synria-Robot-Descriptions next to RoboCore.", file=sys.stderr)
         sys.exit(1)
 
+    # NumPy + C++ first while global backend stays numpy (torch would poison array types).
     rc.set_backend("numpy")
     model_np = RobotModel(str(urdf), base_link=args.base_link, end_link=args.end_link)
     fk_np = FKSolverNumPy(model_np)
-
-    rc.set_backend("torch", device=args.device)
-    model_th = RobotModel(str(urdf), base_link=args.base_link, end_link=args.end_link)
-    fk_th = FKSolverTorch(model_th)
+    fk_cpp = FKSolverCpp(model_np)
 
     rng = np.random.default_rng(0)
     n = model_np.num_chain_dof
@@ -114,19 +117,25 @@ def main() -> None:
 
     atol, rtol = 1e-9, 1e-9
 
+    rc.set_backend("numpy")
     out_np1 = fk_np.solve(q1, return_end_only=True)
+    out_np100 = fk_np.solve(q100, return_end_only=True)
+
+    out_c1 = fk_cpp.solve(q1, return_end_only=True)
+    out_c100 = fk_cpp.solve(q100, return_end_only=True)
+
+    rc.set_backend("torch", device=args.device)
+    model_th = RobotModel(str(urdf), base_link=args.base_link, end_link=args.end_link)
+    fk_th = FKSolverTorch(model_th)
+    torch_device_str = get_backend_manager().get_device()
+
     out_th1 = fk_th.solve(q1, return_end_only=True, device=args.device)
     if hasattr(out_th1, "detach"):
         out_th1 = out_th1.detach().cpu().numpy()
 
-    out_np100 = fk_np.solve(q100, return_end_only=True)
     out_th100 = fk_th.solve(q100, return_end_only=True, device=args.device)
     if hasattr(out_th100, "detach"):
         out_th100 = out_th100.detach().cpu().numpy()
-
-    fk_cpp = FKSolverCpp(model_np)
-    out_c1 = fk_cpp.solve(q1, return_end_only=True)
-    out_c100 = fk_cpp.solve(q100, return_end_only=True)
 
     # --- Numeric correctness: poses and diffs (reference = NumPy) ---
     print("=" * 72)
@@ -158,47 +167,54 @@ def main() -> None:
     print("=" * 72)
     print()
 
-    # Warmup
+    # Warmup: numpy → cpp → torch (same order as correctness and timing).
+    rc.set_backend("numpy")
     for _ in range(20):
         fk_np.solve(q1, return_end_only=True)
-        fk_th.solve(q1, return_end_only=True, device=args.device)
     for _ in range(20):
         fk_cpp.solve(q1, return_end_only=True)
+    rc.set_backend("torch", device=args.device)
+    for _ in range(20):
+        fk_th.solve(q1, return_end_only=True, device=args.device)
 
+    rc.set_backend("numpy")
     t_np_1 = _bench(lambda: fk_np.solve(q1, return_end_only=True), repeats=args.repeats, inner_loops=args.inner_single)
+    t_cpp_1 = _bench(
+        lambda: fk_cpp.solve(q1, return_end_only=True), repeats=args.repeats, inner_loops=args.inner_single
+    )
+    rc.set_backend("torch", device=args.device)
     t_th_1 = _bench(
         lambda: fk_th.solve(q1, return_end_only=True, device=args.device),
         repeats=args.repeats,
         inner_loops=args.inner_single,
     )
-    t_cpp_1 = _bench(
-        lambda: fk_cpp.solve(q1, return_end_only=True), repeats=args.repeats, inner_loops=args.inner_single
-    )
 
+    rc.set_backend("numpy")
     t_np_100 = _bench(lambda: fk_np.solve(q100, return_end_only=True), repeats=args.repeats, inner_loops=args.inner_batch)
+    t_cpp_100 = _bench(
+        lambda: fk_cpp.solve(q100, return_end_only=True), repeats=args.repeats, inner_loops=args.inner_batch
+    )
+    rc.set_backend("torch", device=args.device)
     t_th_100 = _bench(
         lambda: fk_th.solve(q100, return_end_only=True, device=args.device),
         repeats=args.repeats,
         inner_loops=args.inner_batch,
-    )
-    t_cpp_100 = _bench(
-        lambda: fk_cpp.solve(q100, return_end_only=True), repeats=args.repeats, inner_loops=args.inner_batch
     )
 
     def ms_per_call(t_sec: float, inner: int) -> float:
         return t_sec / inner * 1e3
 
     print(f"Model: {urdf.name}  chain DOF={n}  end_link={args.end_link}")
-    print(f"Torch device: {args.device}")
+    print(f"Torch device: {torch_device_str}" + ("" if args.device is None else f" (arg --device={args.device!r})"))
     print()
     print(f"{'backend':<10} {'batch=1 (ms/call)':<22} {'batch=100 (ms/call)':<24}")
     print("-" * 56)
     print(f"{'numpy':<10} {ms_per_call(t_np_1, args.inner_single):<22.6f} {ms_per_call(t_np_100, args.inner_batch):<24.6f}")
-    print(f"{'torch':<10} {ms_per_call(t_th_1, args.inner_single):<22.6f} {ms_per_call(t_th_100, args.inner_batch):<24.6f}")
     print(
         f"{'cpp+eigen':<10} {ms_per_call(t_cpp_1, args.inner_single):<22.6f} "
         f"{ms_per_call(t_cpp_100, args.inner_batch):<24.6f}"
     )
+    print(f"{'torch':<10} {ms_per_call(t_th_1, args.inner_single):<22.6f} {ms_per_call(t_th_100, args.inner_batch):<24.6f}")
 
 
 if __name__ == "__main__":

@@ -125,7 +125,6 @@ Custom location:
 
 ```bash
 export EIGEN3_INCLUDE_DIR="/path/to/include/eigen3"   # must contain Eigen/Dense
-pip install -e .
 ```
 
 ### Clone and install
@@ -134,6 +133,9 @@ pip install -e .
 # Clone repository
 git clone https://github.com/Synria-Robotics/RoboCore.git
 cd RoboCore
+
+conda create -n synria python=3.10 -y
+conda activate synria
 
 # Install (development mode)
 pip install -e .

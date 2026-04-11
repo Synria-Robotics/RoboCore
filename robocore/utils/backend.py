@@ -58,14 +58,14 @@ class BackendManager:
     def set_backend(
         self,
         backend: Literal['numpy', 'torch', 'cpp'] = 'numpy',
-        device: Any = 'cpu',
+        device: Any = None,
         dtype: Optional[Any] = None
     ):
         """
         Set the global backend.
 
         :param backend: 'numpy', 'torch', or 'cpp'
-        :param device: 'cpu', 'cuda', 'cuda:0', etc. or torch.device object (only for torch)
+        :param device: For torch, None picks CUDA if available else CPU; or 'cpu', 'cuda', 'cuda:0', torch.device. Ignored for numpy/cpp (CPU).
         :param dtype: numpy.float32/float64 or torch.float32/float64
         """
         if backend not in ('numpy', 'torch', 'cpp'):
@@ -79,6 +79,13 @@ class BackendManager:
             # Convert torch.device object to string if needed
             if self._torch_available and isinstance(device, self._torch.device):
                 device = str(device)
+
+            if device is None:
+                device = (
+                    'cuda'
+                    if self._torch.cuda.is_available()
+                    else 'cpu'
+                )
 
             # Validate device
             if device.startswith('cuda'):
@@ -243,14 +250,14 @@ def get_backend_manager() -> BackendManager:
 # Convenience functions
 def set_backend(
     backend: Literal['numpy', 'torch', 'cpp'] = 'numpy',
-    device: Any = 'cpu',
+    device: Any = None,
     dtype: Optional[Any] = None
 ):
     """
     Set the global backend.
 
     :param backend: 'numpy', 'torch', or 'cpp'
-    :param device: 'cpu', 'cuda', 'cuda:0', etc. or torch.device object
+    :param device: For torch: None auto-selects CUDA when available, else CPU. Explicit 'cpu' keeps CPU.
     :param dtype: Data type for arrays
     """
     get_backend_manager().set_backend(backend, device, dtype)
