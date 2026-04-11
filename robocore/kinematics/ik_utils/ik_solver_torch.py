@@ -941,8 +941,8 @@ class IKSolverTorch:
             else:
                 dq = dq * self.base_step
 
-            # Step norm clipping
-            if adaptive_step and max_step_norm is not None and max_step_norm > 0:
+            # Step norm clipping (match NumPy _solve_batch: clip whenever max_step_norm is set)
+            if max_step_norm is not None and max_step_norm > 0:
                 dq_norm = torch.linalg.norm(dq, dim=1, keepdim=True)
                 scale = torch.clamp(max_step_norm / (dq_norm + 1e-12), max=1.0)
                 dq = dq * scale

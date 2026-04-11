@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=64", "wheel", "pybind11>=2.11.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -41,6 +41,8 @@ dependencies = [
     "lxml",
     "tqdm",
     "torch"
+    "synriard @ git+https://github.com/Synria-Robotics/Synria-Robot-Descriptions.git",
+    "openrd @ git+https://github.com/Synria-Robotics/Open-Robot-Descriptions.git",
 ]
 
 # Optional dependencies

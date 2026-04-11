@@ -32,17 +32,17 @@ _backend_manager = None
 
 class BackendManager:
     """
-    Global backend manager for numpy/torch switching.
+    Global backend manager for numpy/torch/cpp switching.
 
     Supports:
-    - Backend selection: 'numpy' or 'torch'
-    - Device selection: 'cpu', 'cuda', 'cuda:0', etc.
+    - Backend selection: 'numpy', 'torch', or 'cpp' (native FK/IK/Jacobian extensions; array API like NumPy)
+    - Device selection: 'cpu', 'cuda', 'cuda:0', etc. (torch only)
     - Dtype management: float32, float64
     - Automatic device placement for torch tensors
     """
 
     def __init__(self):
-        self._backend: Literal['numpy', 'torch'] = 'numpy'
+        self._backend: Literal['numpy', 'torch', 'cpp'] = 'numpy'
         self._device: str = 'cpu'
         self._dtype = np.float64
         self._torch_available = False
@@ -57,17 +57,19 @@ class BackendManager:
 
     def set_backend(
         self,
-        backend: Literal['numpy', 'torch'] = 'numpy',
+        backend: Literal['numpy', 'torch', 'cpp'] = 'numpy',
         device: Any = 'cpu',
         dtype: Optional[Any] = None
     ):
         """
         Set the global backend.
 
-        :param backend: 'numpy' or 'torch'
+        :param backend: 'numpy', 'torch', or 'cpp'
         :param device: 'cpu', 'cuda', 'cuda:0', etc. or torch.device object (only for torch)
         :param dtype: numpy.float32/float64 or torch.float32/float64
         """
+        if backend not in ('numpy', 'torch', 'cpp'):
+            raise ValueError(f"backend must be 'numpy', 'torch', or 'cpp', got {backend!r}")
         if backend == 'torch' and not self._torch_available:
             raise RuntimeError("Torch is not available. Install pytorch first.")
 
@@ -134,7 +136,7 @@ class BackendManager:
         :param data: Input data (list, numpy array, or torch tensor)
         :return: Array in the current backend format
         """
-        if self._backend == 'numpy':
+        if self._backend in ('numpy', 'cpp'):
             if isinstance(data, np.ndarray):
                 return data.astype(self._dtype)
             elif self._torch_available and isinstance(data, self._torch.Tensor):
@@ -162,7 +164,7 @@ class BackendManager:
         :param dtype: Override dtype (optional)
         :return: Array in current backend format
         """
-        if self._backend == 'numpy':
+        if self._backend in ('numpy', 'cpp'):
             return np.array(data, dtype=dtype if dtype is not None else self._dtype)
         else:
             return self._torch.tensor(data, device=self._device, dtype=dtype if dtype is not None else self._dtype)
@@ -175,7 +177,7 @@ class BackendManager:
         :param dtype: Override dtype (optional)
         :return: Zeros array
         """
-        if self._backend == 'numpy':
+        if self._backend in ('numpy', 'cpp'):
             return np.zeros(shape, dtype=dtype if dtype is not None else self._dtype)
         else:
             return self._torch.zeros(shape, device=self._device, dtype=dtype if dtype is not None else self._dtype)
@@ -188,7 +190,7 @@ class BackendManager:
         :param dtype: Override dtype (optional)
         :return: Ones array
         """
-        if self._backend == 'numpy':
+        if self._backend in ('numpy', 'cpp'):
             return np.ones(shape, dtype=dtype if dtype is not None else self._dtype)
         else:
             return self._torch.ones(shape, device=self._device, dtype=dtype if dtype is not None else self._dtype)
@@ -201,7 +203,7 @@ class BackendManager:
         :param dtype: Override dtype (optional)
         :return: Identity matrix
         """
-        if self._backend == 'numpy':
+        if self._backend in ('numpy', 'cpp'):
             return np.eye(n, dtype=dtype if dtype is not None else self._dtype)
         else:
             return self._torch.eye(n, device=self._device, dtype=dtype if dtype is not None else self._dtype)
@@ -220,8 +222,8 @@ class BackendManager:
 
     @property
     def is_numpy(self) -> bool:
-        """Check if current backend is numpy."""
-        return self._backend == 'numpy'
+        """Check if current backend uses NumPy arrays (numpy or cpp)."""
+        return self._backend in ('numpy', 'cpp')
 
 
 def get_backend_manager() -> BackendManager:
@@ -240,14 +242,14 @@ def get_backend_manager() -> BackendManager:
 
 # Convenience functions
 def set_backend(
-    backend: Literal['numpy', 'torch'] = 'numpy',
+    backend: Literal['numpy', 'torch', 'cpp'] = 'numpy',
     device: Any = 'cpu',
     dtype: Optional[Any] = None
 ):
     """
     Set the global backend.
 
-    :param backend: 'numpy' or 'torch'
+    :param backend: 'numpy', 'torch', or 'cpp'
     :param device: 'cpu', 'cuda', 'cuda:0', etc. or torch.device object
     :param dtype: Data type for arrays
     """
@@ -258,7 +260,7 @@ def get_backend() -> str:
     """
     Get current backend name.
 
-    :return: 'numpy' or 'torch'
+    :return: 'numpy', 'torch', or 'cpp'
     """
     return get_backend_manager().get_backend()
 

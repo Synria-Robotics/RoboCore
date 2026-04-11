@@ -63,18 +63,19 @@
 | | Optimization-based planning | ⚪ |
 
 ### Supported Robot Formats
-- ✅ **URDF** (Unified Robot Description Format)
-- ✅ **MJCF** (MuJoCo XML) - *Subset implementation for serial chains*
+- ✅ **URDF** - Unified Robot Description Format
+- ✅ **MJCF** - MuJoCo XML
 
 ### Backend Support
 - ✅ **NumPy** - CPU-optimized, 50-100x faster than pure Python
 - ✅ **PyTorch** - GPU acceleration for batch operations
+- ✅ **C++ / Eigen** - Same FK, Jacobian, and DLS IK API via compiled extensions (`cpp` backend); see [Installation](#installation)
 
 ---
 
 ## 🚀 Performance Benchmarks
 
-**Test Platform**: Intel i7-10700K, NVIDIA RTX 3080, 6-DOF Manipulator
+**Test Platform**: NVIDIA , Alicia-D 6-DOF Manipulator
 
 ### Single Configuration
 
@@ -95,6 +96,39 @@
 ---
 
 ## 📦 Installation
+
+FK, Jacobian, and IK can run on **NumPy**, **PyTorch**, or **`cpp`** backends; only the **`cpp`** path uses native extensions, built with **pybind11** + **Eigen3** (headers only) + a **C++17** compiler.
+
+- **pybind11** — installed automatically for the build via `pyproject.toml` (`[build-system] requires`) when you run `pip install -e .` (PEP 517 isolated environment).
+- **Eigen** — *not* a pip package; install on the system (see below) or set **`EIGEN3_INCLUDE_DIR`** to the directory that contains the `Eigen/` folder (so `Eigen/Dense` exists).
+- If Eigen or pybind11 is missing when the `.cpp` sources are present, the build **fails** with an error (extensions are required).
+
+### C++ compiler
+
+| Platform | How to install |
+|----------|----------------|
+| **macOS** | `xcode-select --install` (Command Line Tools, includes `clang++`) or full Xcode from the App Store. |
+| **Debian / Ubuntu** | `sudo apt update && sudo apt install build-essential` |
+| **Fedora** | `sudo dnf install gcc-c++ make` |
+| **Windows** | [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with “Desktop development with C++”, or use **WSL2** and follow the Linux steps above. |
+
+### Eigen3
+
+| Platform | Command / notes |
+|----------|-----------------|
+| **macOS (Homebrew)** | `brew install eigen` — headers are under `/opt/homebrew/include/eigen3` (Apple Silicon) or `/usr/local/include/eigen3` (Intel); `setup.py` checks these paths. |
+| **Debian / Ubuntu** | `sudo apt install libeigen3-dev` — typically `/usr/include/eigen3`. |
+| **Fedora** | `sudo dnf install eigen3-devel` |
+| **Windows** | e.g. `vcpkg install eigen3`, or download Eigen and set `EIGEN3_INCLUDE_DIR` to the folder that **directly contains** the `Eigen` directory. |
+
+Custom location:
+
+```bash
+export EIGEN3_INCLUDE_DIR="/path/to/include/eigen3"   # must contain Eigen/Dense
+pip install -e .
+```
+
+### Clone and install
 
 ```bash
 # Clone repository

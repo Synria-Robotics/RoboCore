@@ -275,9 +275,13 @@ class RobotModel:
         # Handle None values with defaults: -π to π for revolute, -inf to inf for prismatic
         if self.num_chain_dof > 0:
             limits = []
+            has_lo = []
+            has_hi = []
             for j in self._chain_dof_list:
                 lower = j.limit_lower
                 upper = j.limit_upper
+                has_lo.append(1 if lower is not None else 0)
+                has_hi.append(1 if upper is not None else 0)
                 # Handle None values with defaults
                 if lower is None:
                     lower = -np.pi if j.joint_type == 'revolute' else -np.inf
@@ -287,10 +291,14 @@ class RobotModel:
             self.chain_joint_limit = np.array(limits, dtype=float)
             self.chain_joint_limit_max = self.chain_joint_limit[:, 1]
             self.chain_joint_limit_min = self.chain_joint_limit[:, 0]
+            self.chain_joint_limit_has_lower = np.asarray(has_lo, dtype=np.int32)
+            self.chain_joint_limit_has_upper = np.asarray(has_hi, dtype=np.int32)
         else:
             self.chain_joint_limit = np.zeros((0, 2))
             self.chain_joint_limit_max = np.array([])
             self.chain_joint_limit_min = np.array([])
+            self.chain_joint_limit_has_lower = np.array([], dtype=np.int32)
+            self.chain_joint_limit_has_upper = np.array([], dtype=np.int32)
 
     def _linearize_chain(self, base: str, end_link: Optional[str]) -> List[JointSpec]:
         if end_link is None:

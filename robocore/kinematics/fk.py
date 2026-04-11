@@ -112,8 +112,10 @@ def forward_kinematics(
                 if dtype is None:
                     dtype = torch.float64
                 return solver.solve_multi_chain(q, link_names=link_names, device=device, dtype=dtype)
+            elif b == 'cpp':
+                raise ValueError("FK return_all_links is not supported with backend 'cpp'; use 'numpy' or 'torch'")
             else:
-                raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+                raise ValueError("Unsupported backend, expected 'numpy'|'torch'|'cpp'")
 
         # Single chain FK path - solver handles batch automatically
         if b == 'numpy':
@@ -145,8 +147,15 @@ def forward_kinematics(
             elif isinstance(result, torch.Tensor):
                 return result.detach().cpu().numpy()
             return result
+        elif b == 'cpp':
+            from robocore.kinematics.fk_utils.fk_solver_cpp import FKSolverCpp
+
+            if not return_end:
+                raise ValueError("FK backend 'cpp' only supports return_end=True (end-effector pose)")
+            solver = FKSolverCpp(model)
+            return solver.solve(q, return_end_only=True)
         else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+            raise ValueError("Unsupported backend, expected 'numpy'|'torch'|'cpp'")
     finally:
         # Restore original end_link and base_link if we modified them
         if original_end is not None:

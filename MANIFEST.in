@@ -1,7 +1,4 @@
-# Include package data files
-include README.md
 include LICENSE
-recursive-include robocore *.xml
-recursive-include robocore *.yaml
-recursive-include robocore *.yml
-
+include robocore/kinematics/fk_utils/_fk_chain_core.cpp
+include robocore/kinematics/jacobian_utils/_jacobian_chain_core.cpp
+include robocore/kinematics/ik_utils/_ik_chain_core.cpp

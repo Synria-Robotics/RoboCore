@@ -116,26 +116,29 @@ if __name__ == "__main__":
         epilog="""
         Examples:
         # Use default configurations (6 identical configs)
-        python 01c_demo_fk_parallel.py
+        python 01b_demo_fk_parallel.py
 
-        # Use torch backend for better batch performance
-        python 01c_demo_fk_parallel.py --backend torch
+        # Use torch backend for GPU batch performance
+        python 01b_demo_fk_parallel.py --backend torch
+
+        # Native C++ FK (CPU, Eigen); good for large batch on CPU
+        python 01b_demo_fk_parallel.py --backend cpp
 
         # Provide custom joint configurations
-        python 01c_demo_fk_parallel.py --joint-angles \\
+        python 01b_demo_fk_parallel.py --joint-angles \\
             0.1 0.2 -0.3 0.0 0.5 -0.2 \\
             0.2 0.3 -0.4 0.1 0.6 -0.3 \\
             0.0 0.1 -0.2 0.0 0.4 -0.1
 
         # Show transformation matrices for each configuration
-        python 01c_demo_fk_parallel.py --show-matrices
+        python 01b_demo_fk_parallel.py --show-matrices
         """
     )
     parser.add_argument('--model-path', type=str,
                         default=model_path,
                         help='Path to URDF file (default: Alicia-D)')
     parser.add_argument('--base-link', type=str, default='base_link', help='Base link name')
-    parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
+    parser.add_argument('--end-link', type=str, default='link6', help='End-effector link name')
     parser.add_argument('--joint-angles', type=float, nargs='+', 
                         default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2,
                                  0.1, 0.2, -0.3, 0.0, 0.5, -0.2,
@@ -146,8 +149,8 @@ if __name__ == "__main__":
     parser.add_argument('--num-joints', type=int, default=6,
                         help='Number of joints per configuration (default: 6)')
     parser.add_argument('--backend', type=str, default='numpy',
-                        choices=['numpy', 'torch'],
-                        help='Backend to use for computation (default: numpy, torch recommended for batch)')
+                        choices=['numpy', 'torch', 'cpp'],
+                        help='Backend: numpy, torch (GPU batch), or cpp (native CPU FK)')
     parser.add_argument('--verbose', action='store_true',
                         help='Show robot model summary and tree')
     parser.add_argument('--show-matrices', action='store_true',

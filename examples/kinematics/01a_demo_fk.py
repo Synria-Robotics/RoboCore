@@ -35,7 +35,7 @@ def compute_fk(robot_model, backend, joint_angles):
     """Compute forward kinematics for given backend.
     
     :param robot_model: RobotModel instance
-    :param backend: Backend name ('numpy' or 'torch')
+    :param backend: Backend name ('numpy', 'torch', or 'cpp')
     :param joint_angles: Joint angles in radians
     :return: Dictionary with results and computation time
     """
@@ -65,40 +65,51 @@ def main(args):
     robot_model.summary(show_chain=True)
     robot_model.print_tree(show_fixed=True)
 
-    # Compute with both backends
+    # Compute with numpy, torch, and native C++ (Eigen/pybind) backends
     results_np = compute_fk(robot_model, 'numpy', args.joint_angles)
     results_torch = compute_fk(robot_model, 'torch', args.joint_angles)
+    results_cpp = compute_fk(robot_model, 'cpp', args.joint_angles)
 
     # Convert to numpy for comparison
     pos_np = to_numpy(results_np['position'])
     pos_torch = to_numpy(results_torch['position'])
+    pos_cpp = to_numpy(results_cpp['position'])
     euler_np = to_numpy(results_np['euler'])
     euler_torch = to_numpy(results_torch['euler'])
+    euler_cpp = to_numpy(results_cpp['euler'])
     quat_np = to_numpy(results_np['quat'])
     quat_torch = to_numpy(results_torch['quat'])
+    quat_cpp = to_numpy(results_cpp['quat'])
 
     # Display results
     beauty_print(f"End-Effector Position (m):")
     print(f"  NumPy:  {beauty_print_array(pos_np)}")
     print(f"  Torch:  {beauty_print_array(pos_torch)}")
-    pos_diff = np.linalg.norm(pos_np - pos_torch)
-    print(f"  Diff:   {pos_diff:.6e}")
+    print(f"  C++:    {beauty_print_array(pos_cpp)}")
+    pos_diff_nt = np.linalg.norm(pos_np - pos_torch)
+    pos_diff_nc = np.linalg.norm(pos_np - pos_cpp)
+    print(f"  np vs torch: {pos_diff_nt:.6e}   np vs cpp: {pos_diff_nc:.6e}")
 
     beauty_print(f"End-Effector Orientation (Euler XYZ, radians):")
     print(f"  NumPy:  {beauty_print_array(euler_np)}")
     print(f"  Torch:  {beauty_print_array(euler_torch)}")
-    euler_diff = np.linalg.norm(euler_np - euler_torch)
-    print(f"  Diff:   {euler_diff:.6e}")
+    print(f"  C++:    {beauty_print_array(euler_cpp)}")
+    euler_diff_nt = np.linalg.norm(euler_np - euler_torch)
+    euler_diff_nc = np.linalg.norm(euler_np - euler_cpp)
+    print(f"  np vs torch: {euler_diff_nt:.6e}   np vs cpp: {euler_diff_nc:.6e}")
 
     beauty_print(f"End-Effector Orientation (Euler XYZ, degrees):")
     print(f"  NumPy:  {beauty_print_array(np.rad2deg(euler_np))}")
     print(f"  Torch:  {beauty_print_array(np.rad2deg(euler_torch))}")
+    print(f"  C++:    {beauty_print_array(np.rad2deg(euler_cpp))}")
 
     beauty_print(f"End-Effector Orientation (Quaternion xyzw):")
     print(f"  NumPy:  {beauty_print_array(quat_np, precision=6)}")
     print(f"  Torch:  {beauty_print_array(quat_torch, precision=6)}")
-    quat_diff = np.linalg.norm(quat_np - quat_torch)
-    print(f"  Diff:   {quat_diff:.6e}")
+    print(f"  C++:    {beauty_print_array(quat_cpp, precision=6)}")
+    quat_diff_nt = np.linalg.norm(quat_np - quat_torch)
+    quat_diff_nc = np.linalg.norm(quat_np - quat_cpp)
+    print(f"  np vs torch: {quat_diff_nt:.6e}   np vs cpp: {quat_diff_nc:.6e}")
 
     beauty_print(f"Rotation Matrix (NumPy):")
     print(beauty_print_array(to_numpy(results_np['rotation']), precision=6))
@@ -108,7 +119,9 @@ def main(args):
     beauty_print(f"Computation Time:")
     print(f"  NumPy:  {results_np['time']:.6f} seconds")
     print(f"  Torch:  {results_torch['time']:.6f} seconds")
-    print(f"  Ratio:  {results_torch['time'] / results_np['time']:.2f}x")
+    print(f"  C++:    {results_cpp['time']:.6f} seconds")
+    tnp = max(results_np['time'], 1e-15)
+    print(f"  torch/np: {results_torch['time'] / tnp:.2f}x   cpp/np: {results_cpp['time'] / tnp:.2f}x")
 
 
 if __name__ == "__main__":
@@ -121,7 +134,7 @@ if __name__ == "__main__":
                         default=model_path,
                         help='Path to robot model file (default: Alicia-D)')
     parser.add_argument('--base-link', type=str, default='base_link', help='Base link name')
-    parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
+    parser.add_argument('--end-link', type=str, default='link6', help='End-effector link name')
     parser.add_argument('--joint-angles', type=float, nargs='+', default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2],
                         help='Joint angles in radians')
     args = parser.parse_args()
@@ -132,18 +145,22 @@ if __name__ == "__main__":
     [RoboCore:INFO] End-Effector Position (m):
       NumPy:  [+0.16993, +0.01740, +0.20530]
       Torch:  [+0.16993, +0.01740, +0.20530]
-      Diff:   5.735672e-12
+      C++:    [+0.16993, +0.01740, +0.20530]
+      np vs torch: 5.735672e-12   np vs cpp: 3.925231e-17
     [RoboCore:INFO] End-Effector Orientation (Euler XYZ, radians):
       NumPy:  [-2.90034, +1.17327, +3.08082]
       Torch:  [-2.90034, +1.17327, +3.08082]
-      Diff:   7.452386e-11
+      C++:    [-2.90034, +1.17327, +3.08082]
+      np vs torch: 7.452386e-11   np vs cpp: 2.220446e-16
     [RoboCore:INFO] End-Effector Orientation (Euler XYZ, degrees):
       NumPy:  [-166.17740, +67.22347, +176.51776]
       Torch:  [-166.17740, +67.22347, +176.51776]
+      C++:    [-166.17740, +67.22347, +176.51776]
     [RoboCore:INFO] End-Effector Orientation (Quaternion xyzw):
       NumPy:  [+0.041461, +0.828399, +0.083471, +0.552331]
       Torch:  [+0.041461, +0.828399, +0.083471, +0.552331]
-      Diff:   2.245356e-11
+      C++:    [+0.041461, +0.828399, +0.083471, +0.552331]
+      np vs torch: 2.245356e-11   np vs cpp: 1.577740e-16
     [RoboCore:INFO] Rotation Matrix (NumPy):
     [
       [-0.386423  -0.023514  +0.922022]
@@ -158,7 +175,8 @@ if __name__ == "__main__":
       [+0.000000  +0.000000  +0.000000  +1.000000]
     ]
     [RoboCore:INFO] Computation Time:
-      NumPy:  0.000655 seconds
-      Torch:  0.009248 seconds
-      Ratio:  14.12x    
+      NumPy:  0.003816 seconds
+      Torch:  0.056924 seconds
+      C++:    0.000343 seconds
+      torch/np: 14.92x   cpp/np: 0.09x
     """
