@@ -2,7 +2,10 @@
 // Geometric Jacobian 6 x n_dof (world frame), Eigen + pybind11.
 
 #include <Eigen/Dense>
+#include <Eigen/Geometry>
+#include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 #include <vector>
@@ -39,6 +42,16 @@ static Eigen::Matrix4d prismatic_motion(const Eigen::Vector3d &axis_raw, double 
   Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
   T.block<3, 1>(0, 3) = a * q;
   return T;
+}
+
+/// Matches ``robocore.transform.rotation_error``: R_err = R_target * R_current^T, compact axis*angle.
+static Eigen::Vector3d rotation_error_compact(const Eigen::Matrix3d &R_current, const Eigen::Matrix3d &R_target) {
+  const Eigen::Matrix3d R_err = R_target * R_current.transpose();
+  if (!R_err.allFinite()) {
+    return Eigen::Vector3d::Zero();
+  }
+  Eigen::AngleAxisd aa(R_err);
+  return aa.axis() * aa.angle();
 }
 
 /// stop_chain_idx: inclusive joint index in chain to stop after (-1 = full chain to end).
@@ -104,7 +117,122 @@ public:
     return out;
   }
 
+  py::array_t<double> jacobian_numeric(py::array_t<double> q, double epsilon, bool use_central_diff) const {
+    if (!(epsilon > 0.0) || !std::isfinite(epsilon)) {
+      throw std::runtime_error("epsilon must be positive finite");
+    }
+    py::buffer_info qb = q.request();
+    if (qb.ndim == 1) {
+      if (static_cast<std::int32_t>(qb.shape[0]) != n_dof_) {
+        throw std::runtime_error("q length does not match n_dof");
+      }
+      py::array_t<double> out(std::vector<ssize_t>{1, 6, n_dof_});
+      jacobian_numeric_impl(static_cast<const double *>(qb.ptr), 1, use_central_diff, epsilon,
+                            static_cast<double *>(out.mutable_data()));
+      return out;
+    }
+    if (qb.ndim != 2) {
+      throw std::runtime_error("q must be (n_dof,) or (batch, n_dof)");
+    }
+    if (static_cast<std::int32_t>(qb.shape[1]) != n_dof_) {
+      throw std::runtime_error("q.shape[1] does not match n_dof");
+    }
+    const ssize_t batch = qb.shape[0];
+    py::array_t<double> out(std::vector<ssize_t>{batch, 6, n_dof_});
+    jacobian_numeric_impl(static_cast<const double *>(qb.ptr), batch, use_central_diff, epsilon,
+                          static_cast<double *>(out.mutable_data()));
+    return out;
+  }
+
 private:
+  void fk_pose(const double *qb, Eigen::Matrix4d &end_T) const {
+    Eigen::Matrix4d T_parent = Eigen::Matrix4d::Identity();
+    end_T = Eigen::Matrix4d::Identity();
+    const size_t n_joints = types_.size();
+    for (size_t ji = 0; ji < n_joints; ++ji) {
+      const Eigen::Matrix4d T_joint_origin = T_parent * T_origin_[ji];
+      const std::int32_t qix = q_idx_[ji];
+      const JointType ty = types_[ji];
+
+      double qi = 0.0;
+      if (qix >= 0) {
+        qi = qb[qix];
+      }
+      Eigen::Matrix4d Tm;
+      switch (ty) {
+      case JointType::Fixed:
+        Tm = Eigen::Matrix4d::Identity();
+        break;
+      case JointType::Revolute:
+        Tm = rodrigues_motion(axes_[ji], qi);
+        break;
+      case JointType::Prismatic:
+        Tm = prismatic_motion(axes_[ji], qi);
+        break;
+      default:
+        Tm = Eigen::Matrix4d::Identity();
+        break;
+      }
+
+      const Eigen::Matrix4d T_child = T_joint_origin * Tm;
+      T_parent = T_child;
+      end_T = T_child;
+
+      if (stop_chain_idx_ >= 0 && static_cast<std::int32_t>(ji) == stop_chain_idx_) {
+        break;
+      }
+    }
+  }
+
+  void jacobian_numeric_impl(const double *q_ptr, ssize_t batch, bool use_central, double eps,
+                             double *out_ptr) const {
+    std::vector<double> q_work(static_cast<size_t>(n_dof_));
+    for (ssize_t b = 0; b < batch; ++b) {
+      const double *qb = q_ptr + b * n_dof_;
+      Eigen::Matrix4d T_ref;
+      fk_pose(qb, T_ref);
+      const Eigen::Matrix3d R_ref = T_ref.block<3, 3>(0, 0);
+      const Eigen::Vector3d p_ref = T_ref.block<3, 1>(0, 3);
+
+      for (std::int32_t c = 0; c < n_dof_; ++c) {
+        if (use_central) {
+          std::memcpy(q_work.data(), qb, static_cast<size_t>(n_dof_) * sizeof(double));
+          q_work[static_cast<size_t>(c)] += eps;
+          Eigen::Matrix4d Tp;
+          fk_pose(q_work.data(), Tp);
+          std::memcpy(q_work.data(), qb, static_cast<size_t>(n_dof_) * sizeof(double));
+          q_work[static_cast<size_t>(c)] -= eps;
+          Eigen::Matrix4d Tn;
+          fk_pose(q_work.data(), Tn);
+          const Eigen::Vector3d p_diff = (Tp.block<3, 1>(0, 3) - Tn.block<3, 1>(0, 3)) / (2.0 * eps);
+          const Eigen::Vector3d w_diff =
+              (rotation_error_compact(R_ref, Tp.block<3, 3>(0, 0)) -
+               rotation_error_compact(R_ref, Tn.block<3, 3>(0, 0))) /
+              (2.0 * eps);
+          for (int r = 0; r < 3; ++r) {
+            out_ptr[b * 6 * n_dof_ + r * n_dof_ + c] = p_diff[static_cast<Eigen::Index>(r)];
+          }
+          for (int r = 0; r < 3; ++r) {
+            out_ptr[b * 6 * n_dof_ + (3 + r) * n_dof_ + c] = w_diff[static_cast<Eigen::Index>(r)];
+          }
+        } else {
+          std::memcpy(q_work.data(), qb, static_cast<size_t>(n_dof_) * sizeof(double));
+          q_work[static_cast<size_t>(c)] += eps;
+          Eigen::Matrix4d Tp;
+          fk_pose(q_work.data(), Tp);
+          const Eigen::Vector3d p_diff = (Tp.block<3, 1>(0, 3) - p_ref) / eps;
+          const Eigen::Vector3d w_diff = rotation_error_compact(R_ref, Tp.block<3, 3>(0, 0)) / eps;
+          for (int r = 0; r < 3; ++r) {
+            out_ptr[b * 6 * n_dof_ + r * n_dof_ + c] = p_diff[static_cast<Eigen::Index>(r)];
+          }
+          for (int r = 0; r < 3; ++r) {
+            out_ptr[b * 6 * n_dof_ + (3 + r) * n_dof_ + c] = w_diff[static_cast<Eigen::Index>(r)];
+          }
+        }
+      }
+    }
+  }
+
   void jac_impl(const double *q_ptr, ssize_t batch, double *out_ptr) const {
     const size_t n_joints = types_.size();
     for (ssize_t b = 0; b < batch; ++b) {
@@ -205,9 +333,11 @@ private:
 };
 
 PYBIND11_MODULE(_jacobian_chain_core, m) {
-  m.doc() = "Geometric Jacobian 6xn (world frame), matches JacobianSolverNumPy analytic.";
+  m.doc() = "Geometric Jacobian 6xn (world frame), analytic + numeric FD (matches JacobianSolverNumPy).";
   py::class_<ChainJacobian>(m, "ChainJacobian")
       .def(py::init<py::array_t<std::int32_t>, py::array_t<std::int32_t>, py::array_t<double>,
                      py::array_t<double>, std::int32_t, std::int32_t>())
-      .def("jacobian_analytic", &ChainJacobian::jacobian_analytic);
+      .def("jacobian_analytic", &ChainJacobian::jacobian_analytic)
+      .def("jacobian_numeric", &ChainJacobian::jacobian_numeric, py::arg("q"), py::arg("epsilon") = 5e-5,
+           py::arg("use_central_diff") = true);
 }

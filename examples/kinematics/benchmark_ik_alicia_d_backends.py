@@ -181,6 +181,11 @@ def main() -> None:
         help="Only run FK-closure checks; skip warmup and ms/call benchmark.",
     )
     parser.add_argument("--device", default="cpu", help="Torch device (e.g. cpu, cuda).")
+    parser.add_argument(
+        "--no-pk-pin",
+        action="store_true",
+        help="Skip pytorch_kinematics + pinocchio timing (optional deps).",
+    )
     parser.add_argument("--noise", type=float, default=0.15, help="Gaussian noise std on q0 (rad), then clip to limits.")
     parser.add_argument(
         "--seed",
@@ -306,6 +311,91 @@ def main() -> None:
     _print_fk_closure_block("FK numpy q=torch IK", dp_b_th, dor_b_th, pos_tol=pos_tol, ori_tol=ori_tol)
     dp_b_cpp, dor_b_cpp = _fk_closure_errors(fk_np, T_batch, Q_cpp_b)
     _print_fk_closure_block("FK numpy q=cpp IK", dp_b_cpp, dor_b_cpp, pos_tol=pos_tol, ori_tol=ori_tol)
+
+    ikx_pk_pin = None
+    if not args.no_pk_pin:
+        import benchmark_alicia_pk_pin as _bpk
+
+        ok_deps, dep_msg = _bpk.pk_pin_status()
+        if ok_deps:
+            try:
+                import torch
+                from pytorch_kinematics.transforms import Transform3d
+
+                fkctx = _bpk.AliciaPkPinFKJac.build(model_np, urdf, args.base_link, args.end_link, args.device)
+                ikx_pk_pin = _bpk.AliciaPkPinIK.build(
+                    fkctx,
+                    pos_tol=pos_tol,
+                    ori_tol=ori_tol,
+                    max_iters=int(ik_np.max_iters),
+                    damping=1e-3,
+                    step_size=0.2,
+                    num_retries=1,
+                )
+                ikx_pk_pin.set_T_pin_batch(q_star_b)
+                T_pk1, T_pkb = ikx_pk_pin.pk_targets_from_q_star(q_star1, q_star_b)
+
+                sol_pk1 = ikx_pk_pin.ik_pk.solve(Transform3d(matrix=T_pk1))
+                q_pk1 = sol_pk1.solutions[0, 0, :].detach().cpu().numpy()
+                T_pin1 = _bpk.pin_target_pose_from_chain_q(
+                    fkctx.pin_model,
+                    fkctx.pin_data,
+                    q_star1,
+                    fkctx.pin_q_indices,
+                    fkctx.end_frame_id,
+                    fkctx.end_joint_id,
+                )
+                r_pin1 = _bpk.solve_ik_pinocchio(
+                    fkctx.pin_model,
+                    fkctx.pin_data,
+                    T_pin1,
+                    q0_1,
+                    fkctx.pin_q_indices,
+                    fkctx.pin_v_indices,
+                    ikx_pk_pin.pin_ik_end_joint_id,
+                    fkctx.end_frame_id,
+                    pos_tol,
+                    ori_tol,
+                    int(ik_np.max_iters),
+                    1e-3,
+                    0.2,
+                    robot_model=model_np,
+                )
+                q_pin1 = np.asarray(r_pin1["q"], dtype=np.float64)
+                q_t = torch.as_tensor(q_pk1, dtype=fkctx.dtype, device=fkctx.device).unsqueeze(0)
+                ret_pk = fkctx.chain.forward_kinematics(q_t, end_only=False)
+                T_ach_pk = ret_pk[fkctx.end_link].get_matrix()[0].detach().cpu().numpy()
+                T_tgt_pk = T_pk1[0].detach().cpu().numpy()
+                dpos_pk = np.linalg.norm(T_ach_pk[:3, 3] - T_tgt_pk[:3, 3])
+                Rerr_pk = T_tgt_pk[:3, :3] @ T_ach_pk[:3, :3].T
+                tr = np.trace(Rerr_pk)
+                theta_pk = float(np.arccos(np.clip((tr - 1.0) / 2.0, -1.0, 1.0)))
+                T_ach_pin = _bpk.pin_ee_homogeneous(
+                    fkctx.pin_model,
+                    fkctx.pin_data,
+                    _bpk.pin_q_full_from_chain(fkctx.pin_model, q_pin1, fkctx.pin_q_indices),
+                    fkctx.end_frame_id,
+                    fkctx.end_joint_id,
+                )
+                dpos_pin = np.linalg.norm(T_ach_pin[:3, 3] - T_pin1[:3, 3])
+                Rerr_pin = T_pin1[:3, :3] @ T_ach_pin[:3, :3].T
+                trp = np.trace(Rerr_pin)
+                theta_pin = float(np.arccos(np.clip((trp - 1.0) / 2.0, -1.0, 1.0)))
+                print()
+                print(
+                    f"batch=1 (PK/Pin own targets): pytorch_kinematics converged={bool(sol_pk1.converged[0, 0].item())}  "
+                    f"|Δp| vs PK target={dpos_pk:.3e}  axis-angle~={theta_pk:.3e} rad"
+                )
+                print(
+                    f"batch=1: pinocchio success={r_pin1['success']}  iters={r_pin1['iters']}  "
+                    f"|Δp| vs Pin target={dpos_pin:.3e}  axis-angle~={theta_pin:.3e} rad"
+                )
+            except Exception as ex:
+                print(f"(PK/Pin IK sanity check skipped: {ex})", flush=True)
+                ikx_pk_pin = None
+        else:
+            print(f"(PK/Pin optional deps missing: {dep_msg})", flush=True)
+
     print("=" * 72)
     print()
 
@@ -345,21 +435,75 @@ def main() -> None:
         lambda: ik_cpp.solve(T_batch, q0_b, **ik_kw), repeats=args.repeats, inner_loops=args.inner_batch
     )
 
+    t_pk_1 = t_pk_b = t_pin_1 = t_pin_b = None
+    inner_pin_b = args.inner_batch
+    if ikx_pk_pin is not None and ikx_pk_pin.last_T_pkb is not None:
+        import benchmark_alicia_pk_pin as _bpp
+
+        T_pin1_ref = _bpp.pin_target_pose_from_chain_q(
+            ikx_pk_pin.fkctx.pin_model,
+            ikx_pk_pin.fkctx.pin_data,
+            q_star1,
+            ikx_pk_pin.fkctx.pin_q_indices,
+            ikx_pk_pin.fkctx.end_frame_id,
+            ikx_pk_pin.fkctx.end_joint_id,
+        )
+        for _ in range(10):
+            ikx_pk_pin.pk_solve1(ikx_pk_pin.last_T_pk1)
+            ikx_pk_pin.pin_solve1(T_pin1_ref, q0_1)
+        for _ in range(5):
+            ikx_pk_pin.pk_solve_batch(ikx_pk_pin.last_T_pkb)
+            ikx_pk_pin.pin_solve_batch(q0_b)
+        ikx_pk_pin.sync_torch()
+        t_pk_1 = _bench(
+            lambda: ikx_pk_pin.pk_solve1(ikx_pk_pin.last_T_pk1),
+            repeats=args.repeats,
+            inner_loops=args.inner_single,
+        )
+        t_pin_1 = _bench(
+            lambda: ikx_pk_pin.pin_solve1(T_pin1_ref, q0_1),
+            repeats=args.repeats,
+            inner_loops=args.inner_single,
+        )
+        t_pk_b = _bench(
+            lambda: ikx_pk_pin.pk_solve_batch(ikx_pk_pin.last_T_pkb),
+            repeats=args.repeats,
+            inner_loops=args.inner_batch,
+        )
+        # Pin batch = B sequential Python CLIK loops per call — keep inner_loops small vs RoboCore batch.
+        inner_pin_b = max(1, min(args.inner_batch, 4))
+        t_pin_b = _bench(
+            lambda: ikx_pk_pin.pin_solve_batch(q0_b),
+            repeats=args.repeats,
+            inner_loops=inner_pin_b,
+        )
+        ikx_pk_pin.sync_torch()
+
     def ms_per_call(t_sec: float, inner: int) -> float:
         return t_sec / inner * 1e3
 
+    col_w = 22
     batch_col = f"batch={B} (ms/call)"
     print(f"Model: {urdf.name}  chain DOF={n}  end_link={args.end_link}")
     print(f"Torch device: {args.device}")
     print()
-    print(f"{'backend':<10} {'batch=1 (ms/call)':<22} {batch_col:<26}")
-    print("-" * (10 + 22 + 26 + 2))
-    print(f"{'numpy':<10} {ms_per_call(t_np_1, args.inner_single):<22.6f} {ms_per_call(t_np_b, args.inner_batch):<26.6f}")
-    print(f"{'torch':<10} {ms_per_call(t_th_1, args.inner_single):<22.6f} {ms_per_call(t_th_b, args.inner_batch):<26.6f}")
+    print(f"{'backend':<22} {'batch=1 (ms/call)':<{col_w}} {batch_col:<26}")
+    print("-" * (22 + col_w + 26 + 2))
+    print(f"{'numpy':<22} {ms_per_call(t_np_1, args.inner_single):<{col_w}.6f} {ms_per_call(t_np_b, args.inner_batch):<26.6f}")
+    print(f"{'torch (RoboCore)':<22} {ms_per_call(t_th_1, args.inner_single):<{col_w}.6f} {ms_per_call(t_th_b, args.inner_batch):<26.6f}")
     print(
-        f"{'cpp+eigen':<10} {ms_per_call(t_cpp_1, args.inner_single):<22.6f} "
+        f"{'cpp+eigen':<22} {ms_per_call(t_cpp_1, args.inner_single):<{col_w}.6f} "
         f"{ms_per_call(t_cpp_b, args.inner_batch):<26.6f}"
     )
+    if t_pk_1 is not None:
+        print(
+            f"{'pytorch_kinematics':<22} {ms_per_call(t_pk_1, args.inner_single):<{col_w}.6f} "
+            f"{ms_per_call(t_pk_b, args.inner_batch):<26.6f}"
+        )
+        print(
+            f"{'pinocchio (CLIK)':<22} {ms_per_call(t_pin_1, args.inner_single):<{col_w}.6f} "
+            f"{ms_per_call(t_pin_b, args.inner_batch):<26.6f}"
+        )
 
     ms_b_np = ms_per_call(t_np_b, args.inner_batch)
     ms_b_th = ms_per_call(t_th_b, args.inner_batch)
@@ -368,10 +512,15 @@ def main() -> None:
         f"Amortized ms/target ≈ numpy {ms_b_np / B:.3f}, torch {ms_b_th / B:.3f}"
     )
     note += f", cpp {ms_per_call(t_cpp_b, args.inner_batch) / B:.3f}"
+    if t_pk_b is not None:
+        note += f", pytorch_kinematics {ms_per_call(t_pk_b, args.inner_batch) / B:.3f}"
+        note += f", pinocchio {ms_per_call(t_pin_b, inner_pin_b) / B:.3f}"
     note += (
         ". C++ batch is ``solve_batch``: B independent IK solves in C++ with one pybind call (still ~linear in B). "
         "NumPy/Torch batch IK vectorizes FK/Jacobian across active rows each iteration — not one big matmul like batched FK — "
-        "so their batch column is not ~100× the batch=1 column."
+        "so their batch column is not ~100× the batch=1 column. "
+        "pytorch_kinematics uses batched ``PseudoInverseIK``; pinocchio column is B sequential CLIK solves (Python loop); "
+        "pinocchio batch timing uses a smaller inner-loop count than RoboCore because each call is very expensive."
     )
     print()
     print(note)

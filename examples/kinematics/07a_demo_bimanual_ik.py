@@ -36,7 +36,7 @@ def compute_ik(robot_model, backend, target_left, target_right, left_end_link, r
     """Compute bimanual inverse kinematics using unified configuration space.
     
     :param robot_model: RobotModel with unified config space
-    :param backend: Backend name ('numpy' or 'torch')
+    :param backend: Backend name ('numpy', 'torch', or 'cpp')
     :param target_left: Target left end-effector pose [px, py, pz, qx, qy, qz, qw] or 4x4 matrix
     :param target_right: Target right end-effector pose [px, py, pz, qx, qy, qz, qw] or 4x4 matrix
     :param left_end_link: Left arm end-effector link name
@@ -145,42 +145,55 @@ def main(args):
         initial_guess_scale=args.init_scale,
         random_seed=args.seed
     )
+    results_cpp = compute_ik(
+        robot_model, 'cpp', args.target_left, args.target_right,
+        args.left_end_link, args.right_end_link, args.left_base_link,
+        q0=None,
+        num_initial_guesses=args.num_inits,
+        initial_guess_strategy=args.init_strategy,
+        initial_guess_scale=args.init_scale,
+        random_seed=args.seed
+    )
 
     # Convert to numpy for comparison
     q_left_np = to_numpy(results_np['q_left'])
     q_right_np = to_numpy(results_np['q_right'])
     q_left_torch = to_numpy(results_torch['q_left'])
     q_right_torch = to_numpy(results_torch['q_right'])
+    q_left_cpp = np.asarray(results_cpp['q_left'], dtype=float)
+    q_right_cpp = np.asarray(results_cpp['q_right'], dtype=float)
 
     beauty_print(f"IK Solution:")
-    print(f"  Success Left:  NumPy={results_np['success_left']}, Torch={results_torch['success_left']}")
-    print(f"  Success Right:  NumPy={results_np['success_right']}, Torch={results_torch['success_right']}")
-    print(f"  Iterations:  NumPy={results_np['iters']}, Torch={results_torch['iters']}")
-    print(f"  Position Error Left:  NumPy={results_np['pos_err_left']:.6e} m, Torch={results_torch['pos_err_left']:.6e} m")
-    print(f"  Position Error Right:  NumPy={results_np['pos_err_right']:.6e} m, Torch={results_torch['pos_err_right']:.6e} m")
-    print(f"  Orientation Error Left:  NumPy={results_np['ori_err_left']:.6e} rad, Torch={results_torch['ori_err_left']:.6e} rad")
-    print(f"  Orientation Error Right:  NumPy={results_np['ori_err_right']:.6e} rad, Torch={results_torch['ori_err_right']:.6e} rad")
+    print(f"  Success Left:  NumPy={results_np['success_left']}, Torch={results_torch['success_left']}, C++={results_cpp['success_left']}")
+    print(f"  Success Right:  NumPy={results_np['success_right']}, Torch={results_torch['success_right']}, C++={results_cpp['success_right']}")
+    print(f"  Iterations:  NumPy={results_np['iters']}, Torch={results_torch['iters']}, C++={results_cpp['iters']}")
+    print(f"  Position Error Left:  NumPy={results_np['pos_err_left']:.6e} m, Torch={results_torch['pos_err_left']:.6e} m, C++={results_cpp['pos_err_left']:.6e} m")
+    print(f"  Position Error Right:  NumPy={results_np['pos_err_right']:.6e} m, Torch={results_torch['pos_err_right']:.6e} m, C++={results_cpp['pos_err_right']:.6e} m")
+    print(f"  Orientation Error Left:  NumPy={results_np['ori_err_left']:.6e} rad, Torch={results_torch['ori_err_left']:.6e} rad, C++={results_cpp['ori_err_left']:.6e} rad")
+    print(f"  Orientation Error Right:  NumPy={results_np['ori_err_right']:.6e} rad, Torch={results_torch['ori_err_right']:.6e} rad, C++={results_cpp['ori_err_right']:.6e} rad")
 
     beauty_print(f"Solved Joint Angles - Left Arm (radians):")
     print(f"  NumPy:  {beauty_print_array(q_left_np)}")
     print(f"  Torch:  {beauty_print_array(q_left_torch)}")
+    print(f"  C++:    {beauty_print_array(q_left_cpp)}")
 
     beauty_print(f"Solved Joint Angles - Right Arm (radians):")
     print(f"  NumPy:  {beauty_print_array(q_right_np)}")
     print(f"  Torch:  {beauty_print_array(q_right_torch)}")
+    print(f"  C++:    {beauty_print_array(q_right_cpp)}")
 
     beauty_print(f"Computation Time:")
     print(f"  NumPy:  {results_np['time']* 1000:.4f} ms")
     print(f"  Torch:  {results_torch['time']* 1000:.4f} ms")
-    if results_np['time'] > 0:
-        ratio = results_torch['time'] / results_np['time']
-        print(f"  Ratio:  {ratio:.2f}x")
+    print(f"  C++:    {results_cpp['time']* 1000:.4f} ms")
+    tnp = max(results_np['time'], 1e-15)
+    print(f"  torch/np: {results_torch['time'] / tnp:.2f}x   cpp/np: {results_cpp['time'] / tnp:.2f}x")
 
 
 if __name__ == "__main__":
     from synriard import get_model_path
 
-    model_path = get_model_path("Bessica_D", version="v1_0", variant="covered", model_format="urdf")
+    model_path = get_model_path("Bessica_D", version="v1_1", variant="covered", model_format="urdf")
 
     parser = argparse.ArgumentParser(description="Bimanual Inverse Kinematics Demo")
     parser.add_argument('--model-path', type=str,
@@ -207,8 +220,8 @@ if __name__ == "__main__":
                         help='Scale factor for joint limits when generating guesses (0.0 to 1.0, default: 1.0)')
     parser.add_argument('--seed', type=int, default=None,
                         help='Random seed for reproducibility (default: None)')
-    parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch'],
-                        help='Backend to use for computation (default: numpy, ignored - both are tested)')
+    parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch', 'cpp'],
+                        help='Legacy option; demo always runs NumPy, Torch, and C++ IK for comparison')
     args = parser.parse_args()
 
     main(args)

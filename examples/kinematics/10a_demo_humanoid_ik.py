@@ -36,7 +36,7 @@ def compute_ik(robot_model, backend, targets, end_links, base_link='pelvis',
     """Compute humanoid inverse kinematics using unified configuration space.
     
     :param robot_model: RobotModel with unified config space
-    :param backend: Backend name ('numpy' or 'torch')
+    :param backend: Backend name ('numpy', 'torch', or 'cpp')
     :param targets: Dictionary mapping end_link to target pose (4x4 matrix or [px, py, pz, qx, qy, qz, qw])
     :param end_links: List of end-effector link names
     :param base_link: Base link name
@@ -156,29 +156,43 @@ def main(args):
         pos_tol=args.pos_tol,
         ori_tol=args.ori_tol,
     )
+    results_cpp = compute_ik(
+        robot_model, 'cpp', targets, end_links, args.base_link,
+        q0=None,
+        num_initial_guesses=args.num_inits,
+        initial_guess_strategy=args.init_strategy,
+        initial_guess_scale=args.init_scale,
+        random_seed=args.seed,
+        max_iters=args.max_iters,
+        pos_tol=args.pos_tol,
+        ori_tol=args.ori_tol,
+    )
 
     # Convert to numpy for comparison
     q_np = to_numpy(results_np['q_full'])
     q_torch = to_numpy(results_torch['q_full'])
+    q_cpp = np.asarray(results_cpp['q_full'], dtype=float)
 
     beauty_print(f"IK Solution:")
-    print(f"  Success:  NumPy={results_np['success']}, Torch={results_torch['success']}")
-    print(f"  Iterations:  NumPy={results_np['iters']}, Torch={results_torch['iters']}")
-    print(f"  Position Error:  NumPy={results_np['pos_err']:.6e} m, Torch={results_torch['pos_err']:.6e} m")
-    print(f"  Orientation Error:  NumPy={results_np['ori_err']:.6e} rad, Torch={results_torch['ori_err']:.6e} rad")
+    print(f"  Success:  NumPy={results_np['success']}, Torch={results_torch['success']}, C++={results_cpp['success']}")
+    print(f"  Iterations:  NumPy={results_np['iters']}, Torch={results_torch['iters']}, C++={results_cpp['iters']}")
+    print(f"  Position Error:  NumPy={results_np['pos_err']:.6e} m, Torch={results_torch['pos_err']:.6e} m, C++={results_cpp['pos_err']:.6e} m")
+    print(f"  Orientation Error:  NumPy={results_np['ori_err']:.6e} rad, Torch={results_torch['ori_err']:.6e} rad, C++={results_cpp['ori_err']:.6e} rad")
 
     beauty_print(f"Solved Joint Angles (radians):")
     print(f"  NumPy:  {beauty_print_array(q_np)}")
     print(f"  Torch:  {beauty_print_array(q_torch)}")
+    print(f"  C++:    {beauty_print_array(q_cpp)}")
     q_diff = np.linalg.norm(q_np - q_torch)
-    print(f"  Diff:   {q_diff:.6e}")
+    q_diff_nc = np.linalg.norm(q_np - q_cpp)
+    print(f"  np vs torch: {q_diff:.6e}   np vs cpp: {q_diff_nc:.6e}")
 
     beauty_print(f"Computation Time:")
     print(f"  NumPy:  {results_np['time']* 1000:.4f} ms")
     print(f"  Torch:  {results_torch['time']* 1000:.4f} ms")
-    if results_np['time'] > 0:
-        ratio = results_torch['time'] / results_np['time']
-        print(f"  Ratio:  {ratio:.2f}x")
+    print(f"  C++:    {results_cpp['time']* 1000:.4f} ms")
+    tnp = max(results_np['time'], 1e-15)
+    print(f"  torch/np: {results_torch['time'] / tnp:.2f}x   cpp/np: {results_cpp['time'] / tnp:.2f}x")
 
 
 if __name__ == "__main__":
@@ -228,8 +242,8 @@ if __name__ == "__main__":
                         help='Scale factor for joint limits when generating guesses (0.0 to 1.0, default: 1.0)')
     parser.add_argument('--seed', type=int, default=None,
                         help='Random seed for reproducibility (default: None)')
-    parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch'],
-                        help='Backend to use for computation (default: numpy, ignored - both are tested)')
+    parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch', 'cpp'],
+                        help='Legacy option; demo runs NumPy, Torch, and C++ IK for comparison')
     args = parser.parse_args()
 
     main(args)

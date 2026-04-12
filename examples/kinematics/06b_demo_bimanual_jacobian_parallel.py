@@ -109,7 +109,7 @@ def main(args):
 if __name__ == "__main__":
     from synriard import get_model_path
     
-    model_path = get_model_path("Bessica_D", version="v1_0", variant="covered", model_format="urdf")
+    model_path = get_model_path("Bessica_D", version="v1_1", variant="covered", model_format="urdf")
 
     parser = argparse.ArgumentParser(description="Bimanual Jacobian Parallel Demo - Batch Jacobian computation")
     parser.add_argument('--model-path', type=str,
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     parser.add_argument('--scale', type=float, default=0.8,
                         help='Scaling factor for joint range sampling (0.0 to 1.0, default: 0.8)')
     parser.add_argument('--backend', type=str, default='torch',
-                        choices=['numpy', 'torch'],
+                        choices=['numpy', 'torch', 'cpp'],
                         help='Backend to use for computation (default: torch)')
     parser.add_argument('--mode', type=str, default='indep', choices=['indep', 'relative', 'mirror'],
                         help='Jacobian mode: indep (independent), relative (relative transform), mirror (mirror mode)')

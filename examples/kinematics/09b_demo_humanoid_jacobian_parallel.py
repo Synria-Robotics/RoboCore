@@ -128,7 +128,7 @@ if __name__ == "__main__":
     parser.add_argument('--scale', type=float, default=0.8,
                         help='Scaling factor for joint range sampling (0.0 to 1.0, default: 0.8)')
     parser.add_argument('--backend', type=str, default='torch',
-                        choices=['numpy', 'torch'],
+                        choices=['numpy', 'torch', 'cpp'],
                         help='Backend to use for computation (default: torch)')
     parser.add_argument('--verbose', action='store_true',
                         help='Show robot model summary and tree')

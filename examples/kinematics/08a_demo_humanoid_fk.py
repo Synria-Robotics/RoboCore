@@ -37,7 +37,7 @@ def compute_humanoid_fk(robot_model, backend, q_full, end_links, base_link='pelv
     """Compute humanoid forward kinematics using unified configuration space.
     
     :param robot_model: RobotModel with unified config space
-    :param backend: Backend name ('numpy' or 'torch')
+    :param backend: Backend name ('numpy', 'torch', or 'cpp')
     :param q_full: Full joint configuration [nq] (includes all joints)
     :param end_links: List of end-effector link names [left_thumb, right_thumb, left_toe, right_toe]
     :param base_link: Base link name
@@ -110,9 +110,10 @@ def main(args):
             for i, idx in enumerate(sorted_indices[:len(args.joint_angles)]):
                 q_full[idx] = args.joint_angles[i]
 
-    # Compute with both backends
+    # Compute with NumPy, Torch, and C++ backends
     results_np = compute_humanoid_fk(robot_model, 'numpy', q_full, end_links, args.base_link)
     results_torch = compute_humanoid_fk(robot_model, 'torch', q_full, end_links, args.base_link)
+    results_cpp = compute_humanoid_fk(robot_model, 'cpp', q_full, end_links, args.base_link)
 
     # Display results for each end-effector
     end_effector_names = ['left_thumb', 'right_thumb', 'left_toe', 'right_toe']
@@ -122,32 +123,42 @@ def main(args):
         beauty_print(f"{display_name} End-Effector Position (m):")
         pos_np = to_numpy(results_np[name]['position'])
         pos_torch = to_numpy(results_torch[name]['position'])
+        pos_cpp = to_numpy(results_cpp[name]['position'])
         print(f"  NumPy:  {beauty_print_array(pos_np)}")
         print(f"  Torch:  {beauty_print_array(pos_torch)}")
+        print(f"  C++:    {beauty_print_array(pos_cpp)}")
         pos_diff = np.linalg.norm(pos_np - pos_torch)
-        print(f"  Diff:   {pos_diff:.6e}")
+        pos_diff_nc = np.linalg.norm(pos_np - pos_cpp)
+        print(f"  np vs torch: {pos_diff:.6e}   np vs cpp: {pos_diff_nc:.6e}")
 
         beauty_print(f"{display_name} End-Effector Orientation (Euler XYZ, radians):")
         euler_np = to_numpy(results_np[name]['euler'])
         euler_torch = to_numpy(results_torch[name]['euler'])
+        euler_cpp = to_numpy(results_cpp[name]['euler'])
         print(f"  NumPy:  {beauty_print_array(euler_np)}")
         print(f"  Torch:  {beauty_print_array(euler_torch)}")
+        print(f"  C++:    {beauty_print_array(euler_cpp)}")
         euler_diff = np.linalg.norm(euler_np - euler_torch)
-        print(f"  Diff:   {euler_diff:.6e}")
+        euler_diff_nc = np.linalg.norm(euler_np - euler_cpp)
+        print(f"  np vs torch: {euler_diff:.6e}   np vs cpp: {euler_diff_nc:.6e}")
 
         beauty_print(f"{display_name} End-Effector Orientation (Quaternion xyzw):")
         quat_np = to_numpy(results_np[name]['quat'])
         quat_torch = to_numpy(results_torch[name]['quat'])
+        quat_cpp = to_numpy(results_cpp[name]['quat'])
         print(f"  NumPy:  {beauty_print_array(quat_np, precision=6)}")
         print(f"  Torch:  {beauty_print_array(quat_torch, precision=6)}")
+        print(f"  C++:    {beauty_print_array(quat_cpp, precision=6)}")
         quat_diff = np.linalg.norm(quat_np - quat_torch)
-        print(f"  Diff:   {quat_diff:.6e}")
+        quat_diff_nc = np.linalg.norm(quat_np - quat_cpp)
+        print(f"  np vs torch: {quat_diff:.6e}   np vs cpp: {quat_diff_nc:.6e}")
 
     beauty_print(f"Computation Time:")
     print(f"  NumPy:  {results_np['time']*1000:.4f} ms")
     print(f"  Torch:  {results_torch['time']*1000:.4f} ms")
-    if results_np['time'] > 0:
-        print(f"  Ratio:  {results_torch['time'] / results_np['time']:.2f}x")
+    print(f"  C++:    {results_cpp['time']*1000:.4f} ms")
+    tnp = max(results_np['time'], 1e-15)
+    print(f"  torch/np: {results_torch['time'] / tnp:.2f}x   cpp/np: {results_cpp['time'] / tnp:.2f}x")
 
 
 if __name__ == "__main__":

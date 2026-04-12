@@ -62,17 +62,17 @@ class JacobianSolverCpp:
         use_central_diff: bool = True,
         target_link: str | None = None,
     ) -> np.ndarray:
-        """Compute Jacobian (analytic only in C++; numeric raises).
+        """Compute Jacobian via native chain (analytic geometric or numeric finite differences).
 
         :param q: configuration (n,) or (B, n).
-        :param method: only ``analytic`` is supported.
-        :param epsilon: unused (numeric not implemented).
-        :param use_central_diff: unused.
+        :param method: ``analytic`` or ``numeric`` (FK-based FD, same convention as NumPy solver).
+        :param epsilon: finite-difference step (numeric).
+        :param use_central_diff: central vs forward difference (numeric).
         :param target_link: must match constructor if partial chain was used; ignored if None in both.
         :return: (6, n) or (B, 6, n).
         """
-        if method != "analytic":
-            raise NotImplementedError("JacobianSolverCpp only implements method='analytic'")
+        if method not in ("analytic", "numeric"):
+            raise NotImplementedError("JacobianSolverCpp only implements method='analytic' or 'numeric'")
         if target_link is not None and target_link != self._target_link:
             raise ValueError(
                 "JacobianSolverCpp was built for a fixed target_link; "
@@ -82,7 +82,10 @@ class JacobianSolverCpp:
         q, was_single = ensure_batch(q)
         if q.shape[1] != self.n:
             raise ValueError(f"Expected q with {self.n} elements, got {q.shape[1]}")
-        out = self._jac.jacobian_analytic(q)
+        if method == "analytic":
+            out = self._jac.jacobian_analytic(q)
+        else:
+            out = self._jac.jacobian_numeric(q, float(epsilon), bool(use_central_diff))
         return restore_single(out, was_single)
 
 

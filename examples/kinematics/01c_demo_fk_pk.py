@@ -27,9 +27,8 @@ import torch
 import pytorch_kinematics as pk
 import pinocchio
 
-import robocore as rc
 from robocore.modeling import RobotModel
-from robocore.kinematics.fk import forward_kinematics
+from robocore.kinematics.fk_utils.fk_solver_cpp import FKSolverCpp
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 from robocore.utils.backend import to_numpy
 from robocore.transform.conversions import matrix_to_euler, matrix_to_quaternion
@@ -46,9 +45,9 @@ def main(args):
     chain = pk.build_serial_chain_from_urdf(urdf_bytes, end_link, root_link_name=args.base_link)
     n_dof = len(chain.get_joint_parameter_names())
     
-    # RoboCore
+    # RoboCore C++ FK (single solver; same path as cpp backend without per-call construction)
     rc_model = RobotModel(model_path, base_link=args.base_link, end_link=end_link)
-    rc.set_backend('torch', device=args.device)
+    fk_cpp = FKSolverCpp(rc_model)
     
     # Pinocchio
     pin_model = pinocchio.buildModelFromUrdf(model_path)
@@ -81,7 +80,7 @@ def main(args):
         beauty_print(f"Warning: Could not find {end_link} in pinocchio model. Using last joint.", type="warning")
         end_joint_id = len(pin_model.joints) - 1
 
-    beauty_print(f"Forward Kinematics Comparison: PyTorch Kinematics vs Pinocchio vs RoboCore ({n_dof} DOF)", type="module")
+    beauty_print(f"Forward Kinematics Comparison: PyTorch Kinematics vs Pinocchio vs RoboCore C++ ({n_dof} DOF)", type="module")
     beauty_print(f"PyTorch device: {args.device}", type="info")
     
     device = torch.device(args.device)
@@ -130,7 +129,7 @@ def main(args):
     # Note: RoboCore does not apply root link's origin transform. When base_link == end_link,
     # it returns identity matrix. For other cases, it computes relative transform from base_link
     # to end_link without including world2base rotation.
-    T_rc = forward_kinematics(rc_model, q, return_end=True, device=device)
+    T_rc = fk_cpp.solve(q_np)
     T_rc_np = to_numpy(T_rc)
     pos_rc = T_rc_np[:3, 3]
     rot_rc = T_rc_np[:3, :3]
@@ -139,7 +138,7 @@ def main(args):
     print(f"  p = {beauty_print_array(pos_pk)}")
     beauty_print(f"End-Effector Position (Pinocchio):")
     print(f"  p = {beauty_print_array(pos_pin)}")
-    beauty_print(f"End-Effector Position (RoboCore):")
+    beauty_print(f"End-Effector Position (RoboCore C++):")
     print(f"  p = {beauty_print_array(pos_rc)}")
     
     # Convert to quaternion for display
@@ -150,7 +149,7 @@ def main(args):
     print(f"  quat = {beauty_print_array(quat_pk, precision=6)}")
     beauty_print(f"Quaternion xyzw (Pinocchio):")
     print(f"  quat = {beauty_print_array(quat_pin, precision=6)}")
-    beauty_print(f"Quaternion xyzw (RoboCore):")
+    beauty_print(f"Quaternion xyzw (RoboCore C++):")
     print(f"  quat = {beauty_print_array(quat_rc, precision=6)}")
     
     # Position comparison
@@ -211,7 +210,7 @@ def main(args):
 
     time_pk = benchmark(lambda: chain.forward_kinematics(q_tensor, end_only=False))
     time_pin = benchmark(benchmark_pin)
-    time_rc = benchmark(lambda: forward_kinematics(rc_model, q, return_end=True, device=device))
+    time_rc = benchmark(lambda: fk_cpp.solve(q_np))
     
     beauty_print(f"PyTorch Kinematics:  {time_pk:.4f} ms")
     beauty_print(f"Pinocchio:           {time_pin:.4f} ms")
@@ -259,7 +258,7 @@ def main(args):
         rot_pin_rand = T_pin_rand[:3, :3]
 
         # RoboCore
-        T_rc_rand = forward_kinematics(rc_model, q_rand, return_end=True, device=device)
+        T_rc_rand = fk_cpp.solve(q_rand_np)
         T_rc_rand_np = to_numpy(T_rc_rand)
         pos_rc_rand = T_rc_rand_np[:3, 3]
         rot_rc_rand = T_rc_rand_np[:3, :3]
@@ -326,7 +325,7 @@ if __name__ == '__main__':
     parser.add_argument('--model-path', type=str, default=model_path,
                         help='Path to URDF file (default: Alicia-D)')
     parser.add_argument('--base-link', type=str, default='base_link', help='Base link name')
-    parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
+    parser.add_argument('--end-link', type=str, default='link6', help='End-effector link name')
     parser.add_argument('--joint-angles', type=float, nargs='+', default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2],
                         help='Joint angles in radians')
     parser.add_argument('--device', default='cpu', help='PyTorch device (cpu, cuda)')

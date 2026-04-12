@@ -162,7 +162,7 @@ if __name__ == "__main__":
     parser.add_argument('--init-scale', type=float, default=1.0,
                         help='Scale factor for joint limits when generating guesses (0.0 to 1.0, default: 1.0)')
     parser.add_argument('--backend', type=str, default='numpy',
-                        choices=['numpy', 'torch'],
+                        choices=['numpy', 'torch', 'cpp'],
                         help='Backend to use for computation (default: numpy)')
     parser.add_argument('--method', type=str, default='dls',
                         choices=['dls', 'pinv', 'transpose'],

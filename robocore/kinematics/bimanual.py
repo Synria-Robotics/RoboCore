@@ -59,8 +59,13 @@ def bimanual_forward_kinematics(
             if dtype is None:
                 dtype = torch.float64
             return solver.fk(q_left, q_right, return_end=return_end, device=device, dtype=dtype)
+        elif b == 'cpp':
+            from robocore.kinematics.fk_utils.bimanual_fk_solver_cpp import BiIndependentFKSolverCpp
+
+            solver = BiIndependentFKSolverCpp(left_model, right_model)
+            return solver.fk(q_left, q_right, return_end=return_end)
         else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+            raise ValueError("Unsupported backend, expected 'numpy'|'torch'|'cpp'")
     elif mode == 'relative':
         if b == 'numpy':
             from robocore.kinematics.fk_utils.bimanual_fk_solver_numpy import BiRelativeFKSolverNumpy
@@ -75,8 +80,13 @@ def bimanual_forward_kinematics(
             if dtype is None:
                 dtype = torch.float64
             return solver.fk(q_left, q_right, return_end=return_end, device=device, dtype=dtype)
+        elif b == 'cpp':
+            from robocore.kinematics.fk_utils.bimanual_fk_solver_cpp import BiRelativeFKSolverCpp
+
+            solver = BiRelativeFKSolverCpp(left_model, right_model)
+            return solver.fk(q_left, q_right, return_end=return_end)
         else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+            raise ValueError("Unsupported backend, expected 'numpy'|'torch'|'cpp'")
     elif mode == 'mirror':
         if b == 'numpy':
             from robocore.kinematics.fk_utils.bimanual_fk_solver_numpy import BiMirrorFKSolverNumpy
@@ -91,8 +101,13 @@ def bimanual_forward_kinematics(
             if dtype is None:
                 dtype = torch.float64
             return solver.fk(q_left, q_right, return_end=return_end, device=device, dtype=dtype)
+        elif b == 'cpp':
+            from robocore.kinematics.fk_utils.bimanual_fk_solver_cpp import BiMirrorFKSolverCpp
+
+            solver = BiMirrorFKSolverCpp(left_model, right_model)
+            return solver.fk(q_left, q_right, return_end=return_end)
         else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+            raise ValueError("Unsupported backend, expected 'numpy'|'torch'|'cpp'")
     else:
         raise ValueError("Unknown mode, expected 'indep'|'relative'|'mirror'")
 
@@ -137,7 +152,7 @@ def bimanual_inverse_kinematics(
     :param q0_right: Initial right configuration (optional, used as base for strategies)
     :param method: 'dls'|'pinv'|'transpose'
     :param coordination: 'indep'|'relative_pose'|'relative_pos'|'relative_ori'|'mirror'
-    :param backend: Optional backend override ('numpy' or 'torch'). If provided,
+    :param backend: Optional backend override ('numpy', 'torch', or 'cpp'). If provided,
         this is forwarded to the global backend manager so that IK solvers run
         on the requested backend (matches usage in higher-level helpers such as
         ``BimanualRobotModel.ik`` and interactive demos).
@@ -184,8 +199,13 @@ def bimanual_inverse_kinematics(
             from robocore.kinematics.ik_utils.bimanual_ik_solver_torch import BiIndependentIKSolverTorch
             solver = BiIndependentIKSolverTorch(left_model, right_model)
             return solver.solve(target_left, target_right, q0_left, q0_right, **ik_kwargs)
+        elif b == 'cpp':
+            from robocore.kinematics.ik_utils.bimanual_ik_solver_numpy import BiIndependentIKSolverNumpy
+
+            solver = BiIndependentIKSolverNumpy(left_model, right_model)
+            return solver.solve(target_left, target_right, q0_left, q0_right, **ik_kwargs)
         else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+            raise ValueError("Unsupported backend, expected 'numpy'|'torch'|'cpp'")
     elif coordination in ('relative_pose', 'relative_pos', 'relative_ori'):
         constraint_type = 'pose' if coordination == 'relative_pose' else ('position' if coordination == 'relative_pos' else 'orientation')
         if b == 'numpy':
@@ -198,8 +218,13 @@ def bimanual_inverse_kinematics(
             solver = BiRelativeIKSolverTorch(left_model, right_model)
             return solver.solve(target_left, target_right, q0_left, q0_right,
                                 constraint_type=constraint_type, T_rel_grasp=T_rel_grasp, **ik_kwargs)
+        elif b == 'cpp':
+            from robocore.kinematics.ik_utils.bimanual_ik_solver_numpy import BiRelativeIKSolverNumpy
+            solver = BiRelativeIKSolverNumpy(left_model, right_model)
+            return solver.solve(target_left, target_right, q0_left, q0_right,
+                                constraint_type=constraint_type, T_rel_grasp=T_rel_grasp, **ik_kwargs)
         else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+            raise ValueError("Unsupported backend, expected 'numpy'|'torch'|'cpp'")
     elif coordination == 'mirror':
         if b == 'numpy':
             from robocore.kinematics.ik_utils.bimanual_ik_solver_numpy import BiMirrorIKSolverNumpy
@@ -211,8 +236,13 @@ def bimanual_inverse_kinematics(
             solver = BiMirrorIKSolverTorch(left_model, right_model)
             return solver.solve(target_left, target_right, q0_left, q0_right,
                                 T_left_initial=T_left_initial, T_right_initial=T_right_initial, **ik_kwargs)
+        elif b == 'cpp':
+            from robocore.kinematics.ik_utils.bimanual_ik_solver_numpy import BiMirrorIKSolverNumpy
+            solver = BiMirrorIKSolverNumpy(left_model, right_model)
+            return solver.solve(target_left, target_right, q0_left, q0_right,
+                                T_left_initial=T_left_initial, T_right_initial=T_right_initial, **ik_kwargs)
         else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+            raise ValueError("Unsupported backend, expected 'numpy'|'torch'|'cpp'")
     else:
         raise ValueError("Unknown coordination mode")
 
@@ -266,8 +296,18 @@ def bimanual_jacobian(
                 mask = torch.tensor([bool(m) for m in row_mask], dtype=torch.bool)
                 J = J[mask, :]
             return J
+        elif b == 'cpp':
+            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_numpy import BiIndependentJacobianSolverNumpy
+            import numpy as np
+
+            solver = BiIndependentJacobianSolverNumpy(left_model, right_model)
+            J = solver.compute(q_left, q_right)
+            if row_mask is not None:
+                mask = np.array([bool(m) for m in row_mask])
+                J = J[mask, :]
+            return J
         else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+            raise ValueError("Unsupported backend, expected 'numpy'|'torch'|'cpp'")
     elif mode == 'relative':
         if b == 'numpy':
             from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_numpy import BiRelativeJacobianSolverNumpy
@@ -289,8 +329,18 @@ def bimanual_jacobian(
                 mask = torch.tensor([bool(m) for m in row_mask], dtype=torch.bool)
                 J = J[mask, :]
             return J
+        elif b == 'cpp':
+            from robocore.kinematics.jacobian_utils.bimanual_jacobian_solver_numpy import BiRelativeJacobianSolverNumpy
+            import numpy as np
+
+            solver = BiRelativeJacobianSolverNumpy(left_model, right_model)
+            J = solver.compute(q_left, q_right)
+            if row_mask is not None:
+                mask = np.array([bool(m) for m in row_mask])
+                J = J[mask, :]
+            return J
         else:
-            raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+            raise ValueError("Unsupported backend, expected 'numpy'|'torch'|'cpp'")
     elif mode == 'mirror':
         raise NotImplementedError("Jacobian mode not implemented yet: mirror")
     

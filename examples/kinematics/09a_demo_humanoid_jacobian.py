@@ -35,18 +35,20 @@ def compute_jacobian_results(robot_model, backend, q_full, end_links,
     """Compute humanoid Jacobian using unified configuration space.
     
     :param robot_model: RobotModel with unified config space
-    :param backend: Backend name ('numpy' or 'torch')
+    :param backend: Backend name ('numpy', 'torch', or 'cpp')
     :param q_full: Full joint configuration [nq]
     :param end_links: List of end-effector link names
     :param base_link: Base link name
     :param device: Device for torch backend
     :return: Dictionary with Jacobian matrix and computation time
     """
-    rc.set_backend(backend)
-    if backend == 'torch' and device is None:
+    if backend == 'torch':
         import torch
-        device = torch.device('cpu')
+        if device is None:
+            device = torch.device('cpu')
         rc.set_backend('torch', device=str(device))
+    else:
+        rc.set_backend(backend)
 
     start_time = time.perf_counter()
     
@@ -94,15 +96,19 @@ def main(args):
     q_full_torch = torch.tensor(q_full, dtype=torch.float64, device=device)
     results_torch = compute_jacobian_results(robot_model, 'torch', q_full_torch,
                                             end_links, args.base_link, device=device)
+    results_cpp = compute_jacobian_results(robot_model, 'cpp', q_full,
+                                           end_links, args.base_link)
 
     # Convert to numpy for comparison
     J_np = to_numpy(results_np['J'])
     J_torch = to_numpy(results_torch['J'])
+    J_cpp = to_numpy(results_cpp['J'])
 
-    beauty_print("[1] Jacobian Comparison (NumPy vs Torch)", type="module", centered=False)
+    beauty_print("[1] Jacobian Comparison (NumPy vs Torch vs C++)", type="module", centered=False)
     beauty_print(f"Jacobian shape: {J_np.shape}")
     beauty_print(f"Condition number (NumPy): {np.linalg.cond(J_np):.2e}")
     beauty_print(f"Condition number (Torch): {np.linalg.cond(J_torch):.2e}")
+    beauty_print(f"Condition number (C++):   {np.linalg.cond(J_cpp):.2e}")
 
     # Display Jacobian for each end-effector
     for i, (name, display_name) in enumerate(zip(end_names, display_names)):
@@ -112,18 +118,24 @@ def main(args):
         print(beauty_print_array(J_np[start_row:end_row, :], precision=6))
         beauty_print(f"{display_name} Jacobian (Torch, rows {start_row}-{end_row-1}):")
         print(beauty_print_array(J_torch[start_row:end_row, :], precision=6))
+        beauty_print(f"{display_name} Jacobian (C++, rows {start_row}-{end_row-1}):")
+        print(beauty_print_array(J_cpp[start_row:end_row, :], precision=6))
 
-    diff = J_np - J_torch
+    diff_nt = J_np - J_torch
+    diff_nc = J_np - J_cpp
     beauty_print("NumPy vs Torch:")
-    beauty_print(f"  Max difference:        {np.max(np.abs(diff)):.3e}")
-    beauty_print(f"  Frobenius norm:        {np.linalg.norm(diff, 'fro'):.3e}")
+    beauty_print(f"  Max difference:        {np.max(np.abs(diff_nt)):.3e}")
+    beauty_print(f"  Frobenius norm:        {np.linalg.norm(diff_nt, 'fro'):.3e}")
+    beauty_print("NumPy vs C++:")
+    beauty_print(f"  Max difference:        {np.max(np.abs(diff_nc)):.3e}")
+    beauty_print(f"  Frobenius norm:        {np.linalg.norm(diff_nc, 'fro'):.3e}")
 
     beauty_print("[2] Performance Comparison", type="module", centered=False)
     beauty_print(f"NumPy:  {results_np['time']:.4f} ms")
     beauty_print(f"Torch:  {results_torch['time']:.4f} ms")
+    beauty_print(f"C++:    {results_cpp['time']:.4f} ms")
     if results_np['time'] > 0:
-        ratio = results_torch['time'] / results_np['time']
-        beauty_print(f"Ratio:  {ratio:.2f}x")
+        beauty_print(f"torch/np: {results_torch['time'] / results_np['time']:.2f}x   cpp/np: {results_cpp['time'] / results_np['time']:.2f}x")
 
     beauty_print("✓ Humanoid Jacobian validation complete", type="success")
 

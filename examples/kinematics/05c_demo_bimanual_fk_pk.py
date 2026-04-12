@@ -286,6 +286,12 @@ def main(args):
             return_end=True, mode=args.mode, device=device, dtype=dtype
         )
         return result['left'], result['right']
+
+    def benchmark_rc_cpp():
+        return bimanual_forward_kinematics(
+            left_model, right_model, q_left_np, q_right_np,
+            return_end=True, mode=args.mode,
+        )
     
     def benchmark(func):
         t0 = time.perf_counter()
@@ -298,14 +304,20 @@ def main(args):
     time_pk = benchmark(benchmark_pk)
     time_pin = benchmark(benchmark_pin)
     time_rc = benchmark(benchmark_rc)
+    rc.set_backend('cpp')
+    time_rc_cpp = benchmark(benchmark_rc_cpp)
+    rc.set_backend('torch', device=args.device)
     
     beauty_print(f"PyTorch Kinematics:  {time_pk:.4f} ms")
     beauty_print(f"Pinocchio:           {time_pin:.4f} ms")
-    beauty_print(f"RoboCore:            {time_rc:.4f} ms")
+    beauty_print(f"RoboCore (torch):    {time_rc:.4f} ms")
+    beauty_print(f"RoboCore (cpp):      {time_rc_cpp:.4f} ms")
     speedup_pk_rc = time_pk / time_rc if time_rc > 0 else 0
     speedup_pin_rc = time_pin / time_rc if time_rc > 0 else 0
-    beauty_print(f"Speedup (PK vs RC):  {speedup_pk_rc:.2f}x", type="success" if speedup_pk_rc > 1 else "info")
-    beauty_print(f"Speedup (Pin vs RC): {speedup_pin_rc:.2f}x", type="success" if speedup_pin_rc > 1 else "info")
+    speedup_pk_rc_cpp = time_pk / time_rc_cpp if time_rc_cpp > 0 else 0
+    beauty_print(f"Speedup (PK vs RC torch):  {speedup_pk_rc:.2f}x", type="success" if speedup_pk_rc > 1 else "info")
+    beauty_print(f"Speedup (Pin vs RC torch): {speedup_pin_rc:.2f}x", type="success" if speedup_pin_rc > 1 else "info")
+    beauty_print(f"Speedup (PK vs RC cpp):    {speedup_pk_rc_cpp:.2f}x", type="success" if speedup_pk_rc_cpp > 1 else "info")
     
     # Value comparison across random configurations
     beauty_print(f"[3] Value comparison across {args.samples} random configurations", type="module", centered=False)
@@ -388,7 +400,7 @@ if __name__ == '__main__':
     import synriard
     # Bessica is a dual-arm robot
     # Note: PyTorch Kinematics requires URDF format, not MJCF
-    model_path = synriard.get_model_path("Bessica_D", version="v1_0", variant="covered", model_format="urdf")
+    model_path = synriard.get_model_path("Bessica_D", version="v1_1", variant="covered", model_format="urdf")
 
     parser = argparse.ArgumentParser(description="Bimanual Forward Kinematics validation with Pytorch Kinematics and Pinocchio")
     parser.add_argument('--model-path', type=str, default=model_path,

@@ -34,17 +34,18 @@ dependencies = [
     "omegaconf>=2.3.0",
     "mujoco>=2.3.0",
     # MuJoCo 3.x EGL path requires EGLDeviceEXT (not in PyOpenGL 3.1.0).
-    "PyOpenGL>=3.1.6",
+    "PyOpenGL",
     "mujoco-py>=2.1.0",
     "trimesh>=4.9.0",
     "coacd",
     "pyglet==1.5.27",
-    "mesh_to_sdf",
+    # 0.0.14 depends on deprecated PyPI name "sklearn"; 0.0.15 uses "scikit-learn"
+    "mesh_to_sdf>=0.0.15",
     "lxml",
     "tqdm",
     "torch",
-    "synriard @ git+https://github.com/Synria-Robotics/Synria-Robot-Descriptions.git",
-    "openrd @ git+https://github.com/Synria-Robotics/Open-Robot-Descriptions.git",
+    "synriard @ https://github.com/Synria-Robotics/Synria-Robot-Descriptions/releases/download/v1.2.0/synriard-1.2.0-py3-none-any.whl",
+    "openrd @ https://github.com/Synria-Robotics/Open-Robot-Descriptions/releases/download/v1.0.0/openrd-1.0.0-py3-none-any.whl",
 ]
 
 # Optional dependencies

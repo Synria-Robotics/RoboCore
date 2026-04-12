@@ -49,9 +49,12 @@ def main(args):
     # RoboCore
     left_model = RobotModel(model_path, base_link=args.left_base_link, end_link=args.left_end_link)
     right_model = RobotModel(model_path, base_link=args.right_base_link, end_link=args.right_end_link)
-    rc.set_backend('torch', device=args.device)
+    if args.rc_backend == 'torch':
+        rc.set_backend('torch', device=args.device)
+    else:
+        rc.set_backend('cpp')
     
-    beauty_print(f"Bimanual Jacobian Comparison: PyTorch Kinematics vs RoboCore", type="module")
+    beauty_print(f"Bimanual Jacobian Comparison: PyTorch Kinematics vs RoboCore ({args.rc_backend})", type="module")
     beauty_print(f"Left arm: {n_dof_left} DOF, Right arm: {n_dof_right} DOF", type="info")
     beauty_print(f"Mode: {args.mode}", type="info")
     beauty_print(f"PyTorch device: {args.device}", type="info")
@@ -92,7 +95,12 @@ def main(args):
     J_pk_np = J_pk.cpu().numpy()
     
     # Compute Jacobian with RoboCore
-    J_rc = bimanual_jacobian(left_model, right_model, q_left, q_right, mode=args.mode, device=device)
+    if args.rc_backend == 'cpp':
+        q_l_rc = q_left.detach().cpu().numpy()
+        q_r_rc = q_right.detach().cpu().numpy()
+        J_rc = bimanual_jacobian(left_model, right_model, q_l_rc, q_r_rc, mode=args.mode)
+    else:
+        J_rc = bimanual_jacobian(left_model, right_model, q_left, q_right, mode=args.mode, device=device)
     J_rc_np = to_numpy(J_rc)
     
     beauty_print(f"Jacobian shape (PyTorch Kinematics): {J_pk_np.shape}")
@@ -141,6 +149,10 @@ def main(args):
         return J
     
     def benchmark_rc():
+        if args.rc_backend == 'cpp':
+            ql = q_left.detach().cpu().numpy()
+            qr = q_right.detach().cpu().numpy()
+            return bimanual_jacobian(left_model, right_model, ql, qr, mode=args.mode)
         return bimanual_jacobian(left_model, right_model, q_left, q_right, mode=args.mode, device=device)
     
     def benchmark(func):
@@ -186,7 +198,12 @@ def main(args):
         J_pk_rand_np = J_pk_rand.cpu().numpy()
         
         # RoboCore
-        J_rc_rand = bimanual_jacobian(left_model, right_model, q_left_rand, q_right_rand, mode=args.mode, device=device)
+        if args.rc_backend == 'cpp':
+            qlr = q_left_rand.detach().cpu().numpy()
+            qrr = q_right_rand.detach().cpu().numpy()
+            J_rc_rand = bimanual_jacobian(left_model, right_model, qlr, qrr, mode=args.mode)
+        else:
+            J_rc_rand = bimanual_jacobian(left_model, right_model, q_left_rand, q_right_rand, mode=args.mode, device=device)
         J_rc_rand_np = to_numpy(J_rc_rand)
         
         # Condition number
@@ -226,7 +243,7 @@ if __name__ == '__main__':
     import synriard
     # Bessica is a dual-arm robot
     # Note: PyTorch Kinematics requires URDF format
-    model_path = synriard.get_model_path("Bessica_D", version="v1_0", variant="covered", model_format="urdf")
+    model_path = synriard.get_model_path("Bessica_D", version="v1_1", variant="covered", model_format="urdf")
 
     parser = argparse.ArgumentParser(description="Bimanual Jacobian validation with Pytorch Kinematics")
     parser.add_argument('--model-path', type=str, default=model_path,
@@ -242,6 +259,8 @@ if __name__ == '__main__':
     parser.add_argument('--mode', type=str, default='indep', choices=['indep', 'relative', 'mirror'],
                         help='Jacobian mode: indep (independent), relative (relative transform), mirror (mirror mode). Note: PyTorch Kinematics only supports indep mode directly.')
     parser.add_argument('--device', default='cpu', help='PyTorch device (cpu, cuda)')
+    parser.add_argument('--rc-backend', type=str, default='torch', choices=['torch', 'cpp'],
+                        help='RoboCore backend for Jacobian vs PK comparison')
     parser.add_argument('--samples', type=int, default=100, help='Number of test configurations')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     args = parser.parse_args()

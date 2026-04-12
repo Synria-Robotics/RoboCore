@@ -243,8 +243,69 @@ def jacobian(
             J = J.detach().cpu().numpy()
 
         return J
+    elif b == 'cpp':
+        from robocore.kinematics.jacobian_utils.jacobian_solver_cpp import JacobianSolverCpp
+
+        try:
+            import torch
+            if isinstance(q, torch.Tensor):
+                q_in = q.detach().cpu().numpy().astype(np.float64, copy=False)
+            else:
+                q_in = np.asarray(q, dtype=np.float64)
+        except ImportError:
+            q_in = np.asarray(q, dtype=np.float64)
+
+        if method == 'autograd':
+            raise ValueError("Autograd method requires torch backend")
+        if method not in ('analytic', 'numeric'):
+            raise ValueError(f"Unknown method '{method}' for cpp backend. Use 'analytic' or 'numeric'.")
+
+        solver_cpp = JacobianSolverCpp(model)
+        # Solver is built for the current model chain (including dynamic end_link);
+        # passing target_link into solve would require the same target_link in __init__.
+        J = solver_cpp.solve(
+            q_in,
+            method=method,
+            epsilon=epsilon,
+            use_central_diff=use_central_diff,
+            target_link=None,
+        )
+
+        if row_mask is not None:
+            mask_bool: List[bool] = [bool(m) for m in row_mask]
+            if len(mask_bool) != 6:
+                raise ValueError("row_mask must have length 6 (for 6 twist components)")
+            if J.ndim == 3:
+                J = J[:, mask_bool, :]
+            else:
+                J = J[mask_bool, :]
+
+        if joint_indices is not None:
+            if J.ndim == 3:
+                J = J[:, :, list(joint_indices)]
+            else:
+                J = J[:, list(joint_indices)]
+
+        if use_full_config and chain_indices is not None:
+            nq_full = model.num_dof
+            if J.ndim == 3:
+                batch_size = J.shape[0]
+                J_full = np.zeros((batch_size, 6, nq_full), dtype=J.dtype)
+                J_full[:, :, chain_indices] = J
+                J = J_full
+            else:
+                J_full = np.zeros((6, nq_full), dtype=J.dtype)
+                J_full[:, chain_indices] = J
+                J = J_full
+
+        if original_end is not None:
+            model.end_link = original_end
+            model.base_link = original_base
+            model._build_chain()
+
+        return J
     else:
-        raise ValueError("Unsupported backend, expected 'auto'|'numpy'|'torch'")
+        raise ValueError("Unsupported backend, expected 'numpy'|'torch'|'cpp'")
 
 
 __all__ = ["jacobian"]

@@ -103,6 +103,11 @@ def main() -> None:
     parser.add_argument("--inner-single", type=int, default=2000, help="Jacobian calls per trial (batch=1).")
     parser.add_argument("--inner-batch", type=int, default=200, help="Jacobian calls per trial (batch=100).")
     parser.add_argument("--device", default="cpu", help="Torch device (e.g. cpu, cuda).")
+    parser.add_argument(
+        "--no-pk-pin",
+        action="store_true",
+        help="Skip pytorch_kinematics + pinocchio timing (optional deps).",
+    )
     args = parser.parse_args()
 
     urdf = args.urdf or _default_urdf()
@@ -198,20 +203,51 @@ def main() -> None:
         lambda: jac_cpp.solve(q100, method="analytic"), repeats=args.repeats, inner_loops=args.inner_batch
     )
 
+    t_pk_1 = t_pk_100 = t_pin_1 = t_pin_100 = None
+    if not args.no_pk_pin and args.target_link is None:
+        import benchmark_alicia_pk_pin as _bpk
+
+        ok_pk, msg_pk = _bpk.pk_pin_status()
+        if ok_pk:
+            ctx = _bpk.AliciaPkPinFKJac.build(model_np, urdf, args.base_link, args.end_link, args.device)
+            for _ in range(20):
+                ctx.pk_jac1(q1)
+                ctx.pin_jac1(q1)
+            ctx.sync_torch()
+            t_pk_1 = _bench(lambda: ctx.pk_jac1(q1), repeats=args.repeats, inner_loops=args.inner_single)
+            t_pin_1 = _bench(lambda: ctx.pin_jac1(q1), repeats=args.repeats, inner_loops=args.inner_single)
+            t_pk_100 = _bench(lambda: ctx.pk_jac_batch(q100), repeats=args.repeats, inner_loops=args.inner_batch)
+            t_pin_100 = _bench(lambda: ctx.pin_jac_batch(q100), repeats=args.repeats, inner_loops=args.inner_batch)
+            ctx.sync_torch()
+        else:
+            print(f"(skip pytorch_kinematics/pinocchio Jacobian: {msg_pk})", flush=True)
+    elif args.target_link is not None:
+        print("(skip pytorch_kinematics/pinocchio Jacobian: PK chain is built for --end-link only)", flush=True)
+
     def ms_per_call(t_sec: float, inner: int) -> float:
         return t_sec / inner * 1e3
 
+    col_w = 22
     print(f"Model: {urdf.name}  chain DOF={n}  end_link={args.end_link}")
     print(f"Torch device: {args.device}")
     print()
-    print(f"{'backend':<10} {'batch=1 (ms/call)':<22} {'batch=100 (ms/call)':<24}")
-    print("-" * 56)
-    print(f"{'numpy':<10} {ms_per_call(t_np_1, args.inner_single):<22.6f} {ms_per_call(t_np_100, args.inner_batch):<24.6f}")
-    print(f"{'torch':<10} {ms_per_call(t_th_1, args.inner_single):<22.6f} {ms_per_call(t_th_100, args.inner_batch):<24.6f}")
+    print(f"{'backend':<22} {'batch=1 (ms/call)':<{col_w}} {'batch=100 (ms/call)':<24}")
+    print("-" * (22 + col_w + 24 + 2))
+    print(f"{'numpy':<22} {ms_per_call(t_np_1, args.inner_single):<{col_w}.6f} {ms_per_call(t_np_100, args.inner_batch):<24.6f}")
+    print(f"{'torch (RoboCore)':<22} {ms_per_call(t_th_1, args.inner_single):<{col_w}.6f} {ms_per_call(t_th_100, args.inner_batch):<24.6f}")
     print(
-        f"{'cpp+eigen':<10} {ms_per_call(t_cpp_1, args.inner_single):<22.6f} "
+        f"{'cpp+eigen':<22} {ms_per_call(t_cpp_1, args.inner_single):<{col_w}.6f} "
         f"{ms_per_call(t_cpp_100, args.inner_batch):<24.6f}"
     )
+    if t_pk_1 is not None:
+        print(
+            f"{'pytorch_kinematics':<22} {ms_per_call(t_pk_1, args.inner_single):<{col_w}.6f} "
+            f"{ms_per_call(t_pk_100, args.inner_batch):<24.6f}"
+        )
+        print(
+            f"{'pinocchio':<22} {ms_per_call(t_pin_1, args.inner_single):<{col_w}.6f} "
+            f"{ms_per_call(t_pin_100, args.inner_batch):<24.6f}"
+        )
 
 
 if __name__ == "__main__":

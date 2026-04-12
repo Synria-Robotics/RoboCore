@@ -40,6 +40,20 @@ _NATIVE_CPPS = (
     "robocore/kinematics/fk_utils/_fk_chain_core.cpp",
     "robocore/kinematics/jacobian_utils/_jacobian_chain_core.cpp",
     "robocore/kinematics/ik_utils/_ik_chain_core.cpp",
+    "robocore/kinematics/ik_utils/_multichain_ik_core.cpp",
+)
+
+_NATIVE_EXTENSION_SPECS: tuple[tuple[str, str], ...] = (
+    ("robocore.kinematics.fk_utils._fk_chain_core", "robocore/kinematics/fk_utils/_fk_chain_core.cpp"),
+    (
+        "robocore.kinematics.jacobian_utils._jacobian_chain_core",
+        "robocore/kinematics/jacobian_utils/_jacobian_chain_core.cpp",
+    ),
+    ("robocore.kinematics.ik_utils._ik_chain_core", "robocore/kinematics/ik_utils/_ik_chain_core.cpp"),
+    (
+        "robocore.kinematics.ik_utils._multichain_ik_core",
+        "robocore/kinematics/ik_utils/_multichain_ik_core.cpp",
+    ),
 )
 
 
@@ -63,37 +77,17 @@ def _ext_modules():
     if sys.platform == "darwin":
         extra.append("-stdlib=libc++")
     exts = []
-    fk_cpp, jac_cpp, ik_cpp = _NATIVE_CPPS
-    if (ROOT / fk_cpp).is_file():
-        exts.append(
-            Pybind11Extension(
-                "robocore.kinematics.fk_utils._fk_chain_core",
-                [fk_cpp],
-                include_dirs=[ei],
-                cxx_std=17,
-                extra_compile_args=extra,
+    for mod_name, rel_path in _NATIVE_EXTENSION_SPECS:
+        if (ROOT / rel_path).is_file():
+            exts.append(
+                Pybind11Extension(
+                    mod_name,
+                    [rel_path],
+                    include_dirs=[ei],
+                    cxx_std=17,
+                    extra_compile_args=extra,
+                )
             )
-        )
-    if (ROOT / jac_cpp).is_file():
-        exts.append(
-            Pybind11Extension(
-                "robocore.kinematics.jacobian_utils._jacobian_chain_core",
-                [jac_cpp],
-                include_dirs=[ei],
-                cxx_std=17,
-                extra_compile_args=extra,
-            )
-        )
-    if (ROOT / ik_cpp).is_file():
-        exts.append(
-            Pybind11Extension(
-                "robocore.kinematics.ik_utils._ik_chain_core",
-                [ik_cpp],
-                include_dirs=[ei],
-                cxx_std=17,
-                extra_compile_args=extra,
-            )
-        )
     return exts
 
 

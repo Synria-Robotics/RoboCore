@@ -194,7 +194,7 @@ def main(args):
 if __name__ == "__main__":
     from synriard import get_model_path
     
-    model_path = get_model_path("Bessica_D", version="v1_0", variant="covered", model_format="urdf")
+    model_path = get_model_path("Bessica_D", version="v1_1", variant="covered", model_format="urdf")
 
     parser = argparse.ArgumentParser(description="Bimanual Inverse Kinematics Parallel Demo - Batch IK processing with random joint configurations")
     parser.add_argument('--model-path', type=str,
@@ -218,7 +218,7 @@ if __name__ == "__main__":
     parser.add_argument('--init-scale', type=float, default=1.0,
                         help='Scale factor for joint limits when generating guesses (0.0 to 1.0, default: 1.0)')
     parser.add_argument('--backend', type=str, default='numpy',
-                        choices=['numpy', 'torch'],
+                        choices=['numpy', 'torch', 'cpp'],
                         help='Backend to use for computation (default: torch)')
     parser.add_argument('--method', type=str, default='dls',
                         choices=['dls', 'pinv', 'transpose'],

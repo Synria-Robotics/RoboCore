@@ -118,7 +118,7 @@ if __name__ == "__main__":
     parser.add_argument('--num-configs', type=int, default=50, help='Number of joint configurations to process')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for generating configurations')
     parser.add_argument('--scale', type=float, default=1.0, help='Scale factor for joint limits (0.0 to 1.0)')
-    parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch'],
+    parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch', 'cpp'],
                         help='Backend to use for computation (default: numpy)')
     args = parser.parse_args()
     main(args)

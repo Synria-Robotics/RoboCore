@@ -1,7 +1,7 @@
 """Jacobian Parallel Demo
 
-This demo demonstrates parallel/batch Jacobian computation.
-It shows how to use batch processing for multiple joint configurations.
+This demo demonstrates parallel/batch Jacobian computation and compares
+NumPy, Torch, and C++ backend batch timing (mirrors 02a_demo_jacobian.py for single-J).
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -30,98 +30,150 @@ import robocore as rc
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.jacobian import jacobian
 from robocore.utils.beauty_logger import beauty_print_array, beauty_print
+from robocore.utils.backend import to_numpy
+
+
+def compute_jacobian_batch(robot_model, backend, joint_angles_batch, *, method='analytic'):
+    """Compute batch Jacobian for given backend.
+
+    Same layout as ``compute_fk_batch`` in ``01b_demo_fk_parallel.py``: normalize ``q`` to
+    (B, n_dof), time one backend call, return array plus elapsed seconds.
+
+    :param robot_model: RobotModel instance
+    :param backend: Backend name ('numpy', 'torch', or 'cpp')
+    :param joint_angles_batch: Joint angles per row, shape (B, n_dof) or list of configs
+    :param method: Jacobian method, 'analytic' or 'numeric'
+    :return: Dictionary with batch Jacobian and wall-clock time for the Jacobian call
+    """
+    rc.set_backend(backend)
+    q_batch = np.asarray(joint_angles_batch, dtype=np.float64)
+    if q_batch.ndim == 1:
+        q_batch = q_batch.reshape(1, -1)
+
+    start_time = time.time()
+    J = jacobian(robot_model, q_batch, method=method)
+    elapsed_time = time.time() - start_time
+
+    return {
+        'jacobian': J,
+        'time': elapsed_time,
+    }
+
+
+def _jacobian_agreement_frobenius(J_ref, J_other):
+    """Max Frobenius norm of (J_ref - J_other) over batch, or single-matrix Frobenius norm."""
+    A = to_numpy(J_ref)
+    B = to_numpy(J_other)
+    D = A - B
+    if D.ndim == 2:
+        return float(np.linalg.norm(D, 'fro'))
+    return float(np.max(np.linalg.norm(D.reshape(D.shape[0], -1), axis=1)))
 
 
 def main(args):
-    backend = args.backend
-    rc.set_backend(backend)
+    joint_configs = args.joint_angles
+    num_batch = len(joint_configs)
+    q_batch = np.asarray(joint_configs, dtype=np.float64)
 
-    # Load robot model
+    beauty_print(f"Batch Jacobian: B={num_batch} configuration(s), method={args.method}")
+
     robot_model = RobotModel(str(args.model_path), base_link=args.base_link, end_link=args.end_link)
     if args.verbose:
         robot_model.summary(show_chain=True)
         robot_model.print_tree(show_fixed=True)
 
-    # Generate random joint configurations
-    beauty_print("Generating Random Joint Configurations", type="module", centered=True)
-    joint_configs = robot_model.random_q_batch(args.num_configs, seed=args.seed, scale=args.scale)
-    beauty_print(f"Generated {args.num_configs} random joint configuration(s)")
-    num_batch = args.num_configs
+    results_np = compute_jacobian_batch(robot_model, 'numpy', q_batch, method=args.method)
+    results_torch = compute_jacobian_batch(robot_model, 'torch', q_batch, method=args.method)
+    results_cpp = compute_jacobian_batch(robot_model, 'cpp', q_batch, method=args.method)
 
-    # Single Jacobian example
-    beauty_print("Single Jacobian Example", type="module", centered=True)
-    q_single = joint_configs[0]
-    
-    start_time = time.time()
-    J_single = jacobian(robot_model, q_single, method=args.method)
-    single_time = time.time() - start_time
-    
-    beauty_print(f"Single Jacobian time: {single_time:.6f} seconds")
-    beauty_print(f"Jacobian shape: {J_single.shape}")
-    beauty_print(f"Condition number: {np.linalg.cond(J_single):.2e}")
+    J_np = to_numpy(results_np['jacobian'])
+    fro_nt = _jacobian_agreement_frobenius(results_np['jacobian'], results_torch['jacobian'])
+    fro_nc = _jacobian_agreement_frobenius(results_np['jacobian'], results_cpp['jacobian'])
 
-    # Batch Jacobian example
-    beauty_print("Batch Jacobian Example", type="module", centered=True)
-    q_batch = np.array(joint_configs)
-    
-    start_time = time.time()
-    J_batch = jacobian(robot_model, q_batch, method=args.method)
-    batch_time = time.time() - start_time
-    
-    beauty_print(f"Batch Jacobian time: {batch_time:.6f} seconds")
-    beauty_print(f"Average time per configuration: {batch_time/num_batch:.6f} seconds")
-    beauty_print(f"Jacobian batch shape: {J_batch.shape}")
-    
-    if num_batch > 1:
-        speedup = (single_time * num_batch) / batch_time
-        beauty_print(f"Effective speedup: {speedup:.2f}x")
+    beauty_print("Jacobian agreement (max Frobenius over batch if B>1):")
+    print(f"  np vs torch: {fro_nt:.6e}   np vs cpp: {fro_nc:.6e}")
 
-    # Display results
-    if args.show_details:
-        beauty_print("Results for Each Configuration", type="module", centered=True)
-        for i in range(num_batch):
-            J = J_batch[i] if J_batch.ndim == 3 else J_single
-            q_config = joint_configs[i]
-            
-            beauty_print(f"\nConfiguration {i+1}:")
-            beauty_print(f"  Joint angles: {beauty_print_array(np.array(q_config))}")
-            beauty_print(f"  Condition number: {np.linalg.cond(J):.2e}")
-            
-            if args.show_matrix:
-                beauty_print(f"  Jacobian Matrix:")
-                print(beauty_print_array(J, precision=6))
+    beauty_print("Batch computation time:")
+    print(f"  NumPy:  {results_np['time']:.6f} seconds")
+    print(f"  Torch:  {results_torch['time']:.6f} seconds")
+    print(f"  C++:    {results_cpp['time']:.6f} seconds")
+    tnp = max(results_np['time'], 1e-15)
+    print(f"  torch/np: {results_torch['time'] / tnp:.2f}x   cpp/np: {results_cpp['time'] / tnp:.2f}x")
+    if num_batch > 0:
+        print(f"  NumPy avg per config: {results_np['time'] / num_batch:.6f} s")
+        print(f"  Torch avg per config: {results_torch['time'] / num_batch:.6f} s")
+        print(f"  C++ avg per config:   {results_cpp['time'] / num_batch:.6f} s")
+
+    beauty_print("Results for each sample (NumPy backend)", type="module", centered=True)
+    for i in range(num_batch):
+        Ji = J_np[i] if J_np.ndim == 3 else J_np
+        q_config = joint_configs[i]
+
+        beauty_print(f"Configuration {i + 1}:", type="info")
+        print(f"  Joint angles: {beauty_print_array(np.array(q_config))}")
+        print(f"  Jacobian shape: {Ji.shape}")
+        print(f"  Condition number: {np.linalg.cond(Ji):.2e}")
+
+        if args.show_matrices:
+            print(f"  Jacobian matrix:")
+            print(beauty_print_array(Ji, precision=6))
 
 
 if __name__ == "__main__":
     from synriard import get_model_path
-    
+
     model_path = get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="urdf")
 
-    parser = argparse.ArgumentParser(description="Jacobian Parallel Demo - Batch Jacobian computation")
+    parser = argparse.ArgumentParser(
+        description="Jacobian batch demo — NumPy / Torch / C++ timing (see also 02a_demo_jacobian.py)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+        Examples:
+        python 02b_demo_jacobian_parallel.py
+
+        python 02b_demo_jacobian_parallel.py --joint-angles \\
+            0.1 0.2 -0.3 0.0 0.5 -0.2 \\
+            0.2 0.3 -0.4 0.1 0.6 -0.3
+
+        python 02b_demo_jacobian_parallel.py --method numeric --show-matrices
+        """
+    )
     parser.add_argument('--model-path', type=str,
                         default=model_path,
                         help='Path to URDF file (default: Alicia-D)')
     parser.add_argument('--base-link', type=str, default='base_link', help='Base link name')
-    parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
-    parser.add_argument('--num-configs', type=int, default=1000,
-                        help='Number of random joint configurations to generate (default: 1000)')
-    parser.add_argument('--seed', type=int, default=None,
-                        help='Random seed for reproducibility (default: None)')
-    parser.add_argument('--scale', type=float, default=0.8,
-                        help='Scaling factor for joint range sampling (0.0 to 1.0, default: 0.8)')
-    parser.add_argument('--backend', type=str, default='torch',
-                        choices=['numpy', 'torch'],
-                        help='Backend to use for computation (default: torch)')
+    parser.add_argument('--end-link', type=str, default='link6', help='End-effector link name')
+    parser.add_argument('--joint-angles', type=float, nargs='+',
+                        default=[0.1, 0.2, -0.3, 0.0, 0.5, -0.2,
+                                 0.4, 0.2, -0.3, 0.0, 0.5, -0.2,
+                                 0.1, 0.5, -0.3, 0.0, 0.0, 0.2,
+                                 0.5, 0.1, -0.9, 0.0, 0.2, -0.2,
+                                 0.1, 0.2, -0.3, 0.7, 0.5, -0.2],
+                        help='Joint angles in radians (flattened list, reshaped by --num-joints)')
+    parser.add_argument('--num-joints', type=int, default=6,
+                        help='Number of joints per configuration (default: 6)')
     parser.add_argument('--method', type=str, default='analytic',
-                        choices=['analytic', 'numeric', 'autograd'],
-                        help='Jacobian method (default: analytic)')
+                        choices=['analytic', 'numeric'],
+                        help='Jacobian method (default: analytic; autograd not used in batch backend compare)')
     parser.add_argument('--verbose', action='store_true',
                         help='Show robot model summary and tree')
-    parser.add_argument('--show-details', action='store_true',
-                        help='Show detailed results for each configuration')
-    parser.add_argument('--show-matrix', action='store_true',
-                        help='Show full Jacobian matrices')
+    parser.add_argument('--show-matrices', action='store_true',
+                        help='Show full Jacobian matrix for each configuration')
+    parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch', 'cpp'],
+                        help='Legacy option (ignored — NumPy, Torch, and C++ are all tested)')
     args = parser.parse_args()
 
-    main(args)
+    num_joints = args.num_joints
+    joint_angles_flat = args.joint_angles
+    if len(joint_angles_flat) % num_joints != 0:
+        raise ValueError(
+            f"Total number of joint angles ({len(joint_angles_flat)}) must be divisible by num-joints ({num_joints})"
+        )
 
+    n_batch = len(joint_angles_flat) // num_joints
+    args.joint_angles = [
+        joint_angles_flat[i * num_joints:(i + 1) * num_joints]
+        for i in range(n_batch)
+    ]
+
+    main(args)

@@ -46,7 +46,10 @@ def main(args):
     
     # RoboCore - create first to get joint mapping
     robot_model = RobotModel(model_path, base_link=args.base_link)
-    rc.set_backend('torch', device=args.device)
+    if args.rc_backend == 'torch':
+        rc.set_backend('torch', device=args.device)
+    else:
+        rc.set_backend('cpp')
     
     # PyTorch Kinematics - build chains for all four end-effectors
     with open(model_path, 'rb') as f:
@@ -69,7 +72,7 @@ def main(args):
     pin_model = pinocchio.buildModelFromUrdf(model_path)
     pin_data = pin_model.createData()
     
-    beauty_print(f"Humanoid Inverse Kinematics Comparison: PyTorch Kinematics vs RoboCore", type="module")
+    beauty_print(f"Humanoid Inverse Kinematics Comparison: PyTorch Kinematics vs RoboCore ({args.rc_backend})", type="module")
     beauty_print(f"PyTorch device: {args.device}", type="info")
     beauty_print("Note: PyTorch Kinematics solves each end-effector independently. RoboCore solves all four simultaneously.", type="info")
     beauty_print("Note: Pinocchio IK for multi-chain is complex and skipped in this demo.", type="info")
@@ -258,6 +261,8 @@ if __name__ == '__main__':
                         help='Scale factor for joint limits when generating guesses (0.0 to 1.0, default: 1.0)')
     parser.add_argument('--num-retries', type=int, default=1, help='Number of retries for PyTorch Kinematics IK (default: 1)')
     parser.add_argument('--device', default='cpu', help='PyTorch device')
+    parser.add_argument('--rc-backend', type=str, default='torch', choices=['torch', 'cpp'],
+                        help='RoboCore IK backend for PK comparison')
     args = parser.parse_args()
     
     main(args)

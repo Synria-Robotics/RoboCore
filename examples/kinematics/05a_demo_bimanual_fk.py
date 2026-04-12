@@ -37,7 +37,7 @@ def compute_bimanual_fk(robot_model, backend, q_full, left_end_link, right_end_l
     """Compute bimanual forward kinematics using unified configuration space.
     
     :param robot_model: RobotModel with unified config space
-    :param backend: Backend name ('numpy' or 'torch')
+    :param backend: Backend name ('numpy', 'torch', or 'cpp')
     :param q_full: Full joint configuration [nq] (includes all joints)
     :param left_end_link: Left arm end-effector link name
     :param right_end_link: Right arm end-effector link name
@@ -122,126 +122,166 @@ def main(args):
     if len(args.q_right) <= len(right_indices):
         q_full[right_indices[:len(args.q_right)]] = args.q_right
 
-    # Compute with both backends
+    # Compute with NumPy, Torch, and C++ (Eigen) backends
     results_np = compute_bimanual_fk(robot_model, 'numpy', q_full,
                                      args.left_end_link, args.right_end_link, args.left_base_link)
     results_torch = compute_bimanual_fk(robot_model, 'torch', q_full,
                                         args.left_end_link, args.right_end_link, args.left_base_link)
+    results_cpp = compute_bimanual_fk(robot_model, 'cpp', q_full,
+                                       args.left_end_link, args.right_end_link, args.left_base_link)
 
     # Display results
     beauty_print(f"Left Arm End-Effector Position (m):")
     pos_left_np = to_numpy(results_np['left']['position'])
     pos_left_torch = to_numpy(results_torch['left']['position'])
+    pos_left_cpp = to_numpy(results_cpp['left']['position'])
     print(f"  NumPy:  {beauty_print_array(pos_left_np)}")
     print(f"  Torch:  {beauty_print_array(pos_left_torch)}")
+    print(f"  C++:    {beauty_print_array(pos_left_cpp)}")
     pos_diff_left = np.linalg.norm(pos_left_np - pos_left_torch)
-    print(f"  Diff:   {pos_diff_left:.6e}")
+    pos_diff_left_nc = np.linalg.norm(pos_left_np - pos_left_cpp)
+    print(f"  np vs torch: {pos_diff_left:.6e}   np vs cpp: {pos_diff_left_nc:.6e}")
 
     beauty_print(f"Left Arm End-Effector Orientation (Euler XYZ, radians):")
     euler_left_np = to_numpy(results_np['left']['euler'])
     euler_left_torch = to_numpy(results_torch['left']['euler'])
+    euler_left_cpp = to_numpy(results_cpp['left']['euler'])
     print(f"  NumPy:  {beauty_print_array(euler_left_np)}")
     print(f"  Torch:  {beauty_print_array(euler_left_torch)}")
+    print(f"  C++:    {beauty_print_array(euler_left_cpp)}")
     euler_diff_left = np.linalg.norm(euler_left_np - euler_left_torch)
-    print(f"  Diff:   {euler_diff_left:.6e}")
+    euler_diff_left_nc = np.linalg.norm(euler_left_np - euler_left_cpp)
+    print(f"  np vs torch: {euler_diff_left:.6e}   np vs cpp: {euler_diff_left_nc:.6e}")
 
     beauty_print(f"Left Arm End-Effector Orientation (Quaternion xyzw):")
     quat_left_np = to_numpy(results_np['left']['quat'])
     quat_left_torch = to_numpy(results_torch['left']['quat'])
+    quat_left_cpp = to_numpy(results_cpp['left']['quat'])
     print(f"  NumPy:  {beauty_print_array(quat_left_np, precision=6)}")
     print(f"  Torch:  {beauty_print_array(quat_left_torch, precision=6)}")
+    print(f"  C++:    {beauty_print_array(quat_left_cpp, precision=6)}")
     quat_diff_left = np.linalg.norm(quat_left_np - quat_left_torch)
-    print(f"  Diff:   {quat_diff_left:.6e}")
+    quat_diff_left_nc = np.linalg.norm(quat_left_np - quat_left_cpp)
+    print(f"  np vs torch: {quat_diff_left:.6e}   np vs cpp: {quat_diff_left_nc:.6e}")
 
     beauty_print(f"Right Arm End-Effector Position (m):")
     pos_right_np = to_numpy(results_np['right']['position'])
     pos_right_torch = to_numpy(results_torch['right']['position'])
+    pos_right_cpp = to_numpy(results_cpp['right']['position'])
     print(f"  NumPy:  {beauty_print_array(pos_right_np)}")
     print(f"  Torch:  {beauty_print_array(pos_right_torch)}")
+    print(f"  C++:    {beauty_print_array(pos_right_cpp)}")
     pos_diff_right = np.linalg.norm(pos_right_np - pos_right_torch)
-    print(f"  Diff:   {pos_diff_right:.6e}")
+    pos_diff_right_nc = np.linalg.norm(pos_right_np - pos_right_cpp)
+    print(f"  np vs torch: {pos_diff_right:.6e}   np vs cpp: {pos_diff_right_nc:.6e}")
 
     beauty_print(f"Right Arm End-Effector Orientation (Euler XYZ, radians):")
     euler_right_np = to_numpy(results_np['right']['euler'])
     euler_right_torch = to_numpy(results_torch['right']['euler'])
+    euler_right_cpp = to_numpy(results_cpp['right']['euler'])
     print(f"  NumPy:  {beauty_print_array(euler_right_np)}")
     print(f"  Torch:  {beauty_print_array(euler_right_torch)}")
+    print(f"  C++:    {beauty_print_array(euler_right_cpp)}")
     euler_diff_right = np.linalg.norm(euler_right_np - euler_right_torch)
-    print(f"  Diff:   {euler_diff_right:.6e}")
+    euler_diff_right_nc = np.linalg.norm(euler_right_np - euler_right_cpp)
+    print(f"  np vs torch: {euler_diff_right:.6e}   np vs cpp: {euler_diff_right_nc:.6e}")
 
     beauty_print(f"Right Arm End-Effector Orientation (Quaternion xyzw):")
     quat_right_np = to_numpy(results_np['right']['quat'])
     quat_right_torch = to_numpy(results_torch['right']['quat'])
+    quat_right_cpp = to_numpy(results_cpp['right']['quat'])
     print(f"  NumPy:  {beauty_print_array(quat_right_np, precision=6)}")
     print(f"  Torch:  {beauty_print_array(quat_right_torch, precision=6)}")
+    print(f"  C++:    {beauty_print_array(quat_right_cpp, precision=6)}")
     quat_diff_right = np.linalg.norm(quat_right_np - quat_right_torch)
-    print(f"  Diff:   {quat_diff_right:.6e}")
+    quat_diff_right_nc = np.linalg.norm(quat_right_np - quat_right_cpp)
+    print(f"  np vs torch: {quat_diff_right:.6e}   np vs cpp: {quat_diff_right_nc:.6e}")
 
     if 'relative' in results_np:
         beauty_print(f"Relative Transform Position (m):")
         pos_rel_np = to_numpy(results_np['relative']['position'])
         pos_rel_torch = to_numpy(results_torch['relative']['position'])
+        pos_rel_cpp = to_numpy(results_cpp['relative']['position'])
         print(f"  NumPy:  {beauty_print_array(pos_rel_np)}")
         print(f"  Torch:  {beauty_print_array(pos_rel_torch)}")
+        print(f"  C++:    {beauty_print_array(pos_rel_cpp)}")
         pos_diff_rel = np.linalg.norm(pos_rel_np - pos_rel_torch)
-        print(f"  Diff:   {pos_diff_rel:.6e}")
+        pos_diff_rel_nc = np.linalg.norm(pos_rel_np - pos_rel_cpp)
+        print(f"  np vs torch: {pos_diff_rel:.6e}   np vs cpp: {pos_diff_rel_nc:.6e}")
 
         if 'euler' in results_np['relative']:
             beauty_print(f"Relative Transform Orientation (Euler XYZ, radians):")
             euler_rel_np = to_numpy(results_np['relative']['euler'])
             euler_rel_torch = to_numpy(results_torch['relative']['euler'])
+            euler_rel_cpp = to_numpy(results_cpp['relative']['euler'])
             print(f"  NumPy:  {beauty_print_array(euler_rel_np)}")
             print(f"  Torch:  {beauty_print_array(euler_rel_torch)}")
+            print(f"  C++:    {beauty_print_array(euler_rel_cpp)}")
             euler_diff_rel = np.linalg.norm(euler_rel_np - euler_rel_torch)
-            print(f"  Diff:   {euler_diff_rel:.6e}")
+            euler_diff_rel_nc = np.linalg.norm(euler_rel_np - euler_rel_cpp)
+            print(f"  np vs torch: {euler_diff_rel:.6e}   np vs cpp: {euler_diff_rel_nc:.6e}")
 
         if 'quat' in results_np['relative']:
             beauty_print(f"Relative Transform Orientation (Quaternion xyzw):")
             quat_rel_np = to_numpy(results_np['relative']['quat'])
             quat_rel_torch = to_numpy(results_torch['relative']['quat'])
+            quat_rel_cpp = to_numpy(results_cpp['relative']['quat'])
             print(f"  NumPy:  {beauty_print_array(quat_rel_np, precision=6)}")
             print(f"  Torch:  {beauty_print_array(quat_rel_torch, precision=6)}")
+            print(f"  C++:    {beauty_print_array(quat_rel_cpp, precision=6)}")
             quat_diff_rel = np.linalg.norm(quat_rel_np - quat_rel_torch)
-            print(f"  Diff:   {quat_diff_rel:.6e}")
+            quat_diff_rel_nc = np.linalg.norm(quat_rel_np - quat_rel_cpp)
+            print(f"  np vs torch: {quat_diff_rel:.6e}   np vs cpp: {quat_diff_rel_nc:.6e}")
 
     if 'mirror' in results_np:
         beauty_print(f"Mirror Transform Position (m):")
         pos_mirror_np = to_numpy(results_np['mirror']['position'])
         pos_mirror_torch = to_numpy(results_torch['mirror']['position'])
+        pos_mirror_cpp = to_numpy(results_cpp['mirror']['position'])
         print(f"  NumPy:  {beauty_print_array(pos_mirror_np)}")
         print(f"  Torch:  {beauty_print_array(pos_mirror_torch)}")
+        print(f"  C++:    {beauty_print_array(pos_mirror_cpp)}")
         pos_diff_mirror = np.linalg.norm(pos_mirror_np - pos_mirror_torch)
-        print(f"  Diff:   {pos_diff_mirror:.6e}")
+        pos_diff_mirror_nc = np.linalg.norm(pos_mirror_np - pos_mirror_cpp)
+        print(f"  np vs torch: {pos_diff_mirror:.6e}   np vs cpp: {pos_diff_mirror_nc:.6e}")
 
         if 'euler' in results_np['mirror']:
             beauty_print(f"Mirror Transform Orientation (Euler XYZ, radians):")
             euler_mirror_np = to_numpy(results_np['mirror']['euler'])
             euler_mirror_torch = to_numpy(results_torch['mirror']['euler'])
+            euler_mirror_cpp = to_numpy(results_cpp['mirror']['euler'])
             print(f"  NumPy:  {beauty_print_array(euler_mirror_np)}")
             print(f"  Torch:  {beauty_print_array(euler_mirror_torch)}")
+            print(f"  C++:    {beauty_print_array(euler_mirror_cpp)}")
             euler_diff_mirror = np.linalg.norm(euler_mirror_np - euler_mirror_torch)
-            print(f"  Diff:   {euler_diff_mirror:.6e}")
+            euler_diff_mirror_nc = np.linalg.norm(euler_mirror_np - euler_mirror_cpp)
+            print(f"  np vs torch: {euler_diff_mirror:.6e}   np vs cpp: {euler_diff_mirror_nc:.6e}")
 
         if 'quat' in results_np['mirror']:
             beauty_print(f"Mirror Transform Orientation (Quaternion xyzw):")
             quat_mirror_np = to_numpy(results_np['mirror']['quat'])
             quat_mirror_torch = to_numpy(results_torch['mirror']['quat'])
+            quat_mirror_cpp = to_numpy(results_cpp['mirror']['quat'])
             print(f"  NumPy:  {beauty_print_array(quat_mirror_np, precision=6)}")
             print(f"  Torch:  {beauty_print_array(quat_mirror_torch, precision=6)}")
+            print(f"  C++:    {beauty_print_array(quat_mirror_cpp, precision=6)}")
             quat_diff_mirror = np.linalg.norm(quat_mirror_np - quat_mirror_torch)
-            print(f"  Diff:   {quat_diff_mirror:.6e}")
+            quat_diff_mirror_nc = np.linalg.norm(quat_mirror_np - quat_mirror_cpp)
+            print(f"  np vs torch: {quat_diff_mirror:.6e}   np vs cpp: {quat_diff_mirror_nc:.6e}")
 
     beauty_print(f"Computation Time:")
     print(f"  NumPy:  {results_np['time']*1000:.4f} ms")
     print(f"  Torch:  {results_torch['time']*1000:.4f} ms")
-    print(f"  Ratio:  {results_torch['time'] / results_np['time']:.2f}x")
+    print(f"  C++:    {results_cpp['time']*1000:.4f} ms")
+    tnp = max(results_np['time'], 1e-15)
+    print(f"  torch/np: {results_torch['time'] / tnp:.2f}x   cpp/np: {results_cpp['time'] / tnp:.2f}x")
 
 
 if __name__ == "__main__":
     from synriard import get_model_path
 
     # Bessica is a dual-arm robot
-    model_path = get_model_path("Bessica_D", version="v1_1", variant="skeleton", model_format="urdf")
+    model_path = get_model_path("Bessica_D", version="v1_1", variant="covered", model_format="urdf")
 
     parser = argparse.ArgumentParser(description="Bimanual Forward Kinematics Demo")
     parser.add_argument('--model-path', type=str, default=model_path,

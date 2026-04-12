@@ -185,6 +185,18 @@ def inverse_kinematics(
                 torch_dtype=torch_dtype,
                 **solver_kwargs,
             )
+        elif backend == 'cpp':
+            result = _solve_cpp(
+                model, target_arr, initial_guesses, is_batch,
+                method=method,
+                target_link=target_link or end_link,
+                row_mask=row_mask,
+                nullspace_gain=nullspace_gain,
+                joint_centering=joint_centering,
+                joint_center_gain=joint_center_gain,
+                joint_center_weights=joint_center_weights,
+                **solver_kwargs,
+            )
         else:
             raise ValueError(f"Unsupported backend '{backend}'")
         
@@ -213,6 +225,169 @@ def inverse_kinematics(
             model.end_link = original_end
             model.base_link = original_base
             model._build_chain()
+
+
+def _solve_cpp(
+    model, target_arr, initial_guesses, is_batch, *, method, target_link, row_mask,
+    nullspace_gain, joint_centering, joint_center_gain, joint_center_weights, **solver_kwargs
+) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
+    """C++ (Eigen/pybind) IK solver; same flow as NumPy but ``IKSolverCpp`` (DLS, analytic Jacobian only)."""
+    from robocore.kinematics.ik_utils.ik_solver_cpp import IKSolverCpp
+
+    if str(method).lower() != 'dls':
+        raise ValueError("IK backend 'cpp' only supports method='dls'")
+    if not solver_kwargs.get('use_analytic_jacobian', True):
+        raise NotImplementedError("IK backend 'cpp' requires use_analytic_jacobian=True")
+
+    solver_init = {k: solver_kwargs.pop(k) for k in ['min_damping', 'max_damping', 'base_step']
+                   if k in solver_kwargs}
+
+    solver = IKSolverCpp(
+        model,
+        max_iters=solver_kwargs.pop('max_iters', 200),
+        pos_tol=solver_kwargs.pop('pos_tol', 1e-3),
+        ori_tol=solver_kwargs.pop('ori_tol', 1e-3),
+        **solver_init,
+    )
+
+    common_kwargs = dict(
+        method=method,
+        use_analytic_jacobian=solver_kwargs.pop('use_analytic_jacobian', True),
+        target_link=target_link,
+        row_mask=row_mask,
+        nullspace_gain=nullspace_gain,
+        joint_centering=joint_centering,
+        joint_center_gain=joint_center_gain,
+        joint_center_weights=joint_center_weights,
+        **solver_kwargs,
+    )
+
+    def run_once(target, q_init):
+        res = solver.solve(target, np.asarray(q_init), **common_kwargs)
+        if isinstance(res, dict):
+            res['backend'] = 'cpp'
+        return res
+
+    def best_result(candidates):
+        successes = [c for c in candidates if c.get('success')]
+        if successes:
+            return min(successes, key=lambda c: c.get('err_norm', float('inf')))
+        return min(candidates, key=lambda c: c.get('err_norm', float('inf')))
+
+    num_guesses = len(initial_guesses)
+
+    if not is_batch:
+        if num_guesses == 1:
+            return run_once(target_arr, initial_guesses[0])
+        candidates = [run_once(target_arr, q0) for q0 in initial_guesses]
+        return best_result(candidates)
+
+    batch_size = target_arr.shape[0]
+
+    if num_guesses == 1:
+        q0_batch = np.tile(initial_guesses[0], (batch_size, 1))
+        res = solver.solve(target_arr, q0_batch, **common_kwargs)
+        if isinstance(res, dict):
+            results = []
+            for i in range(batch_size):
+                result_dict = {}
+                for k, v in res.items():
+                    if isinstance(v, list) and len(v) == batch_size:
+                        result_dict[k] = v[i]
+                    elif k == 'backend':
+                        result_dict[k] = v
+                    else:
+                        result_dict[k] = v
+                results.append(result_dict)
+            return results
+        return res
+
+    num_guesses = len(initial_guesses)
+    q0_first = np.tile(initial_guesses[0], (batch_size, 1))
+    first_results = solver.solve(target_arr, q0_first, **common_kwargs)
+
+    if isinstance(first_results, dict):
+        first_results_list = []
+        for i in range(batch_size):
+            result_dict = {}
+            for k, v in first_results.items():
+                if isinstance(v, list) and len(v) == batch_size:
+                    result_dict[k] = v[i]
+                elif k == 'backend':
+                    result_dict[k] = v
+                else:
+                    result_dict[k] = v
+            first_results_list.append(result_dict)
+        first_results = first_results_list
+
+    results = []
+    failed_targets = []
+    failed_indices = []
+
+    for target_idx in range(batch_size):
+        first_res = first_results[target_idx] if isinstance(first_results, list) else first_results
+        if first_res.get('success'):
+            results.append(first_res)
+        else:
+            failed_targets.append(target_arr[target_idx])
+            failed_indices.append(target_idx)
+            results.append(None)
+
+    if not failed_targets:
+        return results
+
+    new_candidates_map: Dict[int, List[Dict[str, Any]]] = {}
+
+    for guess_idx in range(1, num_guesses):
+        if not failed_targets:
+            break
+
+        failed_targets_arr = np.array(failed_targets)
+        q0_batch = np.tile(initial_guesses[guess_idx], (len(failed_targets), 1))
+        batch_results = solver.solve(failed_targets_arr, q0_batch, **common_kwargs)
+
+        if isinstance(batch_results, dict):
+            batch_results_list = []
+            for i in range(len(failed_targets)):
+                result_dict = {}
+                for k, v in batch_results.items():
+                    if isinstance(v, list) and len(v) == len(failed_targets):
+                        result_dict[k] = v[i]
+                    elif k == 'backend':
+                        result_dict[k] = v
+                    else:
+                        result_dict[k] = v
+                batch_results_list.append(result_dict)
+            batch_results = batch_results_list
+
+        new_failed_targets = []
+        new_failed_indices = []
+
+        for i, failed_idx in enumerate(failed_indices):
+            guess_res = batch_results[i] if isinstance(batch_results, list) else batch_results
+            if failed_idx not in new_candidates_map:
+                first_res = first_results[failed_idx] if isinstance(first_results, list) else first_results
+                new_candidates_map[failed_idx] = [first_res]
+            new_candidates_map[failed_idx].append(guess_res)
+
+            if guess_res.get('success'):
+                results[failed_idx] = best_result(new_candidates_map[failed_idx])
+            else:
+                new_failed_targets.append(failed_targets[i])
+                new_failed_indices.append(failed_idx)
+
+        failed_targets = new_failed_targets
+        failed_indices = new_failed_indices
+
+    for failed_idx in failed_indices:
+        if results[failed_idx] is None:
+            candidates = new_candidates_map.get(failed_idx, [])
+            if candidates:
+                results[failed_idx] = best_result(candidates)
+            else:
+                results[failed_idx] = {'q': [0.0] * model.num_chain_dof, 'success': False}
+
+    return results
 
 
 def _solve_numpy(
@@ -583,6 +758,33 @@ def _solve_multichain_ik(
     :param solver_kwargs: Extra solver parameters
     :return: IK result dict with 'q' in full config space
     """
+    backend = get_backend()
+    if backend == 'cpp' and str(method).lower() == 'dls':
+        try:
+            from robocore.kinematics.ik_utils.multichain_ik_cpp import solve_multichain_ik_cpp
+        except ImportError:
+            pass
+        else:
+            sk = dict(solver_kwargs)
+            max_iters_mc = int(sk.pop('max_iters', 200))
+            pos_tol_mc = float(sk.pop('pos_tol', 1e-3))
+            ori_tol_mc = float(sk.pop('ori_tol', 1e-3))
+            damping_mc = float(sk.pop('damping', 1e-3))
+            step_limit_mc = float(sk.pop('step_limit', 0.2))
+            return solve_multichain_ik_cpp(
+                model,
+                targets,
+                end_links,
+                q0,
+                base_link=base_link,
+                method='dls',
+                max_iters=max_iters_mc,
+                pos_tol=pos_tol_mc,
+                ori_tol=ori_tol_mc,
+                damping=damping_mc,
+                step_limit=step_limit_mc,
+            )
+
     base = base_link or model.base_link
     
     # Create chain views for each end_link

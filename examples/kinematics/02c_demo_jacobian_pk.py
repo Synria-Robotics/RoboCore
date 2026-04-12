@@ -45,10 +45,11 @@ def main(args):
     chain = pk.build_serial_chain_from_urdf(urdf_bytes, end_link)
     n_dof = len(chain.get_joint_parameter_names())
     
-    # RoboCore
+    # RoboCore (cpp: single JacobianSolverCpp — same idea as FKSolverCpp in 01c_demo_fk_pk.py;
+    # high-level jacobian() would construct a new C++ solver on every call)
     rc_model = RobotModel(model_path, base_link=args.base_link, end_link=end_link)
     rc.set_backend(args.backend)
-    
+
     # Pinocchio
     pin_model = pinocchio.buildModelFromUrdf(model_path)
     pin_data = pin_model.createData()
@@ -76,13 +77,30 @@ def main(args):
         beauty_print(f"Warning: Could not find {end_link} in pinocchio model. Using last joint.", type="warning")
         end_joint_id = len(pin_model.joints) - 1
 
-    beauty_print(f"Jacobian Comparison: PyTorch Kinematics vs Pinocchio vs RoboCore ({n_dof} DOF)", type="module")
-    beauty_print(f"PyTorch device: {args.device}", type="info")
-    
     device = torch.device(args.device)
     dtype = torch.float64
     chain = chain.to(dtype=dtype, device=device)
-    
+
+    jac_cpp = None
+    if args.backend == 'cpp':
+        from robocore.kinematics.jacobian_utils.jacobian_solver_cpp import JacobianSolverCpp
+
+        jac_cpp = JacobianSolverCpp(rc_model)
+
+    def rc_compute_jacobian(q_vec, *, method='analytic'):
+        """RoboCore Jacobian; cpp path reuses JacobianSolverCpp (see jacobian() cpp branch)."""
+        q_arr = np.asarray(q_vec, dtype=np.float64)
+        if jac_cpp is not None:
+            return jac_cpp.solve(q_arr, method=method)
+        return jacobian(rc_model, q_arr, method=method, device=device)
+
+    rc_label = 'RoboCore C++' if jac_cpp is not None else f'RoboCore ({args.backend})'
+    beauty_print(
+        f"Jacobian Comparison: PyTorch Kinematics vs Pinocchio vs {rc_label} ({n_dof} DOF)",
+        type="module",
+    )
+    beauty_print(f"PyTorch device: {args.device}", type="info")
+
     beauty_print("[1] Jacobian Computation", type="module", centered=False)
     q = torch.zeros(n_dof, dtype=dtype, device=device)
     q_np = q.cpu().numpy()
@@ -98,9 +116,9 @@ def main(args):
     
     # Pinocchio Jacobian
     q_pin_full = pinocchio.neutral(pin_model).copy()
-    for i, pin_idx in enumerate(pin_q_indices):
+    for j, pin_idx in enumerate(pin_q_indices):
         if pin_idx < len(q_pin_full):
-            q_pin_full[pin_idx] = q_np[i]
+            q_pin_full[pin_idx] = q_np[j]
     pinocchio.forwardKinematics(pin_model, pin_data, q_pin_full)
     if end_frame_id is not None:
         pinocchio.updateFramePlacements(pin_model, pin_data)
@@ -122,18 +140,18 @@ def main(args):
                 pin_v_indices.append(joint_id)
     J_pin_np = J_pin_full[:, pin_v_indices] if len(pin_v_indices) > 0 else J_pin_full
 
-    J_rc = jacobian(rc_model, q_np, method='analytic', device=device)
+    J_rc = rc_compute_jacobian(q_np)
     J_rc_np = to_numpy(J_rc)
-    
+
     beauty_print(f"Jacobian shape (PyTorch Kinematics): {J_pk_np.shape}")
     beauty_print(f"Jacobian shape (Pinocchio): {J_pin_np.shape}")
-    beauty_print(f"Jacobian shape (RoboCore): {J_rc_np.shape}")
+    beauty_print(f"Jacobian shape ({rc_label}): {J_rc_np.shape}")
     cond_num_pk = float(np.linalg.cond(J_pk_np))
     cond_num_pin = float(np.linalg.cond(J_pin_np))
     cond_num_rc = float(np.linalg.cond(J_rc_np))
     beauty_print(f"Condition number (PyTorch Kinematics): {cond_num_pk:.2e}")
     beauty_print(f"Condition number (Pinocchio): {cond_num_pin:.2e}")
-    beauty_print(f"Condition number (RoboCore): {cond_num_rc:.2e}")
+    beauty_print(f"Condition number ({rc_label}): {cond_num_rc:.2e}")
     
     beauty_print(f"Jacobian Matrix (PyTorch Kinematics):")
     print(beauty_print_array(J_pk_np, precision=6))
@@ -141,7 +159,7 @@ def main(args):
     beauty_print(f"Jacobian Matrix (Pinocchio):")
     print(beauty_print_array(J_pin_np, precision=6))
 
-    beauty_print(f"Jacobian Matrix (RoboCore Analytic):")
+    beauty_print(f"Jacobian Matrix ({rc_label}):")
     print(beauty_print_array(J_rc_np, precision=6))
     
     # Value comparison
@@ -172,9 +190,9 @@ def main(args):
     
     def benchmark_pin():
         q_pin_full = pinocchio.neutral(pin_model).copy()
-        for i, pin_idx in enumerate(pin_q_indices):
+        for j, pin_idx in enumerate(pin_q_indices):
             if pin_idx < len(q_pin_full):
-                q_pin_full[pin_idx] = q_np[i]
+                q_pin_full[pin_idx] = q_np[j]
         pinocchio.forwardKinematics(pin_model, pin_data, q_pin_full)
         if end_frame_id is not None:
             pinocchio.updateFramePlacements(pin_model, pin_data)
@@ -189,11 +207,11 @@ def main(args):
 
     time_pk = benchmark(lambda: chain.jacobian(q))
     time_pin = benchmark(benchmark_pin)
-    time_rc = benchmark(lambda: jacobian(rc_model, q_np, method='analytic', device=device))
-    
+    time_rc = benchmark(lambda: rc_compute_jacobian(q_np))
+
     beauty_print(f"PyTorch Kinematics:  {time_pk:.4f} ms")
     beauty_print(f"Pinocchio:           {time_pin:.4f} ms")
-    beauty_print(f"RoboCore Analytic:   {time_rc:.4f} ms")
+    beauty_print(f"{(rc_label + ':'):<22} {time_rc:.4f} ms")
     speedup_pk_rc = time_pk / time_rc if time_rc > 0 else 0
     speedup_pin_rc = time_pin / time_rc if time_rc > 0 else 0
     beauty_print(f"Speedup (PK vs RC):  {speedup_pk_rc:.2f}x", type="success" if speedup_pk_rc > 1 else "info")
@@ -219,9 +237,9 @@ def main(args):
         
         # Pinocchio
         q_pin_full_rand = pinocchio.neutral(pin_model).copy()
-        for i, pin_idx in enumerate(pin_q_indices):
+        for j, pin_idx in enumerate(pin_q_indices):
             if pin_idx < len(q_pin_full_rand):
-                q_pin_full_rand[pin_idx] = q_rand_np[i]
+                q_pin_full_rand[pin_idx] = q_rand_np[j]
         pinocchio.forwardKinematics(pin_model, pin_data, q_pin_full_rand)
         if end_frame_id is not None:
             pinocchio.updateFramePlacements(pin_model, pin_data)
@@ -235,7 +253,7 @@ def main(args):
         J_pin_rand_np = J_pin_full_rand[:, pin_v_indices] if len(pin_v_indices) > 0 else J_pin_full_rand
 
         # RoboCore
-        J_rc_rand = jacobian(rc_model, q_rand_np, method='analytic', device=device)
+        J_rc_rand = rc_compute_jacobian(q_rand_np)
         J_rc_rand_np = to_numpy(J_rc_rand)
         
         # Condition number
@@ -266,7 +284,7 @@ def main(args):
     beauty_print(f"  Max:    {np.max(condition_numbers_pin):.2e}")
     beauty_print(f"  Min:    {np.min(condition_numbers_pin):.2e}")
     
-    beauty_print(f"Condition number statistics (RoboCore):")
+    beauty_print(f"Condition number statistics ({rc_label}):")
     beauty_print(f"  Mean:   {np.mean(condition_numbers_rc):.2e}")
     beauty_print(f"  Median: {np.median(condition_numbers_rc):.2e}")
     beauty_print(f"  Max:    {np.max(condition_numbers_rc):.2e}")
@@ -301,9 +319,9 @@ if __name__ == '__main__':
     parser.add_argument('--model-path', type=str, default=model_path,
                         help='Path to URDF file (default: Alicia-D)')
     parser.add_argument('--base-link', type=str, default='base_link', help='Base link name')
-    parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name') 
-    parser.add_argument('--backend', type=str, default='torch', choices=['numpy', 'torch'],
-                        help='Backend to use for RoboCore (default: numpy)')
+    parser.add_argument('--end-link', type=str, default='link6', help='End-effector link name')
+    parser.add_argument('--backend', type=str, default='cpp', choices=['numpy', 'torch', 'cpp'],
+                        help='RoboCore kinematics backend (default: cpp)')
     parser.add_argument('--device', default='cpu', help='PyTorch device (cpu, cuda)')
     parser.add_argument('--samples', type=int, default=100, help='Number of test configurations')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')

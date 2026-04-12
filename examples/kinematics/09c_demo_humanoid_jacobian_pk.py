@@ -43,7 +43,10 @@ def main(args):
     
     # RoboCore - create first to get joint mapping
     robot_model = RobotModel(model_path, base_link=args.base_link)
-    rc.set_backend('torch', device=args.device)
+    if args.rc_backend == 'torch':
+        rc.set_backend('torch', device=args.device)
+    else:
+        rc.set_backend('cpp')
     
     # PyTorch Kinematics - build chains for all four end-effectors
     with open(model_path, 'rb') as f:
@@ -66,7 +69,7 @@ def main(args):
     pin_model = pinocchio.buildModelFromUrdf(model_path)
     pin_data = pin_model.createData()
     
-    beauty_print(f"Humanoid Jacobian Comparison: PyTorch Kinematics vs Pinocchio vs RoboCore", type="module")
+    beauty_print(f"Humanoid Jacobian Comparison: PyTorch Kinematics vs Pinocchio vs RoboCore ({args.rc_backend})", type="module")
     beauty_print(f"PyTorch device: {args.device}", type="info")
     
     device = torch.device(args.device)
@@ -202,6 +205,8 @@ if __name__ == '__main__':
     parser.add_argument('--joint-angles', type=float, nargs='+', default=None,
                         help='Joint angles in radians (optional)')
     parser.add_argument('--device', default='cpu', help='PyTorch device')
+    parser.add_argument('--rc-backend', type=str, default='torch', choices=['torch', 'cpp'],
+                        help='RoboCore Jacobian backend for PK/Pin comparison')
     args = parser.parse_args()
     
     main(args)

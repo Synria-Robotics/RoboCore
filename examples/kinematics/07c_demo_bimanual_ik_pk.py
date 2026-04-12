@@ -54,9 +54,12 @@ def main(args):
     # RoboCore
     left_model = RobotModel(model_path, base_link=args.left_base_link, end_link=args.left_end_link)
     right_model = RobotModel(model_path, base_link=args.right_base_link, end_link=args.right_end_link)
-    rc.set_backend('torch', device=args.device)
+    if args.rc_backend == 'torch':
+        rc.set_backend('torch', device=args.device)
+    else:
+        rc.set_backend('cpp')
 
-    beauty_print(f"Bimanual Inverse Kinematics Comparison: PyTorch Kinematics vs RoboCore", type="module")
+    beauty_print(f"Bimanual Inverse Kinematics Comparison: PyTorch Kinematics vs RoboCore ({args.rc_backend})", type="module")
     beauty_print(f"Left arm: {n_dof_left} DOF, Right arm: {n_dof_right} DOF", type="info")
     beauty_print(f"Coordination mode: {args.coordination}", type="info")
     beauty_print(f"PyTorch device: {args.device}", type="info")
@@ -435,7 +438,7 @@ if __name__ == '__main__':
     import synriard
     # Bessica is a dual-arm robot
     # Note: PyTorch Kinematics requires URDF format
-    model_path = synriard.get_model_path("Bessica_D", version="v1_0", variant="covered", model_format="urdf")
+    model_path = synriard.get_model_path("Bessica_D", version="v1_1", variant="covered", model_format="urdf")
 
     parser = argparse.ArgumentParser(description="Bimanual Inverse Kinematics validation with Pytorch Kinematics")
     parser.add_argument('--model-path', type=str, default=model_path,
@@ -459,6 +462,8 @@ if __name__ == '__main__':
     parser.add_argument('--damping', type=float, default=1e-9, help='Regularization factor for DLS (lambda^2)')
     parser.add_argument('--step-size', type=float, default=0.2, help='Learning rate')
     parser.add_argument('--device', default='cpu', help='PyTorch device (cpu, cuda)')
+    parser.add_argument('--rc-backend', type=str, default='torch', choices=['torch', 'cpp'],
+                        help='RoboCore backend for IK vs PK comparison')
     parser.add_argument('--samples', type=int, default=100, help='Number of test configurations')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--num-retries', type=int, default=1, help='Number of initial guesses to try (default: 1)')

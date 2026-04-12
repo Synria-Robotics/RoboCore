@@ -67,31 +67,45 @@
 - ✅ **MJCF** - MuJoCo XML
 
 ### Backend Support
-- ✅ **NumPy** - CPU-optimized, 50-100x faster than pure Python
-- ✅ **PyTorch** - GPU acceleration for batch operations
-- ✅ **C++ / Eigen** - Same FK, Jacobian, and DLS IK API via compiled extensions (`cpp` backend); see [Installation](#installation)
+- ✅ **NumPy** - CPU vectorized reference implementation; see **Performance benchmarks** below
+- ✅ **PyTorch** - Same API with optional **CUDA** for batched FK / Jacobian / IK (`--device cuda` in the benchmark scripts)
+- ✅ **C++ / Eigen** - Same FK, analytic Jacobian, and **DLS IK** API via pybind11 extensions (`cpp` / `IKSolverCpp`); see [Installation](#installation)
 
 ---
 
 ## 🚀 Performance Benchmarks
 
-**Test Platform**: NVIDIA , Alicia-D 6-DOF Manipulator
+**Representative run** (Apple Silicon laptop, **CPU** PyTorch for RoboCore and PK; C++ extensions built).
 
-### Single Configuration
+### Forward kinematics (end-effector 4×4)
 
-| Operation | Pure Python | NumPy | Speedup |
-|-----------|-------------|-------|---------|
-| Forward Kinematics | 2.5 ms | **0.05 ms** | **50x** |
-| Inverse Kinematics | 450 ms | **5.6 ms** | **80x** |
-| Jacobian (Analytic) | 3.2 ms | **0.03 ms** | **107x** |
-| Jacobian (Numeric) | 18 ms | **0.35 ms** | **51x** |
+| Backend | batch=1 (ms/call) | batch=100 (ms/call) |
+|---------|-------------------|---------------------|
+| RoboCore NumPy | 0.134 | 0.353 |
+| RoboCore PyTorch (CPU) | 0.561 | 0.652 |
+| **RoboCore C++ / Eigen** | **0.0010** | **0.0085** |
+| pytorch_kinematics | 0.209 | 0.331 |
+| pinocchio | 0.002 | 0.198 |
 
-### Batch Processing (1000 configs)
+### Analytic Jacobian (6 × n)
 
-| Operation | NumPy (CPU) | PyTorch (GPU) | Speedup |
-|-----------|-------------|---------------|---------|
-| Forward Kinematics | 45 ms | **3.2 ms** | **14x** |
-| Jacobian (Analytic) | 28 ms | **2.1 ms** | **13x** |
+| Backend | batch=1 (ms/call) | batch=100 (ms/call) |
+|---------|-------------------|---------------------|
+| RoboCore NumPy | 0.116 | 11.68 |
+| RoboCore PyTorch (CPU) | 0.608 | 1.50 |
+| **RoboCore C++ / Eigen** | **0.0012** | **0.0209** |
+| pytorch_kinematics | 0.652 | 0.900 |
+| pinocchio | 0.0029 | 0.307 |
+
+### Inverse kinematics (single chain)
+
+| Backend | batch=1 (ms/call) | batch=100 (ms/call) |
+|---------|-------------------|---------------------|
+| RoboCore NumPy (DLS) | 2.195 | 62.03 |
+| RoboCore PyTorch (CPU, DLS) | 3.49 | 57.17 |
+| **RoboCore C++ / Eigen** (DLS) | **0.008** | **0.77** |
+| pytorch_kinematics (PseudoInverseIK) | 195 | 259 |
+| pinocchio (CLIK, Python) | 0.68 | 410 |
 
 ---
 

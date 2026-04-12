@@ -33,9 +33,9 @@ from robocore.transform.conversions import *
 
 def compute_ik(robot_model, backend, end_pose, q0=None, num_initial_guesses=1, initial_guess_strategy='random', initial_guess_scale=1.0, random_seed=None):
     """Compute inverse kinematics for given backend.
-    
+
     :param robot_model: RobotModel instance
-    :param backend: Backend name ('numpy' or 'torch')
+    :param backend: Backend name ('numpy', 'torch', or 'cpp')
     :param end_pose: Target end-effector pose [px, py, pz, qx, qy, qz, qw]
     :param q0: Base initial joint angles guess (optional, used as base for strategies)
     :param num_initial_guesses: Number of initial guesses to try
@@ -50,7 +50,7 @@ def compute_ik(robot_model, backend, end_pose, q0=None, num_initial_guesses=1, i
     T_fk = np.zeros((4, 4))
     T_fk[:3, 3] = end_pose[:3]
     T_fk[3, 3] = 1.0
-    T_fk[:3, :3] = quaternion_to_matrix(end_pose[3:])
+    T_fk[:3, :3] = to_numpy(quaternion_to_matrix(end_pose[3:]))
 
     ik_result = inverse_kinematics(
         robot_model,
@@ -101,33 +101,45 @@ def main(args):
         initial_guess_scale=args.init_scale,
         random_seed=args.seed
     )
+    results_cpp = compute_ik(
+        robot_model, 'cpp', args.end_pose,
+        q0=None,
+        num_initial_guesses=args.num_inits,
+        initial_guess_strategy=args.init_strategy,
+        initial_guess_scale=args.init_scale,
+        random_seed=args.seed
+    )
 
     # Convert to numpy for comparison
     q_np = to_numpy(results_np['q'])
     q_torch = to_numpy(results_torch['q'])
+    q_cpp = to_numpy(results_cpp['q'])
 
     beauty_print(f"IK Solution:")
-    print(f"  Success:  NumPy={results_np['success']}, Torch={results_torch['success']}")
-    print(f"  Iterations:  NumPy={results_np['iters']}, Torch={results_torch['iters']}")
-    print(f"  Position Error:  NumPy={results_np['pos_err']:.6e} m, Torch={results_torch['pos_err']:.6e} m")
-    print(f"  Orientation Error:  NumPy={results_np['ori_err']:.6e} rad, Torch={results_torch['ori_err']:.6e} rad")
+    print(f"  Success:  NumPy={results_np['success']}, Torch={results_torch['success']}, C++={results_cpp['success']}")
+    print(f"  Iterations:  NumPy={results_np['iters']}, Torch={results_torch['iters']}, C++={results_cpp['iters']}")
+    print(f"  Position Error:  NumPy={results_np['pos_err']:.6e} m, Torch={results_torch['pos_err']:.6e} m, C++={results_cpp['pos_err']:.6e} m")
+    print(f"  Orientation Error:  NumPy={results_np['ori_err']:.6e} rad, Torch={results_torch['ori_err']:.6e} rad, C++={results_cpp['ori_err']:.6e} rad")
     if results_np['err_norm'] is not None:
-        print(f"  Total Error:  NumPy={results_np['err_norm']:.6e}, Torch={results_torch['err_norm']:.6e}")
+        print(f"  Total Error:  NumPy={results_np['err_norm']:.6e}, Torch={results_torch['err_norm']:.6e}, C++={results_cpp['err_norm']:.6e}")
 
     beauty_print(f"Solved Joint Angles (radians):")
     print(f"  NumPy:  {beauty_print_array(q_np)}")
     print(f"  Torch:  {beauty_print_array(q_torch)}")
-    q_diff = np.linalg.norm(q_np - q_torch)
-    print(f"  Diff:   {q_diff:.6e}")
+    print(f"  C++:    {beauty_print_array(q_cpp)}")
+    print(f"  np vs torch: {np.linalg.norm(q_np - q_torch):.6e}   np vs cpp: {np.linalg.norm(q_np - q_cpp):.6e}")
 
     beauty_print(f"Solved Joint Angles (degrees):")
     print(f"  NumPy:  {beauty_print_array(np.rad2deg(q_np))}")
     print(f"  Torch:  {beauty_print_array(np.rad2deg(q_torch))}")
+    print(f"  C++:    {beauty_print_array(np.rad2deg(q_cpp))}")
 
     beauty_print(f"Computation Time:")
     print(f"  NumPy:  {results_np['time']* 1000:.4f} ms")
     print(f"  Torch:  {results_torch['time']* 1000:.4f} ms")
-    print(f"  Ratio:  {results_torch['time'] / results_np['time']:.2f}x")
+    print(f"  C++:    {results_cpp['time']* 1000:.4f} ms")
+    tnp = max(results_np['time'], 1e-15)
+    print(f"  torch/np: {results_torch['time'] / tnp:.2f}x   cpp/np: {results_cpp['time'] / tnp:.2f}x")
 
 
 if __name__ == "__main__":
@@ -140,7 +152,7 @@ if __name__ == "__main__":
                         default=model_path,
                         help='Path to model file (default: Alicia-D)')
     parser.add_argument('--base-link', type=str, default='base_link', help='Base link name')
-    parser.add_argument('--end-link', type=str, default='Link6', help='End-effector link name')
+    parser.add_argument('--end-link', type=str, default='link6', help='End-effector link name')
     parser.add_argument('--end-pose', type=float, nargs='+',
                         default=[0.16993, 0.01740, 0.20530, 0.041461, 0.828399, 0.083471, 0.552331],
                         help='Target end-effector pose as 7 floats (px, py, pz, qx, qy, qz, qw)')
@@ -153,8 +165,8 @@ if __name__ == "__main__":
                         help='Scale factor for joint limits when generating guesses (0.0 to 1.0, default: 1.0)')
     parser.add_argument('--seed', type=int, default=None,
                         help='Random seed for reproducibility (default: None)')
-    parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch'],
-                        help='Backend to use for computation (default: numpy, ignored - both are tested)')
+    parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch', 'cpp'],
+                        help='Legacy option (ignored — NumPy, Torch, and C++ are all tested)')
     args = parser.parse_args()
     main(args)
 

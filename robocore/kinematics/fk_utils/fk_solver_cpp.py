@@ -81,6 +81,59 @@ def chain_arrays_from_robot_model(model: "RobotModel"):
     return types, q_indices, T_rows, axes, n_dof
 
 
+def chain_arrays_global_config(model: "RobotModel", base_link: str, end_link: str):
+    """Pack chain base→end with q row indices into the full configuration vector.
+
+    Restores model base_link/end_link after packing. Matches FK/Jacobian convention
+    used by :func:`chain_arrays_from_robot_model` but ``q_indices`` reference
+    ``model._dof_name_to_index`` (length ``model.num_dof`` q).
+
+    :param model: robot model
+    :param base_link: chain root link name
+    :param end_link: chain tip link name
+    :return: tuple (joint_types int32, q_indices int32, T_origin rows (n,16) col-major, axes (n,3))
+    """
+    orig_base, orig_end = model.base_link, model.end_link
+    try:
+        model.base_link = base_link
+        model.end_link = end_link
+        model._build_chain()
+        joints = model._chain_joints
+        n_j = len(joints)
+        types = np.zeros(n_j, dtype=np.int32)
+        q_indices = np.full(n_j, -1, dtype=np.int32)
+        T_rows = np.zeros((n_j, 16), dtype=np.float64)
+        axes = np.zeros((n_j, 3), dtype=np.float64)
+
+        for i, j in enumerate(joints):
+            if j.joint_type == "fixed":
+                types[i] = 0
+            elif j.joint_type == "revolute":
+                types[i] = 1
+            elif j.joint_type == "prismatic":
+                types[i] = 2
+            else:
+                types[i] = 0
+
+            if j.joint_type in ("revolute", "prismatic"):
+                if j.name not in model._dof_name_to_index:
+                    raise KeyError(
+                        f"actuated joint {j.name!r} missing from model._dof_name_to_index"
+                    )
+                q_indices[i] = int(model._dof_name_to_index[j.name])
+
+            R0 = _rpy_to_R(j.origin_rpy[0], j.origin_rpy[1], j.origin_rpy[2])
+            T_origin = _make_T(R0, np.asarray(j.origin_xyz, dtype=np.float64))
+            T_rows[i, :] = np.asarray(T_origin, dtype=np.float64).flatten(order="F")
+            axes[i, :] = np.asarray(j.axis, dtype=np.float64)
+
+        return types, q_indices, T_rows, axes
+    finally:
+        model.base_link = orig_base
+        model.end_link = orig_end
+        model._build_chain()
+
+
 class FKSolverCpp:
     """Forward kinematics using compiled Eigen chain (end-effector only, batch supported)."""
 
@@ -119,4 +172,4 @@ class FKSolverCpp:
         return restore_single(out, was_single)
 
 
-__all__ = ["FKSolverCpp", "chain_arrays_from_robot_model"]
+__all__ = ["FKSolverCpp", "chain_arrays_from_robot_model", "chain_arrays_global_config"]

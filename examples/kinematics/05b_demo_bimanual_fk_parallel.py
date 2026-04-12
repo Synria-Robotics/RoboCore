@@ -93,7 +93,7 @@ def main(args):
 if __name__ == "__main__":
     from synriard import get_model_path
 
-    model_path = get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="mjcf")
+    model_path = get_model_path("Bessica_D", version="v1_1", variant="covered", model_format="mjcf")
 
     parser = argparse.ArgumentParser(description="Bimanual Forward Kinematics Parallel Demo")
     parser.add_argument('--model-path', type=str, default=model_path,
@@ -107,7 +107,7 @@ if __name__ == "__main__":
     parser.add_argument('--scale', type=float, default=1.0, help='Scale factor for joint limits (0.0 to 1.0)')
     parser.add_argument('--mode', type=str, default='indep', choices=['indep', 'relative', 'mirror'],
                         help='FK mode: indep (independent), relative (relative transform), mirror (mirror mode)')
-    parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch'],
+    parser.add_argument('--backend', type=str, default='numpy', choices=['numpy', 'torch', 'cpp'],
                         help='Backend to use for computation (default: numpy)')
     args = parser.parse_args()
     main(args)
