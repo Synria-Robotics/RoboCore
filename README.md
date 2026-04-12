@@ -77,35 +77,40 @@
 
 **Representative run** (Apple Silicon laptop, **CPU** PyTorch for RoboCore and PK; C++ extensions built).
 
+**vs C++** columns: latency ratio `t_backend / t_RoboCore C++` for the same batch shape (**1×** = same speed as C++; **>1×** = that many times **slower** than C++).
+
 ### Forward kinematics (end-effector 4×4)
 
-| Backend | batch=1 (ms/call) | batch=100 (ms/call) |
-|---------|-------------------|---------------------|
-| RoboCore NumPy | 0.134 | 0.353 |
-| RoboCore PyTorch (CPU) | 0.561 | 0.652 |
-| **RoboCore C++ / Eigen** | **0.0010** | **0.0085** |
-| pytorch_kinematics | 0.209 | 0.331 |
-| pinocchio | 0.002 | 0.198 |
+| Backend | batch=1 (ms/call) | batch=100 (ms/call) | vs C++ b=1 | vs C++ b=100 |
+|---------|-------------------|---------------------|------------|--------------|
+| pytorch_kinematics | 0.209 | 0.331 | ~209× | ~39× |
+| pinocchio | 0.002 | 0.198 | ~2.0× | ~23× |
+| RoboCore NumPy | 0.134 | 0.353 | ~134× | ~42× |
+| RoboCore PyTorch (CPU) | 0.561 | 0.652 | ~561× | ~77× |
+| **RoboCore C++ / Eigen** | **0.0010** | **0.0085** | **1×** | **1×** |
+
 
 ### Analytic Jacobian (6 × n)
 
-| Backend | batch=1 (ms/call) | batch=100 (ms/call) |
-|---------|-------------------|---------------------|
-| RoboCore NumPy | 0.116 | 11.68 |
-| RoboCore PyTorch (CPU) | 0.608 | 1.50 |
-| **RoboCore C++ / Eigen** | **0.0012** | **0.0209** |
-| pytorch_kinematics | 0.652 | 0.900 |
-| pinocchio | 0.0029 | 0.307 |
+| Backend | batch=1 (ms/call) | batch=100 (ms/call) | vs C++ b=1 | vs C++ b=100 |
+|---------|-------------------|---------------------|------------|--------------|
+| pytorch_kinematics | 0.652 | 0.900 | ~540× | ~43× |
+| pinocchio | 0.0029 | 0.307 | ~2.4× | ~15× |
+| RoboCore NumPy | 0.116 | 11.68 | ~97× | ~560× |
+| RoboCore PyTorch (CPU) | 0.608 | 1.50 | ~510× | ~72× |
+| **RoboCore C++ / Eigen** | **0.0012** | **0.0209** | **1×** | **1×** |
+
 
 ### Inverse kinematics (single chain)
 
-| Backend | batch=1 (ms/call) | batch=100 (ms/call) |
-|---------|-------------------|---------------------|
-| RoboCore NumPy (DLS) | 2.195 | 62.03 |
-| RoboCore PyTorch (CPU, DLS) | 3.49 | 57.17 |
-| **RoboCore C++ / Eigen** (DLS) | **0.008** | **0.77** |
-| pytorch_kinematics (PseudoInverseIK) | 195 | 259 |
-| pinocchio (CLIK, Python) | 0.68 | 410 |
+| Backend | batch=1 (ms/call) | batch=100 (ms/call) | vs C++ b=1 | vs C++ b=100 |
+|---------|-------------------|---------------------|------------|--------------|
+| pytorch_kinematics (PseudoInverseIK) | 195 | 259 | ~24k× | ~340× |
+| pinocchio (CLIK, Python) | 0.68 | 410 | ~85× | ~530× |
+| RoboCore NumPy (DLS) | 2.195 | 62.03 | ~270× | ~81× |
+| RoboCore PyTorch (CPU, DLS) | 3.49 | 57.17 | ~440× | ~74× |
+| **RoboCore C++ / Eigen** (DLS) | **0.008** | **0.77** | **1×** | **1×** |
+
 
 ---
 
