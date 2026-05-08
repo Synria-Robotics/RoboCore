@@ -8,6 +8,7 @@
 #include <vector>
 
 namespace py = pybind11;
+using ssize_t = py::ssize_t;
 
 enum class JointType : std::int32_t { Fixed = 0, Revolute = 1, Prismatic = 2 };
 

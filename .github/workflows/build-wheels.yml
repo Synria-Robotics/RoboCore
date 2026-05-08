@@ -89,7 +89,7 @@ jobs:
         uses: pypa/cibuildwheel@v2.23.3
         env:
           CIBW_ARCHS: ${{ matrix.archs }}
-          CIBW_BUILD: "cp38-* cp39-* cp310-* cp311-* cp312-* cp313-*"
+          CIBW_BUILD: "cp311-* cp312-* cp313-*"
           CIBW_SKIP: "pp* *-musllinux_*"
           CIBW_ENVIRONMENT_LINUX: "EIGEN3_INCLUDE_DIR=/project/.cibw/eigen-3.4.0"
           CIBW_ENVIRONMENT_MACOS: "EIGEN3_INCLUDE_DIR=${{ github.workspace }}/.cibw/eigen-3.4.0"

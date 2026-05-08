@@ -68,7 +68,10 @@ def _ext_modules():
             "Use `pip install -e .` (PEP 517 installs pybind11 from pyproject.toml) "
             "or `pip install pybind11` before `python setup.py build_ext`."
         )
-    extra = ["-O3", "-DEIGEN_NO_DEBUG"]
+    if os.name == "nt":
+        extra = ["/O2", "-DEIGEN_NO_DEBUG"]
+    else:
+        extra = ["-O3", "-DEIGEN_NO_DEBUG"]
     if sys.platform == "darwin":
         extra.append("-stdlib=libc++")
     exts = []
