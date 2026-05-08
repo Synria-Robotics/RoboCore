@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Single-sample DLS IK (analytic Jacobian), Eigen + pybind11.
 // Matches IKSolverNumPy._solve_single core path: DLS, adaptive damping/step, joint clamp.
 // Does not implement Jacobian limit projection or limit-jump heuristics (see ik_solver_cpp docstring).

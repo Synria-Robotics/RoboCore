@@ -1,7 +1,7 @@
 """Dual-arm cooperative kinematics.
 
 Author: Synria Robotics Team
-License: GPL-3.0
+License: MIT
 """
 from __future__ import annotations
 from robocore.utils.backend import get_backend, set_backend

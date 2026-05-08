@@ -116,6 +116,14 @@
 
 ## 📦 Installation
 
+RoboCore is packaged as a **light core** with optional extras.
+
+- Core install: NumPy-based kinematics, transforms, planning, analysis, configs, URDF parsing, and native `cpp` backend support.
+- `torch` extra: PyTorch-based solvers and GPU execution.
+- `mujoco` extra: MJCF parsing and MuJoCo runtime support.
+- `sim` extra: MuJoCo simulation bridge support, including `mujoco-py` compatibility.
+- `descriptions` extra: Synria and Open robot-description packages (`synriard`, `openrd`) for examples and tests.
+
 FK, Jacobian, and IK can run on **NumPy**, **PyTorch**, or **`cpp`** backends; only the **`cpp`** path uses native extensions, built with **pybind11** + **Eigen3** (headers only) + a **C++17** compiler.
 
 - **pybind11** — installed automatically for the build via `pyproject.toml` (`[build-system] requires`) when you run `pip install -e .` (PEP 517 isolated environment).
@@ -156,10 +164,36 @@ cd RoboCore
 conda create -n synria python=3.10 -y
 conda activate synria
 
-# Install (development mode)
+# Install core package in development mode
 pip install -e .
-pip install -r requirements.txt
+
+# Optional extras
+pip install -e ".[torch]"
+pip install -e ".[mujoco]"
+pip install -e ".[sim]"
+pip install -e ".[descriptions]"
+
+# Everything
+pip install -e ".[all]"
 ```
+
+### PyPI installs
+
+```bash
+# Core package
+pip install synria-robocore
+
+# Typical feature sets
+pip install "synria-robocore[torch]"
+pip install "synria-robocore[mujoco]"
+pip install "synria-robocore[sim]"
+pip install "synria-robocore[descriptions]"
+
+# Full environment
+pip install "synria-robocore[all]"
+```
+
+`synriard` and `openrd` are only needed for bundled examples/tests that load published robot-description assets. They are not required for the RoboCore core library itself.
 
 ---
 
@@ -253,15 +287,14 @@ RoboCore/
 
 ## 📄 License
 
-**GPL-3.0 License**  
+**MIT License**  
 Copyright © 2025 **Synria Robotics Co., Ltd.**
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+RoboCore is released under the MIT License.
 
-See the [LICENSE](LICENSE) file for the full license text.
+See [LICENSE](LICENSE) for the full text. Files under
+`robocore/modeling/parser/mjcf_parser` include preserved upstream Apache-2.0
+copyright and license notices where applicable.
 
 ---
 

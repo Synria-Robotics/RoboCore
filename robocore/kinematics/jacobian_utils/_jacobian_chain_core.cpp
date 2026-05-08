@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Geometric Jacobian 6 x n_dof (world frame), Eigen + pybind11.
 
 #include <Eigen/Dense>

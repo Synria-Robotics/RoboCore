@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from setuptools import setup
+from setuptools.command.build_py import build_py as _build_py
 from setuptools.dist import Distribution
 
 ROOT = Path(__file__).resolve().parent
@@ -97,10 +98,26 @@ class _BinaryDistribution(Distribution):
         return bool(_ext_modules())
 
 
+class build_py(_build_py):
+    def find_package_modules(self, package, package_dir):  # noqa: D102
+        modules = super().find_package_modules(package, package_dir)
+        filtered_modules = []
+        for module in modules:
+            module_file = Path(module[2])
+            if module_file.name.endswith("_test.py") and "mjcf_parser" in module_file.parts:
+                continue
+            filtered_modules.append(module)
+        return filtered_modules
+
+
 ext_list = _ext_modules()
+cmdclass = {"build_py": build_py}
+if build_ext and ext_list:
+    cmdclass["build_ext"] = build_ext
+
 setup(
     distclass=_BinaryDistribution,
     ext_modules=ext_list,
-    cmdclass={"build_ext": build_ext} if build_ext and ext_list else {},
+    cmdclass=cmdclass,
     zip_safe=False,
 )

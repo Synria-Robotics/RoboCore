@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Serial-chain FK (revolute / prismatic / fixed), Eigen + pybind11.
 
 #include <Eigen/Dense>

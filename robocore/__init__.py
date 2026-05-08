@@ -2,18 +2,7 @@
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
+Licensed under the MIT License.
 
 Author: Synria Robotics Team
 Website: https://synriarobotics.ai
@@ -22,20 +11,32 @@ Website: https://synriarobotics.ai
 __version__ = "2.5.0"
 __author__ = "Synria Robotics Team"
 __copyright__ = "Copyright (c) 2025 Synria Robotics Co., Ltd."
-__license__ = "GPL-3.0"
+__license__ = "MIT"
 
-from . import modeling
-from . import kinematics
-from . import dynamics
-from . import transform
-from . import planning
-from . import analysis
-from . import configs
-from . import utils
-from . import control
+from importlib import import_module
 
 # Export backend management functions
 from .utils.backend import set_backend, get_backend
+
+_LAZY_SUBMODULES = {
+    'modeling',
+    'kinematics',
+    'dynamics',
+    'transform',
+    'planning',
+    'analysis',
+    'configs',
+    'utils',
+    'control',
+}
+
+
+def __getattr__(name):
+    if name in _LAZY_SUBMODULES:
+        module = import_module(f'.{name}', __name__)
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     'set_backend',

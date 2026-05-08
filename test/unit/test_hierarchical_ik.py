@@ -1,7 +1,7 @@
 """Unit tests for Phase 2.2: Hierarchical task priority IK.
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
-License: GPL-3.0
+License: MIT
 
 Tests:
 1. Nullspace projector properties

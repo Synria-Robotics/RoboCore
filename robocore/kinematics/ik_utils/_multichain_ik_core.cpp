@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: MIT
 // Multi-end-effector DLS IK in unified configuration space (Eigen + pybind11).
 // Matches Python _solve_multichain_ik: stacked 6K error/Jacobian, fixed damping DLS, step clip, q clamp.
 

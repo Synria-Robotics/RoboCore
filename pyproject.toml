@@ -11,11 +11,10 @@ requires-python = ">=3.8"
 authors = [
     {name = "Synria Robotics Team", email = "support@synriarobotics.ai"}
 ]
-license = {text = "GPL-3.0"}
+license = "MIT"
 keywords = ["robotics", "kinematics", "robotics-library", "mujoco"]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
     "Operating System :: OS Independent",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
@@ -32,26 +31,33 @@ dependencies = [
     "scikit-learn>=1.2.0",
     "pyyaml>=6.0",
     "omegaconf>=2.3.0",
-    "mujoco>=2.3.0",
-    # MuJoCo 3.x EGL path requires EGLDeviceEXT (not in PyOpenGL 3.1.0).
-    "PyOpenGL",
-    "mujoco-py>=2.1.0",
     "trimesh>=4.9.0",
     "coacd",
-    "pyglet==1.5.27",
     # 0.0.14 depends on deprecated PyPI name "sklearn"; 0.0.15 uses "scikit-learn"
     "mesh_to_sdf>=0.0.15",
     "lxml",
     "tqdm",
-    "torch",
-    "synriard @ https://github.com/Synria-Robotics/Synria-Robot-Descriptions/releases/download/v1.2.0/synriard-1.2.0-py3-none-any.whl",
-    "openrd @ https://github.com/Synria-Robotics/Open-Robot-Descriptions/releases/download/v1.0.0/openrd-1.0.0-py3-none-any.whl",
 ]
 
 # Optional dependencies
 [project.optional-dependencies]
 torch = [
-    "torch",
+    "torch>=2.0.0",
+]
+mujoco = [
+    "mujoco>=2.3.0",
+    "PyOpenGL",
+    "pyglet==1.5.27",
+]
+sim = [
+    "mujoco>=2.3.0",
+    "mujoco-py>=2.1.0",
+    "PyOpenGL",
+    "pyglet==1.5.27",
+]
+descriptions = [
+    "synriard>=1.2.0",
+    "openrd>=1.0.0",
 ]
 dev = [
     "black",
@@ -60,7 +66,13 @@ dev = [
     "mypy",
 ]
 all = [
-    "torch",
+    "torch>=2.0.0",
+    "mujoco>=2.3.0",
+    "mujoco-py>=2.1.0",
+    "PyOpenGL",
+    "pyglet==1.5.27",
+    "synriard>=1.2.0",
+    "openrd>=1.0.0",
     "black",
     "ruff",
     "pytest",
@@ -72,7 +84,7 @@ Homepage = "https://github.com/Synria-Robotics/RoboCore"
 
 [tool.setuptools]
 # Automatically find all packages and subpackages, excluding tests and examples
-packages = {find = {exclude = ["tests", "examples", "tests.*", "examples.*"]}}
+packages = {find = {include = ["robocore", "robocore.*"]}}
 include-package-data = true
 
 [tool.setuptools.package-data]

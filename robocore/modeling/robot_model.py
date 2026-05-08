@@ -2,18 +2,7 @@
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
+Licensed under the MIT License.
 
 Author: Synria Robotics Team
 Website: https://synriarobotics.ai
@@ -22,13 +11,13 @@ Website: https://synriarobotics.ai
 from __future__ import annotations
 
 from pathlib import Path
+from importlib import import_module
 from typing import Dict, List, Optional, Sequence, Any, Tuple, Union
 import numpy as np
 import trimesh
 import os
 
 from robocore.modeling.parser.urdf_parser import URDFParser
-from robocore.modeling.parser.mjcf_parser import MJCFParser
 from robocore.modeling.parser.utils import JointSpec
 from robocore.kinematics.fk import forward_kinematics
 from robocore.kinematics.ik import inverse_kinematics
@@ -37,13 +26,25 @@ from robocore.kinematics.utils import relative_pose_error, relative_jacobian
 from robocore.utils.backend import get_backend
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
-import torch
-
 
 # Lazy import to avoid circular dependency
 def _get_workspace_analyzer():
     from robocore.analysis.workspace_analyzer import WorkspaceAnalyzer
     return WorkspaceAnalyzer
+
+
+def _get_mjcf_parser():
+    from robocore.modeling.parser.mjcf_parser import MJCFParser
+    return MJCFParser
+
+
+def _get_torch_module():
+    try:
+        return import_module('torch')
+    except ImportError as exc:
+        raise RuntimeError(
+            "Torch support is not available. Install the 'torch' extra, for example `pip install synria-robocore[torch]`."
+        ) from exc
 
 _PARSED_ROBOT_CACHE: Dict[str, Dict[str, Any]] = {}
 
@@ -105,7 +106,7 @@ class RobotModel:
                 # Parse new
                 self.parsed_model = None
                 if self.model_path.endswith('.xml'):
-                    self.parsed_model = MJCFParser(self.model_path)
+                    self.parsed_model = _get_mjcf_parser()(self.model_path)
                 elif self.model_path.endswith('.urdf'):
                     self.parsed_model = URDFParser(self.model_path)
                 else:
@@ -195,6 +196,7 @@ class RobotModel:
                     if isinstance(mesh, trimesh.Scene):
                         combined_mesh = mesh.geometry.values()
                         mesh = trimesh.util.concatenate(combined_mesh)
+                    torch = _get_torch_module()
                     temp = torch.ones(mesh.vertices.shape[0], 1).float()
 
                     vertices = torch.cat((torch.FloatTensor(np.array(mesh.vertices)), temp), dim=-1)
@@ -525,7 +527,7 @@ class RobotModel:
 
         self._num_links_in_tree = idx
 
-    def get_trans_dict(self, joint_value: List, base_trans: Union[None, torch.Tensor] = None) -> dict:
+    def get_trans_dict(self, joint_value: List, base_trans: Optional[Any] = None) -> dict:
         """
         Get the transformation matrices of all links using multi-chain FK.
 

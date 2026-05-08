@@ -2,18 +2,7 @@
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program. If not, see <https://www.gnu.org/licenses/>.
+Licensed under the MIT License.
 
 Author: Synria Robotics Team
 Website: https://synriarobotics.ai
@@ -23,11 +12,19 @@ from __future__ import annotations
 import numpy as np
 from robocore.transform.conversions import matrix_to_axis_angle
 
-try:
-    import torch
-    HAS_TORCH = True
-except ImportError:
-    HAS_TORCH = False
+
+def _get_torch_module():
+    try:
+        from importlib import import_module
+
+        return import_module('torch')
+    except ImportError:
+        return None
+
+
+def _is_torch_tensor(value) -> bool:
+    torch_module = _get_torch_module()
+    return torch_module is not None and isinstance(value, torch_module.Tensor)
 
 
 def relative_pose_error(T_left: np.ndarray, T_right: np.ndarray, T_rel_desired: np.ndarray) -> np.ndarray:
@@ -137,7 +134,7 @@ def ensure_batch(q):
     if was_single:
         if isinstance(q, np.ndarray):
             q = q[np.newaxis, :]
-        elif HAS_TORCH and isinstance(q, torch.Tensor):
+        elif _is_torch_tensor(q):
             q = q.unsqueeze(0)
         else:
             # Fallback for other array-like types
@@ -167,7 +164,7 @@ def restore_single(result, was_single):
                 elif hasattr(v, 'ndim') and v.ndim > 0:
                     if isinstance(v, np.ndarray) and v.ndim > 1:
                         result_single[k] = v[0]
-                    elif HAS_TORCH and isinstance(v, torch.Tensor) and v.ndim > 1:
+                    elif _is_torch_tensor(v) and v.ndim > 1:
                         result_single[k] = v[0]
                     else:
                         result_single[k] = v

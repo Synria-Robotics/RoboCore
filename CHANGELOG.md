@@ -2,6 +2,39 @@
 
 All notable changes to RoboCore will be documented in this file.
 
+## [2.5.0] - 2026-05-08
+
+### 🚀 New Features
+- **C++ kinematics backend**: pybind11 + Eigen3 accelerated FK, IK, and Jacobian solvers (`_fk_chain_core`, `_ik_chain_core`, `_multichain_ik_core`, `_jacobian_chain_core`)
+- **Multi-chain IK**: unified solver for bimanual and humanoid configurations via `MultiChainSolver`
+- **Dynamics module**: inverse dynamics (ID), forward dynamics (FD), mass matrix, gravity/NLE via Pinocchio integration
+- **Motion planning**: joint-space and Cartesian-space planners with trapezoidal and S-curve velocity profiles, spline and polynomial trajectories
+- **MuJoCo bridge**: physics simulation, trajectory execution/evaluation/visualization, interactive IK, comparison analyzer
+- **Config system**: YAML-based robot configuration manager with schema validation
+- **WDF module**: workspace/reachability/signed-distance field analysis with BBO-based planning
+- **Analysis module**: workspace analyzer and singularity analyzer
+
+### 📦 Packaging
+- Migrated to light-core + optional extras model:
+  - `pip install synria-robocore` — core only (numpy, scipy, pyyaml)
+  - `pip install synria-robocore[torch]` — PyTorch backend
+  - `pip install synria-robocore[mujoco]` — MuJoCo bridge
+  - `pip install synria-robocore[sim]` — simulation utilities
+  - `pip install synria-robocore[descriptions]` — robot URDF packages
+  - `pip install synria-robocore[all]` — everything
+- Lazy imports for optional dependencies (torch, mujoco) — no ImportError on core install
+- PEP 639 compliant: `license = "MIT"` in `pyproject.toml`
+- Native extension build via `setup.py` with pybind11 + Eigen3
+
+### ⚖️ License
+- **Migrated from GPL-3.0 to MIT License**
+- All project-owned source files re-headered to MIT
+- Apache-2.0 headers preserved in `robocore/modeling/parser/mjcf_parser/` (dm_control-derived)
+
+### Changed
+- `robocore/__init__.py`: lazy submodule loading via `__getattr__`, `__license__ = "MIT"`
+- Removed direct URL dependencies for internal robot packages from core deps
+
 ## [1.0.0] - 2024-10-04
 
 ### 🎉 Major Release - Production Ready
