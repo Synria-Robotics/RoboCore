@@ -8,7 +8,7 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
-__version__ = "2.5.0"
+__version__ = "2.5.0rc1"
 __author__ = "Synria Robotics Team"
 __copyright__ = "Copyright (c) 2025 Synria Robotics Co., Ltd."
 __license__ = "MIT"
