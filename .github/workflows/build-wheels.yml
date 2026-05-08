@@ -91,6 +91,8 @@ jobs:
           CIBW_ARCHS: ${{ matrix.archs }}
           CIBW_BUILD: "cp311-* cp312-* cp313-*"
           CIBW_SKIP: "pp* *-musllinux_*"
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          CIBW_MANYLINUX_AARCH64_IMAGE: manylinux_2_28
           CIBW_ENVIRONMENT_LINUX: "EIGEN3_INCLUDE_DIR=/project/.cibw/eigen-3.4.0"
           CIBW_ENVIRONMENT_MACOS: "EIGEN3_INCLUDE_DIR=${{ github.workspace }}/.cibw/eigen-3.4.0"
           CIBW_ENVIRONMENT_WINDOWS: "EIGEN3_INCLUDE_DIR=${{ github.workspace }}/.cibw/eigen-3.4.0"
