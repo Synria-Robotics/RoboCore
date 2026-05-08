@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "synria-robocore"
-version = "2.5.0rc1"
+version = "2.5.0rc2"
 description = "Unified High-Throughput Robotics Library"
 readme = "README.md"
 requires-python = ">=3.11"
