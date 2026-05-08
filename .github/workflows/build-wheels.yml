@@ -2,15 +2,12 @@ name: Build And Publish Wheels
 
 on:
   push:
+    branches:
+      - "**"
     tags:
       - "v*"
+  pull_request:
   workflow_dispatch:
-    inputs:
-      publish_to_pypi:
-        description: "Upload built artifacts to PyPI after the build succeeds"
-        required: false
-        default: true
-        type: boolean
 
 permissions:
   contents: read
@@ -141,7 +138,7 @@ jobs:
     needs:
       - build_wheels
       - build_sdist
-    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.publish_to_pypi == 'true'
+    if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
       - name: Download wheels
