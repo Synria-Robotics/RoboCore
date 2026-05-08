@@ -68,13 +68,6 @@ def _ext_modules():
             "Use `pip install -e .` (PEP 517 installs pybind11 from pyproject.toml) "
             "or `pip install pybind11` before `python setup.py build_ext`."
         )
-    ei = _eigen_include()
-    if ei is None:
-        raise RuntimeError(
-            "Eigen3 headers not found (need Eigen/Dense). Install Eigen, e.g. "
-            "`brew install eigen` (macOS), `apt install libeigen3-dev` (Debian/Ubuntu), "
-            "or set EIGEN3_INCLUDE_DIR to the directory that contains the `Eigen/` folder."
-        )
     extra = ["-O3", "-DEIGEN_NO_DEBUG"]
     if sys.platform == "darwin":
         extra.append("-stdlib=libc++")
@@ -85,7 +78,7 @@ def _ext_modules():
                 Pybind11Extension(
                     mod_name,
                     [rel_path],
-                    include_dirs=[ei],
+                    include_dirs=[],
                     cxx_std=17,
                     extra_compile_args=extra,
                 )
@@ -111,10 +104,25 @@ class build_py(_build_py):
         return filtered_modules
 
 
+class _CheckedBuildExt(build_ext):
+    def build_extensions(self):  # noqa: D102
+        ei = _eigen_include()
+        if ei is None:
+            raise RuntimeError(
+                "Eigen3 headers not found (need Eigen/Dense). Install Eigen, e.g. "
+                "`brew install eigen` (macOS), `apt install libeigen3-dev` (Debian/Ubuntu), "
+                "or set EIGEN3_INCLUDE_DIR to the directory that contains the `Eigen/` folder."
+            )
+        for ext in self.extensions:
+            if ei not in ext.include_dirs:
+                ext.include_dirs.append(ei)
+        super().build_extensions()
+
+
 ext_list = _ext_modules()
 cmdclass = {"build_py": build_py}
 if build_ext and ext_list:
-    cmdclass["build_ext"] = build_ext
+    cmdclass["build_ext"] = _CheckedBuildExt
 
 setup(
     distclass=_BinaryDistribution,
