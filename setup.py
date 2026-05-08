@@ -27,6 +27,7 @@ def _eigen_include() -> str | None:
         if (p / "Eigen" / "Dense").is_file():
             return str(p)
     candidates = [
+        ROOT / ".cibw" / "eigen-3.4.0",
         Path("/opt/homebrew/include/eigen3"),
         Path("/usr/local/include/eigen3"),
         Path("/usr/include/eigen3"),
