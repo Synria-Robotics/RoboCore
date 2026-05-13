@@ -30,7 +30,24 @@ class BackendManager:
     - Automatic device placement for torch tensors
     """
 
+    _instance = None
+
+    def __new__(cls):
+        """Return the module-level singleton, creating it if necessary."""
+        global _backend_manager
+        if cls._instance is None:
+            with _lock:
+                if cls._instance is None:
+                    instance = super().__new__(cls)
+                    cls._instance = instance
+                    _backend_manager = instance
+        return cls._instance
+
     def __init__(self):
+        # Guard against re-initialisation of the singleton
+        if getattr(self, '_initialized', False):
+            return
+        self._initialized = True
         self._backend: Literal['numpy', 'torch', 'cpp'] = 'numpy'
         self._device: str = 'cpu'
         self._dtype = np.float64
@@ -228,12 +245,7 @@ def get_backend_manager() -> BackendManager:
 
     :return: Global BackendManager instance
     """
-    global _backend_manager
-    if _backend_manager is None:
-        with _lock:
-            if _backend_manager is None:
-                _backend_manager = BackendManager()
-    return _backend_manager
+    return BackendManager()
 
 
 # Convenience functions
@@ -292,3 +304,27 @@ def to_numpy(x: Any) -> np.ndarray:
     elif isinstance(x, str):
         return x
     return np.array(x)
+
+
+def zeros(*args, **kwargs):
+    """Create a zeros array using the current backend.
+
+    Accepts the same arguments as ``numpy.zeros`` / ``torch.zeros``.
+    """
+    mgr = get_backend_manager()
+    if mgr.get_backend() == 'torch':
+        import torch
+        return torch.zeros(*args, **kwargs)
+    return np.zeros(*args, **kwargs)
+
+
+def eye(n, **kwargs):
+    """Create an identity matrix using the current backend.
+
+    Accepts the same arguments as ``numpy.eye`` / ``torch.eye``.
+    """
+    mgr = get_backend_manager()
+    if mgr.get_backend() == 'torch':
+        import torch
+        return torch.eye(n, **kwargs)
+    return np.eye(n, **kwargs)

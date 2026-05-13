@@ -13,6 +13,9 @@ from typing import Optional, Union, Dict, Any
 from omegaconf import OmegaConf, DictConfig
 from .schemas import RoboCoreConfig
 
+# Sentinel for "no default supplied" — distinct from None
+_MISSING = object()
+
 
 class ConfigManager:
     """Manager for RoboCore configurations."""
@@ -80,7 +83,7 @@ class ConfigManager:
         """
         self.cfg = OmegaConf.merge(self.cfg, updates)
     
-    def get(self, key: str, default: Any = None) -> Any:
+    def get(self, key: str, default: Any = _MISSING) -> Any:
         """
         Get configuration value by key.
         
@@ -89,14 +92,30 @@ class ConfigManager:
         key : str
             Configuration key (supports dot notation, e.g., 'robot.urdf_path')
         default : Any
-            Default value if key not found
+            Default value if key not found.  If omitted, raises ``KeyError``
+            when the key does not exist.
         
         Returns
         -------
         Any
             Configuration value
+        
+        Raises
+        ------
+        KeyError
+            When *key* is not present and no *default* was provided.
         """
-        return OmegaConf.select(self.cfg, key, default=default)
+        result = OmegaConf.select(self.cfg, key, default=_MISSING)
+        if result is _MISSING:
+            if default is _MISSING:
+                raise KeyError(key)
+            return default
+        return result
+
+    @property
+    def _config(self):
+        """Expose the underlying OmegaConf DictConfig for legacy access."""
+        return self.cfg
     
     def to_dict(self) -> Dict:
         """Convert configuration to plain dictionary."""

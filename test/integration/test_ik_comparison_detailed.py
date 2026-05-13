@@ -145,7 +145,7 @@ def batch_comparison(model, n_samples=32, device='cpu', seed=42):
     for i in range(n_samples):
         res = inverse_kinematics(
             model, target_poses[i], q_batch[i],
-, method='dls',
+            method='dls',
             max_iters=100, pos_tol=1e-4, ori_tol=1e-4
         )
         np_results.append(res)

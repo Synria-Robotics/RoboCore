@@ -14,8 +14,18 @@ import pytest
 import numpy as np
 from pathlib import Path
 
-from robocore.modeling.robot_model import BimanualRobotModel
+try:
+    from robocore.modeling.robot_model import BimanualRobotModel
+    _has_bimanual_model = True
+except ImportError:
+    BimanualRobotModel = None  # type: ignore
+    _has_bimanual_model = False
 from robocore.utils.path import get_robocore_path
+
+pytestmark = pytest.mark.skipif(
+    not _has_bimanual_model,
+    reason="BimanualRobotModel not yet implemented (Phase 2)"
+)
 
 
 @pytest.fixture

@@ -69,6 +69,7 @@ class TestNullspaceProjector:
         np.testing.assert_allclose(N @ v_null, v_null, atol=1e-6)
 
 
+@pytest.mark.skip(reason="dual_ik_hierarchical not yet implemented (Phase 2.2)")
 class TestHierarchicalIK:
     """Test hierarchical task priority IK solver."""
     

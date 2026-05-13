@@ -107,7 +107,7 @@ class TestIKAccuracy:
         for i in range(n_samples):
             res = inverse_kinematics(
                 robot_model, target_poses[i], q_batch[i],
-                , method='dls',
+                method='dls',
                 max_iters=100, pos_tol=1e-4, ori_tol=1e-4
             )
             if res['success']:

@@ -343,12 +343,107 @@ def bimanual_jacobian(
             raise ValueError("Unsupported backend, expected 'numpy'|'torch'|'cpp'")
     elif mode == 'mirror':
         raise NotImplementedError("Jacobian mode not implemented yet: mirror")
-    
-    
+
+
+# ---------------------------------------------------------------------------
+# Re-export Task so callers can do: from robocore.kinematics.bimanual import Task
+# ---------------------------------------------------------------------------
+from robocore.kinematics.task import Task  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Convenience aliases
+# ---------------------------------------------------------------------------
+
+def dual_fk(left_model, right_model, q_left, q_right, **kwargs):
+    """Positional-argument alias for :func:`bimanual_forward_kinematics`."""
+    return bimanual_forward_kinematics(left_model, right_model, q_left, q_right, **kwargs)
+
+
+def dual_ik(left_model, right_model, target_left, target_right, **kwargs):
+    """Positional-argument alias for :func:`bimanual_inverse_kinematics`.
+
+    Accepts ``check_workspace`` for compatibility with older call sites but
+    silently discards it (not a parameter of the underlying solver).
+    """
+    kwargs.pop('check_workspace', None)
+    return bimanual_inverse_kinematics(
+        left_model, right_model,
+        target_left=target_left,
+        target_right=target_right,
+        **kwargs,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Screw-theory helpers (Phase 2.1)
+# ---------------------------------------------------------------------------
+
+def adjoint_matrix(T):
+    """Compute the 6×6 spatial adjoint matrix Ad(T) of an SE(3) transform.
+
+    .. math::
+        \\mathrm{Ad}(T) = \\begin{bmatrix} R & 0 \\\\ [p]_\\times R & R \\end{bmatrix}
+
+    where ``[p]_×`` is the skew-symmetric matrix of the translation ``p``.
+
+    :param T: 4×4 homogeneous transformation matrix
+    :return: 6×6 adjoint matrix (numpy array)
+    """
+    R = np.asarray(T[:3, :3], dtype=float)
+    p = np.asarray(T[:3, 3], dtype=float)
+    px = np.array([
+        [ 0.0,  -p[2],  p[1]],
+        [ p[2],  0.0,  -p[0]],
+        [-p[1],  p[0],  0.0 ],
+    ])
+    Ad = np.zeros((6, 6))
+    Ad[:3, :3] = R
+    Ad[3:, :3] = px @ R
+    Ad[3:, 3:] = R
+    return Ad
+
+
+# ---------------------------------------------------------------------------
+# Null-space helpers (Phase 2.2)
+# ---------------------------------------------------------------------------
+
+def nullspace_projector(J):
+    """Compute the null-space projector  **N = I − J⁺J**.
+
+    :param J: Jacobian matrix of shape ``(m, n)``
+    :return: Null-space projector of shape ``(n, n)``
+    """
+    Jpinv = np.linalg.pinv(J)
+    n = J.shape[1]
+    return np.eye(n) - Jpinv @ J
+
+
+def dual_ik_hierarchical(left_model, right_model, tasks, q0_left=None, q0_right=None, **kwargs):
+    """Hierarchical task-priority IK for dual-arm systems.
+
+    .. note::
+        Planned for Phase 2.2.  Not yet implemented.
+    """
+    raise NotImplementedError(
+        "dual_ik_hierarchical is a Phase 2.2 feature and has not been implemented yet."
+    )
+
+
 __all__ = [
     'relative_pose_error',
     'relative_jacobian',
     'bimanual_forward_kinematics',
     'bimanual_jacobian',
     'bimanual_inverse_kinematics',
+    # aliases
+    'dual_fk',
+    'dual_ik',
+    # screw-theory helpers
+    'adjoint_matrix',
+    # null-space helpers
+    'nullspace_projector',
+    'dual_ik_hierarchical',
+    # task abstraction
+    'Task',
 ]

@@ -50,16 +50,40 @@ static Eigen::Matrix4d prismatic_motion(const Eigen::Vector3d &axis_raw, double 
   return T;
 }
 
-/// rotation_error: R_err = R_target * R_current^T, compact axis*angle (world frame).
+/// rotation_error: axis*angle from R_current to R_target (world frame).
+/// Stable SO(3) log map — handles small-angle and near-180° singularities without AngleAxisd.
 static Eigen::Vector3d rotation_error_compact(const Eigen::Matrix3d &R_cur,
                                               const Eigen::Matrix3d &R_tgt) {
-  Eigen::Matrix3d R = R_tgt * R_cur.transpose();
-  Eigen::AngleAxisd aa(R);
-  return aa.axis() * aa.angle();
+  const Eigen::Matrix3d R = R_tgt * R_cur.transpose();
+  const double cos_angle = std::max(-1.0, std::min(1.0, (R.trace() - 1.0) * 0.5));
+  const double angle = std::acos(cos_angle);
+  const Eigen::Vector3d skew(R(2, 1) - R(1, 2), R(0, 2) - R(2, 0), R(1, 0) - R(0, 1));
+  if (angle < 1e-10) {
+    return skew * 0.5;  // first-order approximation for small angles
+  }
+  if (angle > M_PI - 1e-4) {
+    // Near 180°: AngleAxisd is numerically unstable here. Extract axis from
+    // R ≈ 2*n*n^T - I  =>  R(i,i)+1 = 2*n_i^2. Pick largest diagonal.
+    int i = 0;
+    if (R(1, 1) > R(0, 0)) i = 1;
+    if (R(2, 2) > R(i, i)) i = 2;
+    const double ni_sq = (R(i, i) + 1.0) * 0.5;
+    Eigen::Vector3d axis = Eigen::Vector3d::Zero();
+    if (ni_sq > 1e-20) {
+      axis[i] = std::sqrt(ni_sq);
+      const int j = (i + 1) % 3;
+      const int k = (i + 2) % 3;
+      axis[j] = (R(i, j) + R(j, i)) * 0.25 / axis[i];
+      axis[k] = (R(i, k) + R(k, i)) * 0.25 / axis[i];
+    } else {
+      axis = Eigen::Vector3d::UnitX();
+    }
+    return axis.normalized() * angle;
+  }
+  return skew * (angle / (2.0 * std::sin(angle)));  // standard SO(3) log map
 }
 
 static Eigen::VectorXd solve_dls(const Eigen::MatrixXd &J, const Eigen::VectorXd &e, double lam) {
-  const int m = 6;
   Eigen::Matrix<double, 6, 6> A = J * J.transpose();
   A.diagonal().array() += lam * lam;
   Eigen::LDLT<Eigen::Matrix<double, 6, 6>> ldlt(A);
@@ -69,27 +93,23 @@ static Eigen::VectorXd solve_dls(const Eigen::MatrixXd &J, const Eigen::VectorXd
 
 static double adaptive_damping_value(const Eigen::MatrixXd &J, double pos_err, double ori_err,
                                      double min_d, double max_d) {
-  Eigen::Matrix<double, 6, 6> JJt = J * J.transpose();
-  Eigen::SelfAdjointEigenSolver<Eigen::Matrix<double, 6, 6>> es(JJt);
-  double cond = 100.0;
-  if (es.info() == Eigen::Success) {
-    auto ev = es.eigenvalues();
-    double lam_max = std::max(0.0, ev.maxCoeff());
-    double lam_min = std::max(1e-24, ev.minCoeff());
-    double smax = std::sqrt(lam_max);
-    double smin = std::sqrt(lam_min);
-    if (smin > 1e-18) {
-      cond = smax / smin;
-    }
+  // Cheap condition proxy: 6*||JJt||_F^2 / tr(JJt)^2 in [1,6].
+  // 1 = uniform eigenvalues (well-conditioned), 6 = rank-1 (near-singular).
+  // Replaces SelfAdjointEigenSolver (~O(6^3) per iteration) with O(36) ops.
+  const Eigen::Matrix<double, 6, 6> JJt = J * J.transpose();
+  const double tr = JJt.trace();
+  double cond_proxy = 6.0;  // default: assume near-singular
+  if (tr > 1e-20) {
+    cond_proxy = 6.0 * JJt.squaredNorm() / (tr * tr);
   }
-  double err_combo = pos_err + 0.5 * ori_err;
-  if (cond > 200.0 || err_combo > 0.05) {
+  const double err_combo = pos_err + 0.5 * ori_err;
+  if (cond_proxy > 4.0 || err_combo > 0.05) {
     return max_d;
   }
-  if (cond < 30.0 && err_combo < 0.01) {
+  if (cond_proxy < 2.0 && err_combo < 0.01) {
     return min_d;
   }
-  return 0.5 * (min_d + max_d);
+  return std::sqrt(min_d * max_d);  // geometric mean
 }
 
 static double adaptive_step_value(double pos_err, double ori_err, double base_step) {
@@ -194,26 +214,40 @@ public:
 
     bool success = false;
     std::int32_t iters_done = max_iters;
+    double prev_err = std::numeric_limits<double>::infinity();
+    int plateau_count = 0;
+    const int plateau_limit = 15;  // exit early if no meaningful improvement for this many iters
 
     for (std::int32_t it = 1; it <= max_iters; ++it) {
-      Eigen::Matrix4d T_end = fk_end(q);
-      Eigen::Matrix3d R_cur = T_end.block<3, 3>(0, 0);
-      Eigen::Vector3d p_cur = T_end.block<3, 1>(0, 3);
+      // Single-pass FK + Jacobian: one chain traversal instead of two.
+      std::pair<Eigen::Matrix4d, Eigen::MatrixXd> fk_j = fk_and_jacobian(q);
+      const Eigen::Matrix4d &T_end = fk_j.first;
+      Eigen::MatrixXd &J = fk_j.second;
+      const Eigen::Matrix3d R_cur = T_end.block<3, 3>(0, 0);
+      const Eigen::Vector3d p_cur = T_end.block<3, 1>(0, 3);
 
-      Eigen::Vector3d p_err = p_tgt - p_cur;
-      Eigen::Vector3d o_err = rotation_error_compact(R_cur, R_tgt);
-      double pos_norm = p_err.norm();
-      double ori_norm = o_err.norm();
+      const Eigen::Vector3d p_err = p_tgt - p_cur;
+      const Eigen::Vector3d o_err = rotation_error_compact(R_cur, R_tgt);
+      const double pos_norm = p_err.norm();
+      const double ori_norm = o_err.norm();
 
       Eigen::VectorXd e(6);
       e.head<3>() = pos_weight * p_err;
       e.tail<3>() = ori_weight * o_err;
-      double err_norm = e.norm();
+      const double err_norm = e.norm();
 
       if (err_norm < best_err) {
         best_err = err_norm;
         best_q = q;
       }
+
+      // Plateau detection: exit early when no meaningful progress.
+      if (prev_err - err_norm < 1e-8 * (1.0 + prev_err)) {
+        if (++plateau_count >= plateau_limit) break;
+      } else {
+        plateau_count = 0;
+      }
+      prev_err = err_norm;
 
       if (pos_norm < pos_tol && ori_norm < ori_tol) {
         success = true;
@@ -222,7 +256,6 @@ public:
         break;
       }
 
-      Eigen::MatrixXd J = jacobian(q);
       J.topRows(3) *= pos_weight;
       J.bottomRows(3) *= ori_weight;
 
@@ -403,6 +436,61 @@ public:
   }
 
 private:
+  // Single-pass FK + Jacobian: computes end-effector pose and geometric Jacobian
+  // in one chain traversal, replacing the previous fk_end() + jacobian() double-pass.
+  std::pair<Eigen::Matrix4d, Eigen::MatrixXd> fk_and_jacobian(const Eigen::VectorXd &q) const {
+    const size_t n_joints = types_.size();
+    Eigen::MatrixXd J = Eigen::MatrixXd::Zero(6, n_dof_);
+    std::vector<Eigen::Vector3d> z_col(static_cast<size_t>(n_dof_));
+    std::vector<Eigen::Vector3d> p_col(static_cast<size_t>(n_dof_));
+    std::vector<std::uint8_t> col_kind(static_cast<size_t>(n_dof_), 0);
+    std::vector<char> have(static_cast<size_t>(n_dof_), 0);
+    Eigen::Matrix4d T_parent = Eigen::Matrix4d::Identity();
+    Eigen::Matrix4d end_T = Eigen::Matrix4d::Identity();
+    for (size_t ji = 0; ji < n_joints; ++ji) {
+      const Eigen::Matrix4d T_joint_origin = T_parent * T_origin_[ji];
+      const std::int32_t qix = q_idx_[ji];
+      const JointType ty = types_[ji];
+      if (qix >= 0 && (ty == JointType::Revolute || ty == JointType::Prismatic)) {
+        Eigen::Vector3d axis = axes_[ji];
+        const double nn = axis.norm();
+        if (nn > 1e-10) axis /= nn;
+        const Eigen::Matrix3d Rjo = T_joint_origin.block<3, 3>(0, 0);
+        z_col[static_cast<size_t>(qix)] = Rjo * axis;
+        p_col[static_cast<size_t>(qix)] = T_joint_origin.block<3, 1>(0, 3);
+        col_kind[static_cast<size_t>(qix)] =
+            (ty == JointType::Revolute) ? static_cast<std::uint8_t>(1) : static_cast<std::uint8_t>(2);
+        have[static_cast<size_t>(qix)] = 1;
+      }
+      double qi = 0.0;
+      if (qix >= 0) qi = q[qix];
+      Eigen::Matrix4d Tm;
+      switch (ty) {
+      case JointType::Fixed:     Tm = Eigen::Matrix4d::Identity(); break;
+      case JointType::Revolute:  Tm = rodrigues_motion(axes_[ji], qi); break;
+      case JointType::Prismatic: Tm = prismatic_motion(axes_[ji], qi); break;
+      default:                   Tm = Eigen::Matrix4d::Identity(); break;
+      }
+      const Eigen::Matrix4d T_child = T_joint_origin * Tm;
+      T_parent = T_child;
+      end_T = T_child;
+      if (stop_chain_idx_ >= 0 && static_cast<std::int32_t>(ji) == stop_chain_idx_) break;
+    }
+    const Eigen::Vector3d p_end = end_T.block<3, 1>(0, 3);
+    for (std::int32_t c = 0; c < n_dof_; ++c) {
+      const size_t ci = static_cast<size_t>(c);
+      if (!have[ci]) continue;
+      const Eigen::Vector3d &zv = z_col[ci];
+      if (col_kind[ci] == 1) {
+        J.col(c).head<3>() = zv.cross(p_end - p_col[ci]);
+        J.col(c).tail<3>() = zv;
+      } else {
+        J.col(c).head<3>() = zv;
+      }
+    }
+    return {end_T, std::move(J)};
+  }
+
   void clamp_q(Eigen::VectorXd &q) const {
     for (std::int32_t i = 0; i < n_dof_; ++i) {
       const size_t si = static_cast<size_t>(i);
@@ -549,11 +637,11 @@ PYBIND11_MODULE(_ik_chain_core, m) {
       .def("solve", &ChainIKDls::solve, py::arg("target_pose"), py::arg("q0"), py::arg("max_iters") = 200,
            py::arg("pos_tol") = 1e-3, py::arg("ori_tol") = 1e-3, py::arg("min_damping") = 1e-4,
            py::arg("max_damping") = 5e-2, py::arg("base_step") = 1.0, py::arg("pos_weight") = 1.0,
-           py::arg("ori_weight") = 1.0, py::arg("adaptive_damping") = true, py::arg("adaptive_step") = false,
+           py::arg("ori_weight") = 1.0, py::arg("adaptive_damping") = true, py::arg("adaptive_step") = true,
            py::arg("max_step_norm") = 0.5)
       .def("solve_batch", &ChainIKDls::solve_batch, py::arg("target_poses"), py::arg("q0_batch"),
            py::arg("max_iters") = 200, py::arg("pos_tol") = 1e-3, py::arg("ori_tol") = 1e-3,
            py::arg("min_damping") = 1e-4, py::arg("max_damping") = 5e-2, py::arg("base_step") = 1.0,
            py::arg("pos_weight") = 1.0, py::arg("ori_weight") = 1.0, py::arg("adaptive_damping") = true,
-           py::arg("adaptive_step") = false, py::arg("max_step_norm") = 0.5);
+           py::arg("adaptive_step") = true, py::arg("max_step_norm") = 0.5);
 }

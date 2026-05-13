@@ -63,7 +63,7 @@ class TestIKMethods:
         
         result = inverse_kinematics(
             robot_model, target_pose, q_init,
-, method=method,
+            method=method,
             max_iters=100, pos_tol=1e-4, ori_tol=1e-4
         )
         
@@ -130,7 +130,7 @@ class TestIKMethods:
         
         result = inverse_kinematics(
             robot_model, target_pose, q_init,
-, method='dls',
+            method='dls',
             max_iters=100
         )
         

@@ -36,26 +36,57 @@ class Task:
     row_mask: Optional[Sequence[bool]] = None
     joint_indices: Optional[Sequence[int]] = None
 
+    # Valid task types including bimanual variants
+    _VALID_TYPES = frozenset((
+        'absolute', 'absolute_left', 'absolute_right',
+        'relative', 'centering', 'contact',
+    ))
+
     def __post_init__(self):
         """Validate task configuration."""
+        # 1. Type check (first, so message is unambiguous)
+        if self.type not in self._VALID_TYPES:
+            raise ValueError(f"Invalid task type: {self.type!r}. "
+                             f"Must be one of {sorted(self._VALID_TYPES)}.")
+
+        # 2. Weight must be positive
+        if self.weight <= 0:
+            raise ValueError(f"Weight must be positive, got {self.weight}.")
+
+        # 3. Target shape validation (when provided)
+        if self.target is not None:
+            t = np.asarray(self.target)
+            if t.ndim == 2 and t.shape != (4, 4):
+                raise ValueError(
+                    f"Target must be 4x4 for a pose task, got shape {t.shape}."
+                )
+
+        # 4. row_mask length validation (when provided)
+        if self.row_mask is not None:
+            mask = np.asarray(self.row_mask)
+            if mask.ndim != 1 or len(mask) != 6:
+                raise ValueError(
+                    f"row_mask must be a 1-D sequence of 6 booleans/ints, "
+                    f"got length {len(mask)}."
+                )
+            # Ensure it's stored as a numpy array
+            object.__setattr__(self, 'row_mask', mask)
+
+        # 5. Group requirements for types that need them
         if self.type == 'absolute':
             if self.group is None:
-                raise ValueError("Absolute task requires 'group'")
+                raise ValueError("Absolute task requires 'group'.")
             if self.target is None:
-                raise ValueError("Absolute task requires 'target'")
-        elif self.type == 'relative':
-            if self.group_a is None or self.group_b is None:
-                raise ValueError("Relative task requires 'group_a' and 'group_b'")
+                raise ValueError("Absolute task requires 'target'.")
+        elif self.type in ('absolute_left', 'absolute_right'):
             if self.target is None:
-                raise ValueError("Relative task requires 'target'")
+                raise ValueError(f"{self.type!r} task requires 'target'.")
         elif self.type == 'centering':
             if self.group is None:
-                raise ValueError("Centering task requires 'group'")
+                raise ValueError("Centering task requires 'group'.")
         elif self.type == 'contact':
             if self.group is None:
-                raise ValueError("Contact task requires 'group'")
-        else:
-            raise ValueError(f"Unknown task type: {self.type}")
+                raise ValueError("Contact task requires 'group'.")
 
 
 def absolute_task(group: str, target: Union[np.ndarray, Sequence[float]], 

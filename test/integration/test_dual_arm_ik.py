@@ -3,6 +3,7 @@
 Validates that simultaneous solving reaches both targets within tolerances.
 """
 from __future__ import annotations
+import pytest
 import numpy as np
 from robocore.modeling.robot_model import RobotModel
 from robocore.utils.path import get_robocore_path
@@ -12,7 +13,11 @@ URDF_REL = "assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf
 
 
 def test_dual_arm_absolute_ik():
-    base = RobotModel(get_robocore_path(URDF_REL))
+    try:
+        urdf = get_robocore_path(URDF_REL)
+    except FileNotFoundError:
+        pytest.skip(f"Robot description not found: {URDF_REL}")
+    base = RobotModel(urdf)
     leaves = base.available_leaf_links()
     left_end = next(l for l in leaves if 'left_arm_gripper_left_finger' in l)
     right_end = next(l for l in leaves if 'right_arm_gripper_left_finger' in l)
