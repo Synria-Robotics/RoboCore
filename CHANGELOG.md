@@ -2,6 +2,12 @@
 
 All notable changes to RoboCore will be documented in this file.
 
+## [2.5.0rc3] - 2026-05-14
+
+### Fixed
+- `MANIFEST.in`: added missing `_multichain_ik_core.cpp` so sdist builds from PyPI include all four C++ extension sources
+- Config management and IK algorithm refinements (see commit `af205ad`)
+
 ## [2.5.0] - 2026-05-08
 
 ### 🚀 New Features
