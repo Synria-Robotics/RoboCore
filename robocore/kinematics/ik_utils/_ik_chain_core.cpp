@@ -3,6 +3,9 @@
 // Matches IKSolverNumPy._solve_single core path: DLS, adaptive damping/step, joint clamp.
 // Does not implement Jacobian limit projection or limit-jump heuristics (see ik_solver_cpp docstring).
 
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES  // enable M_PI on MSVC
+#endif
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 #include <algorithm>

@@ -2,6 +2,9 @@
 // Multi-end-effector DLS IK in unified configuration space (Eigen + pybind11).
 // Matches Python _solve_multichain_ik: stacked 6K error/Jacobian, fixed damping DLS, step clip, q clamp.
 
+#ifdef _MSC_VER
+#define _USE_MATH_DEFINES  // enable M_PI on MSVC
+#endif
 #include <Eigen/Dense>
 #include <Eigen/Geometry>
 #include <algorithm>
