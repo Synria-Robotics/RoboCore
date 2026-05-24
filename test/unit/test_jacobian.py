@@ -11,43 +11,29 @@ Website: https://synriarobotics.ai
 """
 
 import numpy as np
-import torch
 import pytest
-from pathlib import Path
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.jacobian import jacobian
 import robocore
-from robocore.kinematics.jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
 from robocore.kinematics.jacobian_utils.jacobian_solver_numpy import JacobianSolverNumPy
+
+try:
+    import torch
+    from robocore.kinematics.jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
+except ImportError:
+    torch = None
+    JacobianSolverTorch = None
 
 
 def random_q_in_limits(model, seed=42):
     """Generate random joint configuration within joint limits."""
-    rng = np.random.default_rng(seed)
-    n = model.num_dof
-    q = np.zeros(n)
-    chain_indices = model._get_joint_indices(model.base_link, model.end_link)
-    for idx in chain_indices:
-        js = model.joint_list[idx]
-        lo, hi = -1.0, 1.0
-        if js.limit:
-            if js.limit[0] is not None:
-                lo = js.limit[0]
-            if js.limit[1] is not None:
-                hi = js.limit[1]
-        mid = 0.5 * (lo + hi)
-        span = 0.5 * (hi - lo) * 0.5
-        q[idx] = rng.uniform(mid - span, mid + span)
-    return q
+    return np.asarray(model.random_q(seed=seed), dtype=float)
 
 
 @pytest.fixture(scope="module")
-def robot_model():
+def robot_model(alicia_urdf_path):
     """Load robot model for testing."""
-    urdf_path = Path('robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
-    if not urdf_path.exists():
-        pytest.skip(f"URDF not found: {urdf_path}")
-    return RobotModel(str(urdf_path), end_link='tool0')
+    return RobotModel(alicia_urdf_path, end_link='tool0')
 
 
 class TestJacobianConsistency:
@@ -55,6 +41,7 @@ class TestJacobianConsistency:
     
     def test_numpy_vs_torch_single(self, robot_model):
         """Test that NumPy and PyTorch compute same Jacobian (single sample)."""
+        pytest.importorskip("torch")
         q_test = random_q_in_limits(robot_model, seed=42)
         
         # NumPy Jacobian
@@ -64,7 +51,7 @@ class TestJacobianConsistency:
         # PyTorch Jacobian
         robocore.set_backend('torch', device='cpu')
         J_torch = jacobian(robot_model, q_test, method='analytic', device='cpu', dtype=torch.float64)
-        J_torch_np = J_torch.cpu().numpy()
+        J_torch_np = J_torch.cpu().numpy() if torch.is_tensor(J_torch) else np.asarray(J_torch)
         
         # Should match to numerical precision
         max_diff = np.abs(J_np - J_torch_np).max()

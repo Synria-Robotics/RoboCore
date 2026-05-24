@@ -1,17 +1,20 @@
-"""Module
+"""Robot model abstractions."""
 
-Copyright (c) 2025 Synria Robotics Co., Ltd.
+from importlib import import_module
 
-Licensed under the MIT License.
+_LAZY_EXPORTS = {
+    "RobotModel": ("robocore.modeling.robot_model", "RobotModel"),
+    "ChainView": ("robocore.modeling.chain_view", "ChainView"),
+}
 
-Author: Synria Robotics Team
-Website: https://synriarobotics.ai
-"""
 
-from .robot_model import RobotModel
-from .chain_view import ChainView
+def __getattr__(name):
+    if name in _LAZY_EXPORTS:
+        module_name, attr_name = _LAZY_EXPORTS[name]
+        value = getattr(import_module(module_name), attr_name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__all__ = [
-    "RobotModel",
-    "ChainView",
-]
+
+__all__ = list(_LAZY_EXPORTS)

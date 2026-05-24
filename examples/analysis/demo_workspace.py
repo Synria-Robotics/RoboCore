@@ -263,12 +263,13 @@ def main():
     print("="*70)
     print(f"\nLoading robot model...")
     
+    from robocore.configs import resolve_description_path
+
     if args.robot == 'alicia':
-        urdf_path = os.path.join(Path(__file__).parent.parent,
-                                 '../robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
+        urdf_path = resolve_description_path("synriard://Alicia_D/v5_6/gripper_100mm/urdf")
         dof = 6
     else:  # bessica
-        urdf_path = os.path.join(Path(__file__).parent.parent, '../robocore/assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
+        urdf_path = resolve_description_path("synriard://Bessica_D/v1_1/covered/urdf")
         dof = 7
     
     model = RobotModel(str(urdf_path))

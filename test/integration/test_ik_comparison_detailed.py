@@ -11,31 +11,20 @@ Website: https://synriarobotics.ai
 """
 
 import numpy as np
-import torch
+import pytest
+torch = pytest.importorskip("torch")
 from pathlib import Path
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.ik import inverse_kinematics
 from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
 from robocore.kinematics.fk import forward_kinematics
+from robocore.configs import resolve_description_path
 import robocore
 
 
 def random_q_in_limits(model, seed=42):
     """生成一个在关节限制内的随机配置"""
-    rng = np.random.default_rng(seed)
-    n = model.num_dof
-    q = np.zeros(n)
-    for js in model._chain_actuated:
-        lo, hi = -1.0, 1.0
-        if js.limit:
-            if js.limit[0] is not None:
-                lo = js.limit[0]
-            if js.limit[1] is not None:
-                hi = js.limit[1]
-        mid = 0.5 * (lo + hi)
-        span = 0.5 * (hi - lo) * 0.5
-        q[js.index] = rng.uniform(mid - span, mid + span)
-    return q
+    return np.asarray(model.random_q(seed=seed), dtype=float)
 
 
 def compare_single_ik(model, target_pose, q_init, device='cpu'):
@@ -226,7 +215,7 @@ def batch_comparison(model, n_samples=32, device='cpu', seed=42):
 def main():
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--urdf', default='robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
+    parser.add_argument('--urdf', default='synriard://Alicia_D/v5_6/gripper_100mm/urdf')
     parser.add_argument('--end-link', default='tool0')
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--batch-size', type=int, default=32)
@@ -235,7 +224,11 @@ def main():
     args = parser.parse_args()
     
     # 加载模型
-    urdf_path = Path(args.urdf)
+    try:
+        urdf_path = Path(resolve_description_path(args.urdf))
+    except Exception as exc:
+        print(f"❌ 无法解析机器人描述: {exc}")
+        return
     if not urdf_path.exists():
         print(f"❌ URDF 不存在: {urdf_path}")
         return

@@ -10,30 +10,14 @@ Website: https://synriarobotics.ai
 
 import numpy as np
 import pytest
-from pathlib import Path
 
 from robocore.modeling.robot_model import RobotModel
 from robocore import dynamics
 
 
-def _urdf_path():
-    try:
-        from synriard import get_model_path
-        return Path(get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="urdf"))
-    except Exception:
-        pass
-    p = Path(__file__).resolve().parent.parent.parent / "robocore" / "assets" / "robot_descriptions" / "urdf" / "Alicia-D_v5_5" / "alicia_duo_with_gripper.urdf"
-    if not p.exists():
-        p = Path("robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf")
-    return p
-
-
 @pytest.fixture(scope="module")
-def robot_model():
-    urdf_path = _urdf_path()
-    if not urdf_path.exists():
-        pytest.skip(f"URDF not found: {urdf_path}")
-    return RobotModel(str(urdf_path), end_link="tool0")
+def robot_model(alicia_urdf_path):
+    return RobotModel(alicia_urdf_path, end_link="tool0")
 
 
 def test_inverse_dynamics_shape(robot_model):

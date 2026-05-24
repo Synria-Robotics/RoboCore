@@ -1,38 +1,29 @@
-"""MuJoCo physics simulation modules.
+"""MuJoCo physics simulation modules."""
 
-Copyright (c) 2025 Synria Robotics Co., Ltd.
+from importlib import import_module
 
-Licensed under the MIT License.
+_LAZY_EXPORTS = {
+    'PhysicsSimulator': ('.physics_simulator', 'PhysicsSimulator'),
+    'TrajectoryExecutor': ('.trajectory_executor', 'TrajectoryExecutor'),
+    'TrajectoryEvaluator': ('.trajectory_evaluator', 'TrajectoryEvaluator'),
+    'ComparisonAnalyzer': ('.comparison_analyzer', 'ComparisonAnalyzer'),
+    'interpolate_trajectory': ('.utils', 'interpolate_trajectory'),
+    'interpolate_trajectory_with_derivatives': ('.utils', 'interpolate_trajectory_with_derivatives'),
+    'compute_jerk': ('.utils', 'compute_jerk'),
+    'fft_analysis': ('.utils', 'fft_analysis'),
+    'detect_vibration': ('.utils', 'detect_vibration'),
+    'compute_rms_error': ('.utils', 'compute_rms_error'),
+    'compute_max_error': ('.utils', 'compute_max_error'),
+}
 
-Author: Synria Robotics Team
-Website: https://synriarobotics.ai
-"""
 
-from .physics_simulator import PhysicsSimulator
-from .trajectory_executor import TrajectoryExecutor
-from .trajectory_evaluator import TrajectoryEvaluator
-from .comparison_analyzer import ComparisonAnalyzer
-from .utils import (
-    interpolate_trajectory,
-    interpolate_trajectory_with_derivatives,
-    compute_jerk,
-    fft_analysis,
-    detect_vibration,
-    compute_rms_error,
-    compute_max_error
-)
+def __getattr__(name):
+    if name in _LAZY_EXPORTS:
+        module_name, attr_name = _LAZY_EXPORTS[name]
+        value = getattr(import_module(module_name, __name__), attr_name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__all__ = [
-    'PhysicsSimulator',
-    'TrajectoryExecutor',
-    'TrajectoryEvaluator',
-    'ComparisonAnalyzer',
-    'interpolate_trajectory',
-    'interpolate_trajectory_with_derivatives',
-    'compute_jerk',
-    'fft_analysis',
-    'detect_vibration',
-    'compute_rms_error',
-    'compute_max_error',
-]
 
+__all__ = list(_LAZY_EXPORTS)

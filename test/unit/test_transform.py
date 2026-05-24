@@ -11,8 +11,11 @@ Website: https://synriarobotics.ai
 """
 
 import numpy as np
-import torch
 import pytest
+try:
+    import torch
+except ImportError:
+    torch = None
 from robocore.transform import (
     rpy_to_matrix,
     matrix_to_rpy,
@@ -138,7 +141,7 @@ class TestSE3Transforms:
 class TestBackendConsistency:
     """Test that transform functions work consistently across backends."""
     
-    @pytest.mark.skipif(not torch.cuda.is_available(), reason="Requires PyTorch")
+    @pytest.mark.skipif(torch is None, reason="Requires PyTorch")
     def test_rpy_numpy_vs_torch(self):
         """Test RPY conversion consistency between NumPy and PyTorch."""
         from robocore.utils.backend import set_backend, get_backend

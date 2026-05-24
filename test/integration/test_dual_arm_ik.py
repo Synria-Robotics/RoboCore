@@ -6,18 +6,11 @@ from __future__ import annotations
 import pytest
 import numpy as np
 from robocore.modeling.robot_model import RobotModel
-from robocore.utils.path import get_robocore_path
 from robocore.kinematics.bimanual import dual_fk, dual_ik
 
-URDF_REL = "assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf"
 
-
-def test_dual_arm_absolute_ik():
-    try:
-        urdf = get_robocore_path(URDF_REL)
-    except FileNotFoundError:
-        pytest.skip(f"Robot description not found: {URDF_REL}")
-    base = RobotModel(urdf)
+def test_dual_arm_absolute_ik(bessica_urdf_path):
+    base = RobotModel(bessica_urdf_path)
     leaves = base.available_leaf_links()
     left_end = next(l for l in leaves if 'left_arm_gripper_left_finger' in l)
     right_end = next(l for l in leaves if 'right_arm_gripper_left_finger' in l)

@@ -1,16 +1,18 @@
-"""Simulation bridge implementations.
+"""Simulation bridge implementations."""
 
-Copyright (c) 2025 Synria Robotics Co., Ltd.
+from importlib import import_module
 
-Licensed under the MIT License.
-
-Author: Synria Robotics Team
-Website: https://synriarobotics.ai
-"""
-
-from . import mujoco
-
-__all__ = [
+_LAZY_SUBMODULES = {
     'mujoco',
-]
+}
 
+
+def __getattr__(name):
+    if name in _LAZY_SUBMODULES:
+        module = import_module(f'.{name}', __name__)
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = ['mujoco']

@@ -60,10 +60,20 @@ class WorkspaceAnalyzer:
             Robot model
         """
         self.model = model
-        self.num_dof = model.num_dof
+        self.num_dof = model.num_chain_dof
         
         # Cache for workspace data
         self._workspace_cache: Dict[str, Any] = {}
+
+    def _default_q_limits(self) -> np.ndarray:
+        """Return finite joint limits for the active kinematic chain."""
+        if hasattr(self.model, "chain_joint_limit") and len(self.model.chain_joint_limit) == self.num_dof:
+            limits = np.asarray(self.model.chain_joint_limit, dtype=float).copy()
+        else:
+            limits = np.tile([-np.pi, np.pi], (self.num_dof, 1))
+        limits[~np.isfinite(limits[:, 0]), 0] = -np.pi
+        limits[~np.isfinite(limits[:, 1]), 1] = np.pi
+        return limits
     
     def compute_reachable_workspace(
         self,
@@ -119,7 +129,7 @@ class WorkspaceAnalyzer:
         
         # Default joint limits
         if q_limits is None:
-            q_limits = np.tile([-np.pi, np.pi], (self.num_dof, 1))
+            q_limits = self._default_q_limits()
         
         # Generate samples
         if method == 'monte_carlo':
@@ -188,7 +198,7 @@ class WorkspaceAnalyzer:
         
         # Generate diverse samples
         if q_limits is None:
-            q_limits = np.tile([-np.pi, np.pi], (self.num_dof, 1))
+            q_limits = self._default_q_limits()
         
         q_samples = self._sample_monte_carlo(num_samples, q_limits)
         
@@ -314,6 +324,33 @@ class WorkspaceAnalyzer:
         
         else:
             raise ValueError(f"Unknown method: {method}")
+
+    def analyze_reachability(
+        self,
+        grid_resolution: float = 0.1,
+        bounds: Optional[Dict[str, Tuple[float, float]]] = None,
+        **_: Any,
+    ) -> Dict[str, Any]:
+        """Compatibility wrapper for coarse reachability analysis."""
+        if bounds is None:
+            bounds = {"x": (-1.0, 1.0), "y": (-1.0, 1.0), "z": (-1.0, 1.0)}
+        spans = [max(1, int(np.ceil((hi - lo) / grid_resolution))) for lo, hi in bounds.values()]
+        num_samples = int(max(32, min(2000, np.prod(spans))))
+        points = self.compute_reachable_workspace(num_samples=num_samples, method="monte_carlo")
+        mask = (
+            (points[:, 0] >= bounds["x"][0]) & (points[:, 0] <= bounds["x"][1]) &
+            (points[:, 1] >= bounds["y"][0]) & (points[:, 1] <= bounds["y"][1]) &
+            (points[:, 2] >= bounds["z"][0]) & (points[:, 2] <= bounds["z"][1])
+        )
+        reachable_points = points[mask]
+        volume = self._estimate_bounding_box_volume(reachable_points) if len(reachable_points) else 0.0
+        return {"reachable_points": reachable_points, "count": len(reachable_points), "volume": volume}
+
+    def compute_workspace_volume(self, resolution: float = 0.15, **_: Any) -> Dict[str, float]:
+        """Compatibility wrapper that computes samples then estimates volume."""
+        num_samples = int(max(64, min(5000, round(1.0 / max(resolution, 1e-6)) ** 3)))
+        points = self.compute_reachable_workspace(num_samples=num_samples, method="monte_carlo")
+        return {"volume": self.estimate_workspace_volume(points)}
     
     def check_point_in_workspace(
         self,
@@ -353,6 +390,22 @@ class WorkspaceAnalyzer:
         dist, _ = tree.query(point)
         
         return dist <= tolerance
+
+    def is_reachable(self, point: np.ndarray, tolerance: float = 0.05) -> bool:
+        if 'reachable_points' not in self._workspace_cache:
+            self.compute_reachable_workspace(num_samples=1000, method='monte_carlo')
+        return bool(self.check_point_in_workspace(point, tolerance=tolerance))
+
+    def compute_boundary(self, resolution: float = 0.2) -> Dict[str, Any]:
+        if 'reachable_points' not in self._workspace_cache:
+            num_samples = int(max(64, min(2000, round(1.0 / max(resolution, 1e-6)) ** 3)))
+            self.compute_reachable_workspace(num_samples=num_samples, method='monte_carlo')
+        bounds = self.get_workspace_bounds()
+        return {
+            "bounds": bounds,
+            "min_reach": min(abs(v) for axis in bounds.values() for v in axis),
+            "max_reach": max(abs(v) for axis in bounds.values() for v in axis),
+        }
     
     def compute_workspace_density(
         self,
@@ -443,7 +496,7 @@ class WorkspaceAnalyzer:
         from robocore.kinematics.jacobian import jacobian
         
         if q_limits is None:
-            q_limits = np.tile([-np.pi, np.pi], (self.num_dof, 1))
+            q_limits = self._default_q_limits()
         
         q_samples = self._sample_monte_carlo(num_samples, q_limits)
         

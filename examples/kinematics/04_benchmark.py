@@ -162,7 +162,7 @@ def cmd_ik_compare(args, model):
         t0 = time.perf_counter()
         try:
             results_batch = inverse_kinematics(
-                model, poses, q0_batch=None,
+                model, poses,
                 method=method,
                 pos_tol=args.pos_tol,
                 ori_tol=args.ori_tol,
@@ -450,7 +450,7 @@ def cmd_parallel(args, model):
         beauty_print("NumPy (Batch Interface)")
         result_ik_np = benchmark_ik_batch(
             model, target_poses, None, 'numpy', method='dls',
-            num_initial_guesses=1, initial_guess_strategy='random',
+            num_initial_guesses=3, initial_guess_strategy='center',
             initial_guess_scale=1.0, random_seed=42
         )
         beauty_print(f"  Total time: {result_ik_np['total_time']:.4f} s")
@@ -463,7 +463,7 @@ def cmd_parallel(args, model):
             beauty_print("PyTorch CPU (Batch)")
             result_ik_torch = benchmark_ik_batch(
                 model, target_poses, None, 'torch', 'cpu', method='dls',
-                num_initial_guesses=1, initial_guess_strategy='random',
+                num_initial_guesses=3, initial_guess_strategy='center',
                 initial_guess_scale=1.0, random_seed=42
             )
             beauty_print(f"  Total time: {result_ik_torch['total_time']:.4f} s")
@@ -521,8 +521,9 @@ def main(args):
 
 
 if __name__ == '__main__':
-    import synriard
-    model_path = synriard.get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="urdf")
+    from robocore.configs import resolve_description_path
+
+    model_path = resolve_description_path("synriard://Alicia_D/v5_6/gripper_100mm/urdf")
 
     parser = argparse.ArgumentParser(
         description="Unified Benchmark Suite for RoboCore Kinematics",

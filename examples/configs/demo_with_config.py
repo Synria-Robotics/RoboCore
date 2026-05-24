@@ -15,7 +15,7 @@ import argparse
 from pathlib import Path
 from omegaconf import OmegaConf
 
-from robocore.configs import ConfigManager, get_default_config
+from robocore.configs import ConfigManager, get_default_config, resolve_description_path
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.fk import forward_kinematics
 from robocore.kinematics.ik import inverse_kinematics
@@ -80,9 +80,10 @@ def compute_kinematics(config: ConfigManager, joint_angles: np.ndarray):
     """
     # Load robot model from config
     robot_cfg = config.cfg.robot
-    robot_model = RobotModel(robot_cfg.urdf_path, end_link=robot_cfg.end_link)
+    urdf_path = resolve_description_path(robot_cfg.urdf_path)
+    robot_model = RobotModel(urdf_path, end_link=robot_cfg.end_link)
     
-    print(f"📦 Robot: {Path(robot_cfg.urdf_path).name}")
+    print(f"📦 Robot: {Path(urdf_path).name}")
     print(f"   DOF: {robot_model.num_dof}, End Link: {robot_cfg.end_link}")
     
     # Get config values
@@ -280,7 +281,7 @@ def main():
     
     # Load robot to determine DOF
     robot_cfg = config_manager.cfg.robot
-    robot_model = RobotModel(robot_cfg.urdf_path, end_link=robot_cfg.end_link)
+    robot_model = RobotModel(resolve_description_path(robot_cfg.urdf_path), end_link=robot_cfg.end_link)
     
     # Determine joint angles
     if args.joints is not None:

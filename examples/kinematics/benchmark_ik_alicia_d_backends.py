@@ -41,33 +41,35 @@ from robocore.kinematics.ik_utils.ik_solver_numpy import IKSolverNumPy
 from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
 from robocore.kinematics.ik_utils.ik_solver_cpp import IKSolverCpp
 from robocore.modeling import RobotModel
+from robocore.configs import resolve_description_path
 from robocore.transform.utils import rotation_error
 
 
-def _default_urdf() -> Path:
-    here = Path(__file__).resolve()
-    # .../RoboCore/examples/kinematics/this.py -> parents[3] = workspace (ws_robocore)
-    ws = here.parents[3]
-    return (
-        ws
-        / "Synria-Robot-Descriptions"
-        / "synriard"
-        / "urdf"
-        / "Alicia_D_v5_6"
-        / "Alicia_D_v5_6_gripper_100mm.urdf"
-    )
+def _default_urdf() -> str:
+    return resolve_description_path("synriard://Alicia_D/v5_6/gripper_100mm/urdf")
 
 
-def _bench(fn, *, repeats: int, inner_loops: int) -> float:
+def _bench(fn, *, repeats: int, inner_loops: int, sync=None) -> float:
     """Return seconds for ``inner_loops`` calls, repeated ``repeats`` times (best of)."""
     best = float("inf")
     for _ in range(repeats):
+        if sync is not None:
+            sync()
         t0 = time.perf_counter()
         for _ in range(inner_loops):
             fn()
+        if sync is not None:
+            sync()
         t1 = time.perf_counter()
         best = min(best, t1 - t0)
     return best
+
+
+def _cuda_sync(device) -> None:
+    device_str = str(device)
+    if device_str.startswith("cuda"):
+        import torch
+        torch.cuda.synchronize(device_str)
 
 
 def _q_row_to_numpy(q) -> np.ndarray:
@@ -84,6 +86,13 @@ def _ik_result_q_matrix(result: dict) -> np.ndarray:
         return q.detach().cpu().numpy().astype(np.float64)
     rows = [_q_row_to_numpy(row) for row in q]
     return np.stack(rows, axis=0)
+
+
+def _ik_result_success_array(result: dict) -> np.ndarray:
+    success = result["success"]
+    if hasattr(success, "detach"):
+        success = success.detach().cpu().numpy()
+    return np.asarray(success, dtype=bool)
 
 
 def _fk_closure_errors(fk: FKSolverNumPy, T_target: np.ndarray, Q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -150,9 +159,9 @@ def main() -> None:
     )
     parser.add_argument(
         "--urdf",
-        type=Path,
+        type=str,
         default=None,
-        help="Path to Alicia-D URDF (default: Synria-Robot-Descriptions/.../Alicia_D_v5_6_gripper_100mm.urdf)",
+        help="Path to Alicia-D URDF (default: synriard://Alicia_D/v5_6/gripper_100mm/urdf)",
     )
     parser.add_argument("--base-link", default="base_link")
     parser.add_argument("--end-link", default="link6", help="6-DOF arm tip (before gripper).")
@@ -206,10 +215,9 @@ def main() -> None:
         sys.exit(1)
 
     urdf = args.urdf or _default_urdf()
-    if not urdf.is_file():
-        print(f"URDF not found: {urdf}", file=sys.stderr)
-        print("Pass --urdf or clone Synria-Robot-Descriptions next to RoboCore.", file=sys.stderr)
-        sys.exit(1)
+    if "://" in str(urdf):
+        urdf = resolve_description_path(urdf)
+    urdf = Path(urdf)
 
     rc.set_backend("numpy")
     model_np = RobotModel(str(urdf), base_link=args.base_link, end_link=args.end_link)
@@ -250,7 +258,24 @@ def main() -> None:
         max_step_norm=0.5,
     )
 
+    active_backend = None
+
+    def _switch_backend(backend: str) -> None:
+        nonlocal active_backend
+        if active_backend == backend:
+            return
+        if backend == "torch":
+            rc.set_backend("torch", device=args.device)
+        else:
+            rc.set_backend(backend)
+        active_backend = backend
+
+    def _np_solve(T, q0):
+        _switch_backend("numpy")
+        return ik_np.solve(T, q0, **ik_kw)
+
     def _th_solve(T, q0):
+        _switch_backend("torch")
         return ik_th.solve(
             T,
             q0,
@@ -261,19 +286,23 @@ def main() -> None:
             max_step_norm=0.5,
         )
 
-    r_np1 = ik_np.solve(T_np1, q0_1, **ik_kw)
+    def _cpp_solve(T, q0):
+        _switch_backend("cpp")
+        return ik_cpp.solve(T, q0, **ik_kw)
+
+    r_np1 = _np_solve(T_np1, q0_1)
     r_th1 = _th_solve(T_np1, q0_1)
     q_np1_flat = _q_row_to_numpy(r_np1["q"])
     q_th1_flat = _q_row_to_numpy(r_th1["q"])
 
-    r_np_b = ik_np.solve(T_batch, q0_b, **ik_kw)
+    r_np_b = _np_solve(T_batch, q0_b)
     r_th_b = _th_solve(T_batch, q0_b)
     Q_np_b = _ik_result_q_matrix(r_np_b)
     Q_th_b = _ik_result_q_matrix(r_th_b)
 
     ik_cpp = IKSolverCpp(model_np)
-    r_cpp1 = ik_cpp.solve(T_np1, q0_1, **ik_kw)
-    r_cpp_b = ik_cpp.solve(T_batch, q0_b, **ik_kw)
+    r_cpp1 = _cpp_solve(T_np1, q0_1)
+    r_cpp_b = _cpp_solve(T_batch, q0_b)
     q_cpp1_flat = _q_row_to_numpy(r_cpp1["q"])
     Q_cpp_b = _ik_result_q_matrix(r_cpp_b)
 
@@ -299,10 +328,10 @@ def main() -> None:
     dp1_cpp, dor1_cpp = _fk_closure_errors(fk_np, T_np1, q_cpp1_flat)
     _print_fk_closure_block("FK numpy q=cpp IK", dp1_cpp, dor1_cpp, pos_tol=pos_tol, ori_tol=ori_tol)
     print()
-    succ_np = np.asarray(r_np_b["success"], dtype=bool)
-    succ_th = np.asarray(r_th_b["success"], dtype=bool)
+    succ_np = _ik_result_success_array(r_np_b)
+    succ_th = _ik_result_success_array(r_th_b)
     line = f"batch={B}: IK success count — numpy={int(succ_np.sum())}/{B}  torch={int(succ_th.sum())}/{B}"
-    succ_cpp = np.asarray(r_cpp_b["success"], dtype=bool)
+    succ_cpp = _ik_result_success_array(r_cpp_b)
     line += f"  cpp={int(succ_cpp.sum())}/{B}"
     print(line)
     dp_b_np, dor_b_np = _fk_closure_errors(fk_np, T_batch, Q_np_b)
@@ -410,29 +439,41 @@ def main() -> None:
 
     # Warmup
     for _ in range(20):
-        ik_np.solve(T_np1, q0_1, **ik_kw)
+        _np_solve(T_np1, q0_1)
         _th_solve(T_np1, q0_1)
+    _cuda_sync(args.device)
     for _ in range(20):
-        ik_cpp.solve(T_np1, q0_1, **ik_kw)
+        _cpp_solve(T_np1, q0_1)
 
-    t_np_1 = _bench(lambda: ik_np.solve(T_np1, q0_1, **ik_kw), repeats=args.repeats, inner_loops=args.inner_single)
-    t_th_1 = _bench(lambda: _th_solve(T_np1, q0_1), repeats=args.repeats, inner_loops=args.inner_single)
+    t_np_1 = _bench(lambda: _np_solve(T_np1, q0_1), repeats=args.repeats, inner_loops=args.inner_single)
+    t_th_1 = _bench(
+        lambda: _th_solve(T_np1, q0_1),
+        repeats=args.repeats,
+        inner_loops=args.inner_single,
+        sync=lambda: _cuda_sync(args.device),
+    )
     t_cpp_1 = _bench(
-        lambda: ik_cpp.solve(T_np1, q0_1, **ik_kw), repeats=args.repeats, inner_loops=args.inner_single
+        lambda: _cpp_solve(T_np1, q0_1), repeats=args.repeats, inner_loops=args.inner_single
     )
 
     for _ in range(5):
-        ik_np.solve(T_batch, q0_b, **ik_kw)
+        _np_solve(T_batch, q0_b)
         _th_solve(T_batch, q0_b)
+    _cuda_sync(args.device)
     for _ in range(5):
-        ik_cpp.solve(T_batch, q0_b, **ik_kw)
+        _cpp_solve(T_batch, q0_b)
 
     t_np_b = _bench(
-        lambda: ik_np.solve(T_batch, q0_b, **ik_kw), repeats=args.repeats, inner_loops=args.inner_batch
+        lambda: _np_solve(T_batch, q0_b), repeats=args.repeats, inner_loops=args.inner_batch
     )
-    t_th_b = _bench(lambda: _th_solve(T_batch, q0_b), repeats=args.repeats, inner_loops=args.inner_batch)
+    t_th_b = _bench(
+        lambda: _th_solve(T_batch, q0_b),
+        repeats=args.repeats,
+        inner_loops=args.inner_batch,
+        sync=lambda: _cuda_sync(args.device),
+    )
     t_cpp_b = _bench(
-        lambda: ik_cpp.solve(T_batch, q0_b, **ik_kw), repeats=args.repeats, inner_loops=args.inner_batch
+        lambda: _cpp_solve(T_batch, q0_b), repeats=args.repeats, inner_loops=args.inner_batch
     )
 
     t_pk_1 = t_pk_b = t_pin_1 = t_pin_b = None
@@ -484,7 +525,7 @@ def main() -> None:
 
     col_w = 22
     batch_col = f"batch={B} (ms/call)"
-    print(f"Model: {urdf.name}  chain DOF={n}  end_link={args.end_link}")
+    print(f"Model: {Path(urdf).name}  chain DOF={n}  end_link={args.end_link}")
     print(f"Torch device: {args.device}")
     print()
     print(f"{'backend':<22} {'batch=1 (ms/call)':<{col_w}} {batch_col:<26}")

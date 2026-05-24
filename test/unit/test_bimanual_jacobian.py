@@ -12,15 +12,13 @@ Tests:
 
 import pytest
 import numpy as np
-from pathlib import Path
 
 try:
     from robocore.modeling.robot_model import BimanualRobotModel
     _has_bimanual_model = True
 except ImportError:
-    BimanualRobotModel = None  # type: ignore
+    BimanualRobotModel = None  # type: ignore[assignment]
     _has_bimanual_model = False
-from robocore.utils.path import get_robocore_path
 
 pytestmark = pytest.mark.skipif(
     not _has_bimanual_model,
@@ -29,11 +27,10 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture
-def bimanual_robot():
+def bimanual_robot(bessica_mjcf_path):
     """Load Bessica-D dual-arm robot."""
-    mjcf_path = get_robocore_path("assets/robot_descriptions/mjcf/Bessica-D_v1_0/Bessica_D_Covered_Interactive")
     robot = BimanualRobotModel(
-        mjcf_path,
+        bessica_mjcf_path,
         left_end_link="left_arm_link7",
         right_end_link="right_arm_link7"
     )

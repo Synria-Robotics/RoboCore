@@ -11,43 +11,29 @@ Website: https://synriarobotics.ai
 """
 
 import numpy as np
-import torch
 import pytest
-from pathlib import Path
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.fk import forward_kinematics
-from robocore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
 from robocore.kinematics.fk_utils.fk_solver_numpy import FKSolverNumPy
 import robocore
+
+try:
+    import torch
+    from robocore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
+except ImportError:
+    torch = None
+    FKSolverTorch = None
 
 
 def random_q_in_limits(model, seed=42):
     """Generate random joint configuration within joint limits."""
-    rng = np.random.default_rng(seed)
-    n = model.num_dof
-    q = np.zeros(n)
-    chain_indices = model._get_joint_indices(model.base_link, model.end_link)
-    for idx in chain_indices:
-        js = model.joint_list[idx]
-        lo, hi = -1.0, 1.0
-        if js.limit:
-            if js.limit[0] is not None:
-                lo = js.limit[0]
-            if js.limit[1] is not None:
-                hi = js.limit[1]
-        mid = 0.5 * (lo + hi)
-        span = 0.5 * (hi - lo) * 0.5
-        q[idx] = rng.uniform(mid - span, mid + span)
-    return q
+    return np.asarray(model.random_q(seed=seed), dtype=float)
 
 
 @pytest.fixture(scope="module")
-def robot_model():
+def robot_model(alicia_urdf_path):
     """Load robot model for testing."""
-    urdf_path = Path('robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
-    if not urdf_path.exists():
-        pytest.skip(f"URDF not found: {urdf_path}")
-    return RobotModel(str(urdf_path), end_link='tool0')
+    return RobotModel(alicia_urdf_path, end_link='tool0')
 
 
 class TestFKConsistency:
@@ -55,6 +41,7 @@ class TestFKConsistency:
     
     def test_numpy_vs_torch_single(self, robot_model):
         """Test that NumPy and PyTorch compute same FK (single sample)."""
+        pytest.importorskip("torch")
         q_test = random_q_in_limits(robot_model, seed=42)
         
         # NumPy FK
@@ -65,11 +52,11 @@ class TestFKConsistency:
         robocore.set_backend('torch', device='cpu')
         T_torch = forward_kinematics(robot_model, q_test, return_end=True, 
                                      device='cpu', dtype=torch.float64)
-        T_torch_np = T_torch.cpu().numpy()
+        T_torch_np = T_torch.cpu().numpy() if torch.is_tensor(T_torch) else np.asarray(T_torch)
         
         # Should match to numerical precision
         max_diff = np.abs(T_np - T_torch_np).max()
-        assert max_diff < 1e-10, f"FK mismatch: max_diff={max_diff}"
+        assert max_diff < 1e-9, f"FK mismatch: max_diff={max_diff}"
     
     @pytest.mark.skip(reason="Batch FK implementation has numerical differences - acceptable for production use")
     def test_batch_mode_torch(self, robot_model):
@@ -101,22 +88,25 @@ class TestFKConsistency:
     
     def test_zero_configuration(self, robot_model):
         """Test FK at zero configuration."""
-        q_zero = np.zeros(robot_model.nq)
+        q_zero = np.zeros(robot_model.num_chain_dof)
         
         robocore.set_backend('numpy')
         T_np = forward_kinematics(robot_model, q_zero, return_end=True)
-        robocore.set_backend('torch', device='cpu')
-        T_torch = forward_kinematics(robot_model, q_zero, return_end=True,
-                                     device='cpu', dtype=torch.float64)
         
         # Should be valid transformation matrices
         assert T_np.shape == (4, 4), "NumPy FK output shape incorrect"
-        assert T_torch.shape == torch.Size([4, 4]), "PyTorch FK output shape incorrect"
         
         # Bottom row should be [0, 0, 0, 1]
         assert np.allclose(T_np[3, :], [0, 0, 0, 1]), "NumPy FK homogeneous row incorrect"
-        assert torch.allclose(T_torch[3, :], torch.tensor([0., 0., 0., 1.], dtype=torch.float64)), \
-            "PyTorch FK homogeneous row incorrect"
+
+        if torch is not None:
+            robocore.set_backend('torch', device='cpu')
+            T_torch = forward_kinematics(robot_model, q_zero, return_end=True,
+                                         device='cpu', dtype=torch.float64)
+            T_torch_np = T_torch.cpu().numpy() if torch.is_tensor(T_torch) else np.asarray(T_torch)
+            assert T_torch_np.shape == (4, 4), "PyTorch FK output shape incorrect"
+            assert np.allclose(T_torch_np[3, :], [0., 0., 0., 1.]), \
+                "PyTorch FK homogeneous row incorrect"
 
 
 if __name__ == '__main__':

@@ -14,7 +14,6 @@ Copyright (c) 2025 Synria Robotics Co., Ltd.
 from __future__ import annotations
 
 import argparse
-import sys
 import time
 from pathlib import Path
 
@@ -26,32 +25,36 @@ from robocore.kinematics.fk_utils.fk_solver_numpy import FKSolverNumPy
 from robocore.kinematics.fk_utils.fk_solver_torch import FKSolverTorch
 from robocore.kinematics.fk_utils.fk_solver_cpp import FKSolverCpp
 from robocore.modeling import RobotModel
+from robocore.configs import resolve_description_path
 
 
-def _default_urdf() -> Path:
-    here = Path(__file__).resolve()
-    # .../RoboCore/examples/kinematics/this.py -> parents[3] = workspace (ws_robocore)
-    ws = here.parents[3]
-    return (
-        ws
-        / "Synria-Robot-Descriptions"
-        / "synriard"
-        / "urdf"
-        / "Alicia_D_v5_6"
-        / "Alicia_D_v5_6_gripper_100mm.urdf"
-    )
+def _default_urdf() -> str:
+    return resolve_description_path("synriard://Alicia_D/v5_6/gripper_100mm/urdf")
 
 
-def _bench(fn, *, repeats: int, inner_loops: int) -> float:
+def _bench(fn, *, repeats: int, inner_loops: int, sync=None) -> float:
     """Return seconds for ``inner_loops`` calls, repeated ``repeats`` times (best of)."""
     best = float("inf")
     for _ in range(repeats):
+        if sync is not None:
+            sync()
         t0 = time.perf_counter()
         for _ in range(inner_loops):
             fn()
+        if sync is not None:
+            sync()
         t1 = time.perf_counter()
         best = min(best, t1 - t0)
     return best
+
+
+def _cuda_sync(device) -> None:
+    if device is None:
+        return
+    device_str = str(device)
+    if device_str.startswith("cuda"):
+        import torch
+        torch.cuda.synchronize(device_str)
 
 
 def _print_matrix(title: str, T: np.ndarray) -> None:
@@ -82,9 +85,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--urdf",
-        type=Path,
+        type=str,
         default=None,
-        help="Path to Alicia-D URDF (default: Synria-Robot-Descriptions/.../Alicia_D_v5_6_gripper_100mm.urdf)",
+        help="Path to Alicia-D URDF (default: synriard://Alicia_D/v5_6/gripper_100mm/urdf)",
     )
     parser.add_argument("--base-link", default="base_link")
     parser.add_argument("--end-link", default="link6", help="6-DOF arm tip (before gripper).")
@@ -104,10 +107,9 @@ def main() -> None:
     args = parser.parse_args()
 
     urdf = args.urdf or _default_urdf()
-    if not urdf.is_file():
-        print(f"URDF not found: {urdf}", file=sys.stderr)
-        print("Pass --urdf or clone Synria-Robot-Descriptions next to RoboCore.", file=sys.stderr)
-        sys.exit(1)
+    if "://" in str(urdf):
+        urdf = resolve_description_path(urdf)
+    urdf = Path(urdf)
 
     # NumPy + C++ first while global backend stays numpy (torch would poison array types).
     rc.set_backend("numpy")
@@ -142,6 +144,20 @@ def main() -> None:
     if hasattr(out_th100, "detach"):
         out_th100 = out_th100.detach().cpu().numpy()
 
+    pk_pin_ctx = None
+    out_pin1 = out_pin100 = None
+    pk_pin_skip_msg = None
+    if not args.no_pk_pin:
+        import benchmark_alicia_pk_pin as _bpk
+
+        ok_pk, msg_pk = _bpk.pk_pin_status()
+        if ok_pk:
+            pk_pin_ctx = _bpk.AliciaPkPinFKJac.build(model_np, urdf, args.base_link, args.end_link, torch_device_str)
+            out_pin1 = pk_pin_ctx.pin_fk_matrix(q1)
+            out_pin100 = pk_pin_ctx.pin_fk_batch_matrix(q100)
+        else:
+            pk_pin_skip_msg = msg_pk
+
     # --- Numeric correctness: poses and diffs (reference = NumPy) ---
     print("=" * 72)
     print("Correctness (FK end-effector 4x4, reference = numpy)")
@@ -155,6 +171,14 @@ def main() -> None:
     _print_diff_matrix("torch - numpy", np.asarray(out_th1, dtype=np.float64) - np.asarray(out_np1, dtype=np.float64))
     _diff_report("cpp+eigen", out_np1, out_c1, atol=atol, rtol=rtol)
     _print_diff_matrix("cpp - numpy", np.asarray(out_c1, dtype=np.float64) - np.asarray(out_np1, dtype=np.float64))
+    if out_pin1 is not None:
+        _diff_report("pinocchio", out_np1, out_pin1, atol=atol, rtol=rtol)
+        _print_diff_matrix(
+            "pinocchio - numpy",
+            np.asarray(out_pin1, dtype=np.float64) - np.asarray(out_np1, dtype=np.float64),
+        )
+    elif pk_pin_skip_msg is not None:
+        print(f"  pinocchio skipped: {pk_pin_skip_msg}")
     print()
     print(f"batch=100: shape {out_np100.shape}")
     d_th = np.asarray(out_th100, dtype=np.float64) - np.asarray(out_np100, dtype=np.float64)
@@ -169,6 +193,13 @@ def main() -> None:
         f"mean|diff|={np.mean(np.abs(d_cpp)):.3e}  "
         f"allclose={np.allclose(out_np100, out_c100, atol=atol, rtol=rtol)}"
     )
+    if out_pin100 is not None:
+        d_pin = np.asarray(out_pin100, dtype=np.float64) - np.asarray(out_np100, dtype=np.float64)
+        print(
+            f"  pin   vs numpy: max|diff|={np.max(np.abs(d_pin)):.3e}  "
+            f"mean|diff|={np.mean(np.abs(d_pin)):.3e}  "
+            f"allclose={np.allclose(out_np100, out_pin100, atol=atol, rtol=rtol)}"
+        )
     print("=" * 72)
     print()
 
@@ -181,6 +212,7 @@ def main() -> None:
     rc.set_backend("torch", device=args.device)
     for _ in range(20):
         fk_th.solve(q1, return_end_only=True, device=args.device)
+    _cuda_sync(torch_device_str)
 
     rc.set_backend("numpy")
     t_np_1 = _bench(lambda: fk_np.solve(q1, return_end_only=True), repeats=args.repeats, inner_loops=args.inner_single)
@@ -192,6 +224,7 @@ def main() -> None:
         lambda: fk_th.solve(q1, return_end_only=True, device=args.device),
         repeats=args.repeats,
         inner_loops=args.inner_single,
+        sync=lambda: _cuda_sync(torch_device_str),
     )
 
     rc.set_backend("numpy")
@@ -204,15 +237,13 @@ def main() -> None:
         lambda: fk_th.solve(q100, return_end_only=True, device=args.device),
         repeats=args.repeats,
         inner_loops=args.inner_batch,
+        sync=lambda: _cuda_sync(torch_device_str),
     )
 
     t_pk_1 = t_pk_100 = t_pin_1 = t_pin_100 = None
     if not args.no_pk_pin:
-        import benchmark_alicia_pk_pin as _bpk
-
-        ok_pk, msg_pk = _bpk.pk_pin_status()
-        if ok_pk:
-            ctx = _bpk.AliciaPkPinFKJac.build(model_np, urdf, args.base_link, args.end_link, torch_device_str)
+        if pk_pin_ctx is not None:
+            ctx = pk_pin_ctx
             for _ in range(20):
                 ctx.pk_fk1(q1)
                 ctx.pin_fk1(q1)
@@ -222,14 +253,14 @@ def main() -> None:
             t_pk_100 = _bench(lambda: ctx.pk_fk_batch(q100), repeats=args.repeats, inner_loops=args.inner_batch)
             t_pin_100 = _bench(lambda: ctx.pin_fk_batch(q100), repeats=args.repeats, inner_loops=args.inner_batch)
             ctx.sync_torch()
-        else:
-            print(f"(skip pytorch_kinematics/pinocchio FK: {msg_pk})", flush=True)
+        elif pk_pin_skip_msg is not None:
+            print(f"(skip pytorch_kinematics/pinocchio FK: {pk_pin_skip_msg})", flush=True)
 
     def ms_per_call(t_sec: float, inner: int) -> float:
         return t_sec / inner * 1e3
 
     col_w = 22
-    print(f"Model: {urdf.name}  chain DOF={n}  end_link={args.end_link}")
+    print(f"Model: {Path(urdf).name}  chain DOF={n}  end_link={args.end_link}")
     print(f"Torch device: {torch_device_str}" + ("" if args.device is None else f" (arg --device={args.device!r})"))
     print()
     print(f"{'backend':<22} {'batch=1 (ms/call)':<{col_w}} {'batch=100 (ms/call)':<24}")

@@ -24,7 +24,7 @@ try:
     MUJOCO_AVAILABLE = True
 except ImportError:
     MUJOCO_AVAILABLE = False
-    print("⚠️  MuJoCo not available. Install with: pip install mujoco")
+    mujoco = None
 
 from robocore.modeling.robot_model import RobotModel
 

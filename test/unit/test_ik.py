@@ -12,7 +12,6 @@ Website: https://synriarobotics.ai
 
 import numpy as np
 import pytest
-from pathlib import Path
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.ik import inverse_kinematics
 from robocore.kinematics.fk import forward_kinematics
@@ -21,31 +20,13 @@ import robocore
 
 def random_q_in_limits(model, seed=42):
     """Generate random joint configuration within limits."""
-    rng = np.random.default_rng(seed)
-    n = model.num_dof
-    q = np.zeros(n)
-    chain_indices = model._get_joint_indices(model.base_link, model.end_link)
-    for idx in chain_indices:
-        js = model.joint_list[idx]
-        lo, hi = -1.0, 1.0
-        if js.limit:
-            if js.limit[0] is not None:
-                lo = js.limit[0]
-            if js.limit[1] is not None:
-                hi = js.limit[1]
-        mid = 0.5 * (lo + hi)
-        span = 0.5 * (hi - lo) * 0.5
-        q[idx] = rng.uniform(mid - span, mid + span)
-    return q
+    return np.asarray(model.random_q(seed=seed), dtype=float)
 
 
 @pytest.fixture(scope="module")
-def robot_model():
+def robot_model(alicia_urdf_path):
     """Load robot model for testing."""
-    urdf_path = Path('robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
-    if not urdf_path.exists():
-        pytest.skip(f"URDF not found: {urdf_path}")
-    return RobotModel(str(urdf_path), end_link='tool0')
+    return RobotModel(alicia_urdf_path, end_link='tool0')
 
 
 class TestIKMethods:
@@ -70,7 +51,7 @@ class TestIKMethods:
         # Should return a result
         assert 'q' in result
         assert 'success' in result
-        assert len(result['q']) == robot_model.num_dof
+        assert len(result['q']) == robot_model.num_chain_dof
     
     def test_ik_closure(self, robot_model):
         """Test FK-IK-FK closure property."""
@@ -138,15 +119,13 @@ class TestIKMethods:
             q_solution = result['q']
             
             # Check limits
-            for js in robot_model._actuated:
-                if js.limit:
-                    lo, hi = js.limit
-                    if lo is not None:
-                        assert q_solution[js.index] >= lo - 1e-6, \
-                            f"Joint {js.name} below lower limit: {q_solution[js.index]} < {lo}"
-                    if hi is not None:
-                        assert q_solution[js.index] <= hi + 1e-6, \
-                            f"Joint {js.name} above upper limit: {q_solution[js.index]} > {hi}"
+            for js in robot_model.chain_joint_list:
+                if js.limit_lower is not None:
+                    assert q_solution[js.index] >= js.limit_lower - 1e-6, \
+                        f"Joint {js.name} below lower limit: {q_solution[js.index]} < {js.limit_lower}"
+                if js.limit_upper is not None:
+                    assert q_solution[js.index] <= js.limit_upper + 1e-6, \
+                        f"Joint {js.name} above upper limit: {q_solution[js.index]} > {js.limit_upper}"
 
 
 class TestIKEdgeCases:
@@ -158,7 +137,7 @@ class TestIKEdgeCases:
         target_pose = np.eye(4)
         target_pose[:3, 3] = [100.0, 100.0, 100.0]  # Very far away
         
-        q_init = np.zeros(robot_model.num_dof)
+        q_init = np.zeros(robot_model.num_chain_dof)
         
         result = inverse_kinematics(
             robot_model, target_pose, q_init,
@@ -174,11 +153,11 @@ class TestIKEdgeCases:
     
     def test_ik_zero_configuration(self, robot_model):
         """Test IK from zero configuration."""
-        q_zero = np.zeros(robot_model.num_dof)
+        q_zero = np.zeros(robot_model.num_chain_dof)
         T_zero = forward_kinematics(robot_model, q_zero, return_end=True)
         
         # Solve from slightly perturbed initial guess
-        q_init = np.ones(robot_model.num_dof) * 0.1
+        q_init = np.ones(robot_model.num_chain_dof) * 0.1
         
         result = inverse_kinematics(
             robot_model, T_zero, q_init,

@@ -11,17 +11,13 @@ Website: https://synriarobotics.ai
 """
 
 import pytest
-from pathlib import Path
 from robocore.modeling.robot_model import RobotModel
 
 
 @pytest.fixture(scope="module")
-def urdf_path():
+def urdf_path(alicia_urdf_path):
     """Path to test URDF file."""
-    path = Path('robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
-    if not path.exists():
-        pytest.skip(f"URDF not found: {path}")
-    return str(path)
+    return alicia_urdf_path
 
 
 class TestRobotModel:
@@ -32,7 +28,7 @@ class TestRobotModel:
         model = RobotModel(urdf_path, end_link='tool0')
         
         assert model is not None
-        assert model.urdf_path == urdf_path
+        assert model.model_path == urdf_path
         assert model.end_link == 'tool0'
     
     def test_dof(self, urdf_path):
@@ -80,8 +76,8 @@ class TestRobotModel:
         chain_indices = model._get_joint_indices(model.base_link, model.end_link)
         for idx in chain_indices:
             js = model.joint_list[idx]
-            if js.limit:
-                lo, hi = js.limit
+            if js.limit_lower is not None or js.limit_upper is not None:
+                lo, hi = js.limit_lower, js.limit_upper
                 # Limits should be reasonable
                 assert lo < hi or (lo is None and hi is None)
     

@@ -8,8 +8,8 @@ Copyright (c) 2025 Synria Robotics Co., Ltd.
 
 import numpy as np
 import torch
+from robocore.configs import resolve_description_path
 from robocore.modeling.robot_model import RobotModel
-from robocore.utils.path import get_robocore_path
 from robocore.utils.beauty_logger import beauty_print, beauty_print_array
 
 
@@ -17,7 +17,7 @@ def main():
     beauty_print("RDF Multi-Chain FK Integration Demo", type="module")
     
     # Load robot model (complete tree structure)
-    model_path = get_robocore_path("assets/robot_descriptions/mjcf/Alicia-D_v5_5/alicia_duo_with_gripper.xml")
+    model_path = resolve_description_path("synriard://Alicia_D/v5_6/gripper_100mm/mjcf")
     robot_model = RobotModel(str(model_path))  # Don't specify end_link to load full tree
     
     beauty_print(f"Robot: {robot_model.name}")
@@ -119,4 +119,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

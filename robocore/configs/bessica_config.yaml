@@ -2,7 +2,7 @@
 # ==============================
 
 robot:
-  urdf_path: "robocore/assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf"
+  urdf_path: "synriard://Bessica_D/v1_1/covered/urdf"
   end_link: "left_arm_gripper_left_finger"  # or right_arm_gripper_left_finger
   base_link: null
 

@@ -2,7 +2,7 @@
 
 Install separately (not RoboCore core deps)::
 
-    pip install pytorch_kinematics pinocchio
+    pip install pytorch_kinematics pin
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 """
@@ -290,12 +290,18 @@ class AliciaPkPinFKJac:
         _ = ret[self.end_link].get_matrix()
 
     def pin_fk1(self, q_np: np.ndarray) -> None:
+        _ = self.pin_fk_matrix(q_np)
+
+    def pin_fk_matrix(self, q_np: np.ndarray) -> np.ndarray:
         q_full = pin_q_full_from_chain(self.pin_model, q_np, self.pin_q_indices)
-        _ = pin_ee_homogeneous(self.pin_model, self.pin_data, q_full, self.end_frame_id, self.end_joint_id)
+        return pin_ee_homogeneous(self.pin_model, self.pin_data, q_full, self.end_frame_id, self.end_joint_id)
 
     def pin_fk_batch(self, q_bn: np.ndarray) -> None:
         for i in range(q_bn.shape[0]):
             self.pin_fk1(q_bn[i])
+
+    def pin_fk_batch_matrix(self, q_bn: np.ndarray) -> np.ndarray:
+        return np.stack([self.pin_fk_matrix(q_bn[i]) for i in range(q_bn.shape[0])], axis=0)
 
     def pk_jac1(self, q_np: np.ndarray) -> None:
         q = _TORCH.as_tensor(q_np, dtype=self.dtype, device=self.device)
@@ -306,6 +312,9 @@ class AliciaPkPinFKJac:
         _ = self.chain.jacobian(q)
 
     def pin_jac1(self, q_np: np.ndarray) -> None:
+        _ = self.pin_jacobian_matrix(q_np)
+
+    def pin_jacobian_matrix(self, q_np: np.ndarray) -> np.ndarray:
         q_full = pin_q_full_from_chain(self.pin_model, q_np, self.pin_q_indices)
         _PIN.forwardKinematics(self.pin_model, self.pin_data, q_full)
         if self.end_frame_id is not None:
@@ -319,11 +328,15 @@ class AliciaPkPinFKJac:
             J_full = _PIN.getJointJacobian(
                 self.pin_model, self.pin_data, self.end_joint_id, _PIN.ReferenceFrame.LOCAL_WORLD_ALIGNED
             )
-        _ = J_full[:, self.pin_v_indices] if len(self.pin_v_indices) > 0 else J_full
+        J = J_full[:, self.pin_v_indices] if len(self.pin_v_indices) > 0 else J_full
+        return np.asarray(J, dtype=np.float64)
 
     def pin_jac_batch(self, q_bn: np.ndarray) -> None:
         for i in range(q_bn.shape[0]):
             self.pin_jac1(q_bn[i])
+
+    def pin_jac_batch_matrix(self, q_bn: np.ndarray) -> np.ndarray:
+        return np.stack([self.pin_jacobian_matrix(q_bn[i]) for i in range(q_bn.shape[0])], axis=0)
 
     def sync_torch(self) -> None:
         if self.device.type == "cuda":

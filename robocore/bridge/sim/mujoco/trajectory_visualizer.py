@@ -20,7 +20,7 @@ try:
     MUJOCO_AVAILABLE = True
 except ImportError:
     MUJOCO_AVAILABLE = False
-    print("⚠️  MuJoCo not available. Install with: pip install mujoco")
+    mujoco = None
 
 
 class TrajectoryVisualizer:

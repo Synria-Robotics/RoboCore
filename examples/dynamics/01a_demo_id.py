@@ -57,7 +57,8 @@ if __name__ == "__main__":
         from synriard import get_model_path
         default_path = get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="urdf")
     except Exception:
-        default_path = "robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf"
+        from robocore.configs import resolve_description_path
+        default_path = resolve_description_path("synriard://Alicia_D/v5_6/gripper_100mm/urdf")
 
     parser = argparse.ArgumentParser(description="Inverse Dynamics Demo")
     parser.add_argument("--model-path", type=str, default=default_path, help="Path to URDF")

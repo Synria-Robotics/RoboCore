@@ -149,21 +149,11 @@ class TestRelativeJacobian:
     """Test analytical relative Jacobian vs numerical differentiation."""
     
     @pytest.fixture
-    def dual_arms(self):
+    def dual_arms(self, bessica_urdf_path):
         """Load dual-arm models."""
-        import os
-        from pathlib import Path
-        
-        # Use Bessica-D dual-arm URDF
-        base_path = Path(__file__).parent.parent.parent
-        urdf_path = base_path / "robocore/assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf"
-        
-        if not urdf_path.exists():
-            pytest.skip(f"Bessica URDF not found: {urdf_path}")
-        
         # Load left and right arms with their respective end links
-        left = RobotModel(str(urdf_path), end_link='left_arm_gripper_left_finger')
-        right = RobotModel(str(urdf_path), end_link='right_arm_gripper_left_finger')
+        left = RobotModel(bessica_urdf_path, end_link='left_arm_gripper_left_finger')
+        right = RobotModel(bessica_urdf_path, end_link='right_arm_gripper_left_finger')
         return left, right
     
     def test_jacobian_shape(self, dual_arms):

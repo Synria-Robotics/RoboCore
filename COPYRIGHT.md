@@ -1,6 +1,6 @@
 # Copyright Notice
 
-Copyright © 2025 Synria Robotics Co., Ltd.
+Copyright (c) 2025 Synria Robotics Co., Ltd.
 
 ## RoboCore Software
 
@@ -27,20 +27,9 @@ Apache-2.0 notices and remain distributed with those notices preserved.
 
 See the [LICENSE](LICENSE) file for the full license text.
 
-## Trademarks
-
-"RoboCore" and the Synria Robotics logo are trademarks of 
-Synria Robotics Co., Ltd. All other trademarks are the property 
-of their respective owners.
-
 ## Contact
 
 For licensing inquiries, commercial support, or partnership opportunities:
 
 - **Email**: licensing@synriarobotics.ai
-- **Website**: https://synriarobotics.ai/contact
-- **Address**: [Your Company Address]
-
----
-
-**Built with ❤️ by Synria Robotics Co., Ltd.**
+- **Website**: https://synriarobotics.ai

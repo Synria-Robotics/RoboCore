@@ -8,16 +8,14 @@ Author: Synria Robotics Team
 Website: https://synriarobotics.ai
 """
 
-import os
-from pathlib import Path
 from robocore.modeling.robot_model import RobotModel
 from robocore.analysis.singularity_analyzer import SingularityAnalyzer
+from robocore.configs import resolve_description_path
 from robocore.utils.beauty_logger import beauty_print
 
 
 def main():
-    base = Path(__file__).resolve().parents[1]
-    urdf = os.path.join(base, "../robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf")
+    urdf = resolve_description_path("synriard://Alicia_D/v5_6/gripper_100mm/urdf")
     model = RobotModel(str(urdf), end_link="tool0")
 
     analyzer = SingularityAnalyzer(model)

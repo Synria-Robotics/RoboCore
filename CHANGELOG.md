@@ -2,6 +2,15 @@
 
 All notable changes to RoboCore will be documented in this file.
 
+## [2.5.0rc4] - 2026-05-25
+
+### Fixed
+- Release metadata and README badges now consistently identify the package as MIT-licensed and Python 3.11+.
+- Public package imports avoid pulling optional C++/MuJoCo/WDF dependencies until those features are requested.
+- README and configuration documentation now point to existing example paths.
+- Default robot configuration paths use published description packages instead of missing in-repository assets.
+- Backend tests handle missing optional PyTorch as an expected environment condition.
+
 ## [2.5.0rc3] - 2026-05-14
 
 ### Fixed

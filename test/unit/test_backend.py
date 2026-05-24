@@ -91,7 +91,7 @@ class TestBackendManager:
             set_backend('numpy')  # Restore
         except ImportError:
             # Should raise if torch not available
-            with pytest.raises(ImportError):
+            with pytest.raises(RuntimeError):
                 set_backend('torch')
     
     def test_backend_affects_array_creation(self):
@@ -158,7 +158,7 @@ class TestBackendHelpers:
             try:
                 set_backend(backend_name)
                 results.append(get_backend())
-            except (ValueError, ImportError):
+            except (ValueError, RuntimeError):
                 results.append(None)
         
         try:

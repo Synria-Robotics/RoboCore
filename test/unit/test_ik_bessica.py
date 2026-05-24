@@ -17,7 +17,6 @@
 import math
 import numpy as np
 import pytest
-from pathlib import Path
 
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.fk import forward_kinematics
@@ -25,14 +24,8 @@ from robocore.kinematics.ik import inverse_kinematics
 import robocore
 
 
-URDF_PATH = Path('robocore/assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf')
 LEFT_END = 'left_arm_gripper_left_finger'
 RIGHT_END = 'right_arm_gripper_left_finger'
-
-
-def skip_if_missing():
-    if not URDF_PATH.exists():
-        pytest.skip(f"Bessica URDF not found: {URDF_PATH}")
 
 
 def random_q_in_limits(model, seed=0):
@@ -55,15 +48,13 @@ def random_q_in_limits(model, seed=0):
 
 
 @pytest.fixture(scope="module")
-def left_arm():
-    skip_if_missing()
-    return RobotModel(str(URDF_PATH), end_link=LEFT_END)
+def left_arm(bessica_urdf_path):
+    return RobotModel(bessica_urdf_path, end_link=LEFT_END)
 
 
 @pytest.fixture(scope="module")
-def right_arm():
-    skip_if_missing()
-    return RobotModel(str(URDF_PATH), end_link=RIGHT_END)
+def right_arm(bessica_urdf_path):
+    return RobotModel(bessica_urdf_path, end_link=RIGHT_END)
 
 
 class TestBessicaSevenDOF:

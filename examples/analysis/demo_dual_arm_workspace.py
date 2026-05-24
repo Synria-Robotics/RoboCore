@@ -11,18 +11,18 @@ Run:
 """
 from __future__ import annotations
 import numpy as np
+from robocore.configs import resolve_description_path
 from robocore.modeling.robot_model import RobotModel
-from robocore.utils.path import get_robocore_path
 from robocore.utils.beauty_logger import beauty_print
 
-URDF_REL = "assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf"
+URDF_URI = "synriard://Bessica_D/v1_1/covered/urdf"
 
 
 def main():
     beauty_print("=== Dual-Arm Workspace Analysis ===", type="module", centered=True)
     
     # Load and spawn chains
-    base = RobotModel(get_robocore_path(URDF_REL))
+    base = RobotModel(resolve_description_path(URDF_URI))
     leaves = base.available_leaf_links()
     left_end = next(l for l in leaves if 'left_arm_gripper_left_finger' in l)
     right_end = next(l for l in leaves if 'right_arm_gripper_left_finger' in l)

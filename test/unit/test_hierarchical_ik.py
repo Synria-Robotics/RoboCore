@@ -74,15 +74,10 @@ class TestHierarchicalIK:
     """Test hierarchical task priority IK solver."""
     
     @pytest.fixture
-    def dual_arms(self):
+    def dual_arms(self, bessica_urdf_path):
         """Load dual-arm models."""
-        urdf_path = Path("robocore/assets/robot_descriptions/urdf/Bessica-D_v1_0/Bessica-D_Covered.urdf")
-        
-        if not urdf_path.exists():
-            pytest.skip(f"Bessica URDF not found: {urdf_path}")
-        
-        left = RobotModel(str(urdf_path), end_link='left_arm_gripper_left_finger')
-        right = RobotModel(str(urdf_path), end_link='right_arm_gripper_right_finger')
+        left = RobotModel(bessica_urdf_path, end_link='left_arm_gripper_left_finger')
+        right = RobotModel(bessica_urdf_path, end_link='right_arm_gripper_right_finger')
         return left, right
     
     def test_single_priority_level(self, dual_arms):

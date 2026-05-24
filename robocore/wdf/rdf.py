@@ -1287,36 +1287,42 @@ def sample_sdf_points(link_name, mesh_name, save_path, geom_info):
             warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*invalid value.*')
             try:
                 if surface_method == 'scan':
-        near_points, near_sdf = mesh_to_sdf.sample_sdf_near_surface(mesh,
-                                                                    number_of_points=500000,
-                                                                    surface_point_method='scan',
-                                                                    sign_method='normal',
-                                                                    scan_count=100,
-                                                                    scan_resolution=400,
-                                                                                sample_point_count=10000000,
-                                                                                normal_sample_count=100,
-                                                                                min_size=0.0,
-                                                                                return_gradients=False)
+                    near_points, near_sdf = mesh_to_sdf.sample_sdf_near_surface(
+                        mesh,
+                        number_of_points=500000,
+                        surface_point_method='scan',
+                        sign_method='normal',
+                        scan_count=100,
+                        scan_resolution=400,
+                        sample_point_count=10000000,
+                        normal_sample_count=100,
+                        min_size=0.0,
+                        return_gradients=False,
+                    )
                 else:
-                    near_points, near_sdf = mesh_to_sdf.sample_sdf_near_surface(mesh,
-                                                                                number_of_points=500000,
-                                                                                surface_point_method='sample',
-                                                                                sign_method='normal',
-                                                                                sample_point_count=10000000,
-                                                                                normal_sample_count=100,
-                                                                                min_size=0.0,
-                                                                                return_gradients=False)
+                    near_points, near_sdf = mesh_to_sdf.sample_sdf_near_surface(
+                        mesh,
+                        number_of_points=500000,
+                        surface_point_method='sample',
+                        sign_method='normal',
+                        sample_point_count=10000000,
+                        normal_sample_count=100,
+                        min_size=0.0,
+                        return_gradients=False,
+                    )
             except (AttributeError, RuntimeError, OSError) as e:
                 # Fallback to 'sample' method if 'scan' fails
                 print(f"Warning: 'scan' method failed ({e}), falling back to 'sample' method")
-                near_points, near_sdf = mesh_to_sdf.sample_sdf_near_surface(mesh,
-                                                                            number_of_points=500000,
-                                                                            surface_point_method='sample',
-                                                                            sign_method='normal',
-                                                                    sample_point_count=10000000,
-                                                                    normal_sample_count=100,
-                                                                    min_size=0.0,
-                                                                    return_gradients=False)
+                near_points, near_sdf = mesh_to_sdf.sample_sdf_near_surface(
+                    mesh,
+                    number_of_points=500000,
+                    surface_point_method='sample',
+                    sign_method='normal',
+                    sample_point_count=10000000,
+                    normal_sample_count=100,
+                    min_size=0.0,
+                    return_gradients=False,
+                )
 
         # Sample points randomly within the bounding box [-1,1]
         random_points = np.random.rand(500000, 3) * 2.0 - 1.0
@@ -1326,33 +1332,39 @@ def sample_sdf_points(link_name, mesh_name, save_path, geom_info):
             warnings.filterwarnings('ignore', category=RuntimeWarning, message='.*invalid value.*')
             try:
                 if surface_method == 'scan':
-        random_sdf = mesh_to_sdf.mesh_to_sdf(mesh,
-                                             random_points,
-                                             surface_point_method='scan',
-                                             sign_method='normal',
-                                             bounding_radius=None,
-                                             scan_count=100,
-                                             scan_resolution=400,
-                                                         sample_point_count=10000000,
-                                                         normal_sample_count=100)
+                    random_sdf = mesh_to_sdf.mesh_to_sdf(
+                        mesh,
+                        random_points,
+                        surface_point_method='scan',
+                        sign_method='normal',
+                        bounding_radius=None,
+                        scan_count=100,
+                        scan_resolution=400,
+                        sample_point_count=10000000,
+                        normal_sample_count=100,
+                    )
                 else:
-                    random_sdf = mesh_to_sdf.mesh_to_sdf(mesh,
-                                                         random_points,
-                                                         surface_point_method='sample',
-                                                         sign_method='normal',
-                                                         bounding_radius=None,
-                                                         sample_point_count=10000000,
-                                                         normal_sample_count=100)
+                    random_sdf = mesh_to_sdf.mesh_to_sdf(
+                        mesh,
+                        random_points,
+                        surface_point_method='sample',
+                        sign_method='normal',
+                        bounding_radius=None,
+                        sample_point_count=10000000,
+                        normal_sample_count=100,
+                    )
             except (AttributeError, RuntimeError, OSError) as e:
                 # Fallback to 'sample' method if 'scan' fails
                 print(f"Warning: 'scan' method failed ({e}), falling back to 'sample' method")
-                random_sdf = mesh_to_sdf.mesh_to_sdf(mesh,
-                                                     random_points,
-                                                     surface_point_method='sample',
-                                                     sign_method='normal',
-                                                     bounding_radius=None,
-                                             sample_point_count=10000000,
-                                             normal_sample_count=100)
+                random_sdf = mesh_to_sdf.mesh_to_sdf(
+                    mesh,
+                    random_points,
+                    surface_point_method='sample',
+                    sign_method='normal',
+                    bounding_radius=None,
+                    sample_point_count=10000000,
+                    normal_sample_count=100,
+                )
     else:
         raise ValueError(f"Unsupported geometry type {geom_type}.")
 

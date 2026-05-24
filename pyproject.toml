@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "synria-robocore"
-version = "2.5.0rc3"
+version = "2.5.0rc4"
 description = "Unified High-Throughput Robotics Library"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -32,9 +32,6 @@ dependencies = [
     "pyyaml>=6.0",
     "omegaconf>=2.3.0",
     "trimesh>=4.9.0",
-    "coacd",
-    # 0.0.14 depends on deprecated PyPI name "sklearn"; 0.0.15 uses "scikit-learn"
-    "mesh_to_sdf>=0.0.15",
     "lxml",
     "tqdm",
 ]
@@ -55,9 +52,20 @@ sim = [
     "PyOpenGL",
     "pyglet==1.5.27",
 ]
+wdf = [
+    "torch>=2.0.0",
+    "matplotlib>=3.6.0",
+    "trimesh>=4.9.0",
+    # 0.0.14 depends on deprecated PyPI name "sklearn"; 0.0.15 uses "scikit-learn"
+    "mesh_to_sdf>=0.0.15",
+    "coacd",
+]
 descriptions = [
     "synriard>=1.2.0",
-    "openrd>=1.0.0",
+]
+benchmark = [
+    "pytorch_kinematics>=0.10.0",
+    "pin>=4.0.0",
 ]
 dev = [
     "black",
@@ -71,8 +79,11 @@ all = [
     "mujoco-py>=2.1.0",
     "PyOpenGL",
     "pyglet==1.5.27",
+    "mesh_to_sdf>=0.0.15",
+    "coacd",
     "synriard>=1.2.0",
-    "openrd>=1.0.0",
+    "pytorch_kinematics>=0.10.0",
+    "pin>=4.0.0",
     "black",
     "ruff",
     "pytest",

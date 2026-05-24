@@ -109,11 +109,10 @@ class SingularityAnalyzer:
             q = []
             for js in self.model._chain_dof_list:
                 lo, hi = -3.14, 3.14
-                if js.limit:
-                    if js.limit[0] is not None:
-                        lo = js.limit[0]
-                    if js.limit[1] is not None:
-                        hi = js.limit[1]
+                if js.limit_lower is not None:
+                    lo = js.limit_lower
+                if js.limit_upper is not None:
+                    hi = js.limit_upper
                 q.append(random.uniform(lo * 0.8, hi * 0.8))
             try:
                 m = self.analyze_configuration(q)

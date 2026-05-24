@@ -12,7 +12,6 @@ Website: https://synriarobotics.ai
 
 import pytest
 import numpy as np
-from pathlib import Path
 from robocore.modeling.robot_model import RobotModel
 from robocore.analysis.singularity_analyzer import SingularityAnalyzer
 from robocore.kinematics.jacobian import jacobian
@@ -21,29 +20,13 @@ import robocore
 
 def random_q_in_limits(model, seed=42):
     """Generate random joint configuration within limits."""
-    rng = np.random.default_rng(seed)
-    n = model.num_dof
-    q = np.zeros(n)
-    for js in model._chain_actuated:
-        lo, hi = -1.0, 1.0
-        if js.limit:
-            if js.limit[0] is not None:
-                lo = js.limit[0]
-            if js.limit[1] is not None:
-                hi = js.limit[1]
-        mid = 0.5 * (lo + hi)
-        span = 0.5 * (hi - lo) * 0.5
-        q[js.index] = rng.uniform(mid - span, mid + span)
-    return q
+    return np.asarray(model.random_q(seed=seed), dtype=float)
 
 
 @pytest.fixture(scope="module")
-def robot_model():
+def robot_model(alicia_urdf_path):
     """Load robot model for singularity testing."""
-    urdf_path = Path('robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
-    if not urdf_path.exists():
-        pytest.skip(f"URDF not found: {urdf_path}")
-    return RobotModel(str(urdf_path), end_link='tool0')
+    return RobotModel(alicia_urdf_path, end_link='tool0')
 
 
 @pytest.mark.integration
@@ -180,7 +163,7 @@ class TestSingularityTypes:
         analyzer = SingularityAnalyzer(robot_model)
         
         # Zero configuration (often singular)
-        q_zero = np.zeros(robot_model.num_dof)
+        q_zero = np.zeros(robot_model.num_chain_dof)
         
         try:
             sing_type = analyzer.classify_singularity(q_zero, )
@@ -204,7 +187,7 @@ class TestSingularityTypes:
         assert null_dim >= 0
         
         # For redundant manipulators, null space should exist
-        if robot_model.num_dof > 6:
+        if robot_model.num_chain_dof > 6:
             # Most configurations should have null space
             assert null_dim >= 0
 

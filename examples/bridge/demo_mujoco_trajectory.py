@@ -237,8 +237,8 @@ def main():
     # Load robot model
     print(f"\nLoading robot model...")
     if args.robot == 'alicia':
-        urdf_path = os.path.join(Path(__file__).parent.parent,
-                                 '../robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
+        from robocore.configs import resolve_description_path
+        urdf_path = resolve_description_path("synriard://Alicia_D/v5_6/gripper_100mm/urdf")
         dof = 6
     else:  # bessica
         import synriard
@@ -260,7 +260,7 @@ def main():
         print(f"\nTo create MuJoCo MJCF file:")
         print(f"  1. Manually convert URDF to MJCF format")
         print(f"  2. Or use --mjcf to specify MJCF file path")
-        print(f"\nMJCF example location: robocore/assets/robot_descriptions/mjcf/")
+        print(f"\nTip: install description assets with `pip install synria-robocore[descriptions]`")
         print(f"\nFallback: Attempting to load URDF directly (may have compatibility issues)")
         
         # Try to use URDF directly

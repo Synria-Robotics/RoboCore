@@ -81,6 +81,7 @@ class RobotModel:
         else:
             self.end_link = end_link
 
+        self._validate_chain_endpoints(chain_root=self.base_link, end_link=self.end_link)
         self._build_chain()
         self._build_multi_chain_index()  # Build multi-chain indexing system
 
@@ -214,6 +215,14 @@ class RobotModel:
         self._graph = {}
         for j in self.parsed_model.joints:
             self._graph.setdefault(j.parent, []).append(j)
+
+    def _validate_chain_endpoints(self, chain_root: str, end_link: Optional[str]) -> None:
+        link_names = set(self.all_link)
+        graph_roots = set(self._graph)
+        if chain_root not in link_names and chain_root not in graph_roots:
+            raise ValueError(f"Base link {chain_root!r} was not found in model {self.model_path!r}.")
+        if end_link is not None and end_link not in link_names and end_link not in graph_roots:
+            raise ValueError(f"End link {end_link!r} was not found in model {self.model_path!r}.")
 
     def _build_chain(self):
         # Check if world_to_base_joint exists

@@ -14,7 +14,6 @@ Copyright (c) 2025 Synria Robotics Co., Ltd.
 from __future__ import annotations
 
 import argparse
-import sys
 import time
 from pathlib import Path
 
@@ -25,32 +24,34 @@ from robocore.kinematics.jacobian_utils.jacobian_solver_numpy import JacobianSol
 from robocore.kinematics.jacobian_utils.jacobian_solver_torch import JacobianSolverTorch
 from robocore.kinematics.jacobian_utils.jacobian_solver_cpp import JacobianSolverCpp
 from robocore.modeling import RobotModel
+from robocore.configs import resolve_description_path
 
 
-def _default_urdf() -> Path:
-    here = Path(__file__).resolve()
-    # .../RoboCore/examples/kinematics/this.py -> parents[3] = workspace (ws_robocore)
-    ws = here.parents[3]
-    return (
-        ws
-        / "Synria-Robot-Descriptions"
-        / "synriard"
-        / "urdf"
-        / "Alicia_D_v5_6"
-        / "Alicia_D_v5_6_gripper_100mm.urdf"
-    )
+def _default_urdf() -> str:
+    return resolve_description_path("synriard://Alicia_D/v5_6/gripper_100mm/urdf")
 
 
-def _bench(fn, *, repeats: int, inner_loops: int) -> float:
+def _bench(fn, *, repeats: int, inner_loops: int, sync=None) -> float:
     """Return seconds for ``inner_loops`` calls, repeated ``repeats`` times (best of)."""
     best = float("inf")
     for _ in range(repeats):
+        if sync is not None:
+            sync()
         t0 = time.perf_counter()
         for _ in range(inner_loops):
             fn()
+        if sync is not None:
+            sync()
         t1 = time.perf_counter()
         best = min(best, t1 - t0)
     return best
+
+
+def _cuda_sync(device) -> None:
+    device_str = str(device)
+    if device_str.startswith("cuda"):
+        import torch
+        torch.cuda.synchronize(device_str)
 
 
 def _print_jacobian(title: str, J: np.ndarray) -> None:
@@ -88,9 +89,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--urdf",
-        type=Path,
+        type=str,
         default=None,
-        help="Path to Alicia-D URDF (default: Synria-Robot-Descriptions/.../Alicia_D_v5_6_gripper_100mm.urdf)",
+        help="Path to Alicia-D URDF (default: synriard://Alicia_D/v5_6/gripper_100mm/urdf)",
     )
     parser.add_argument("--base-link", default="base_link")
     parser.add_argument("--end-link", default="link6", help="6-DOF arm tip (before gripper).")
@@ -111,10 +112,9 @@ def main() -> None:
     args = parser.parse_args()
 
     urdf = args.urdf or _default_urdf()
-    if not urdf.is_file():
-        print(f"URDF not found: {urdf}", file=sys.stderr)
-        print("Pass --urdf or clone Synria-Robot-Descriptions next to RoboCore.", file=sys.stderr)
-        sys.exit(1)
+    if "://" in str(urdf):
+        urdf = resolve_description_path(urdf)
+    urdf = Path(urdf)
 
     rc.set_backend("numpy")
     model_np = RobotModel(str(urdf), base_link=args.base_link, end_link=args.end_link)
@@ -145,6 +145,20 @@ def main() -> None:
     J_c1 = jac_cpp.solve(q1, method="analytic")
     J_c100 = jac_cpp.solve(q100, method="analytic")
 
+    pk_pin_ctx = None
+    J_pin1 = J_pin100 = None
+    pk_pin_skip_msg = None
+    if not args.no_pk_pin and args.target_link is None:
+        import benchmark_alicia_pk_pin as _bpk
+
+        ok_pk, msg_pk = _bpk.pk_pin_status()
+        if ok_pk:
+            pk_pin_ctx = _bpk.AliciaPkPinFKJac.build(model_np, urdf, args.base_link, args.end_link, args.device)
+            J_pin1 = pk_pin_ctx.pin_jacobian_matrix(q1)
+            J_pin100 = pk_pin_ctx.pin_jac_batch_matrix(q100)
+        else:
+            pk_pin_skip_msg = msg_pk
+
     # --- Numeric correctness (reference = NumPy) ---
     print("=" * 72)
     print("Correctness (analytic Jacobian 6 x n, reference = numpy)")
@@ -159,6 +173,11 @@ def main() -> None:
     _print_diff_jacobian("torch - numpy", J_th1 - J_np1)
     _diff_report("cpp+eigen", J_np1, J_c1, atol=atol, rtol=rtol)
     _print_diff_jacobian("cpp - numpy", J_c1 - J_np1)
+    if J_pin1 is not None:
+        _diff_report("pinocchio", J_np1, J_pin1, atol=atol, rtol=rtol)
+        _print_diff_jacobian("pinocchio - numpy", J_pin1 - J_np1)
+    elif pk_pin_skip_msg is not None:
+        print(f"  pinocchio skipped: {pk_pin_skip_msg}")
     print()
     print(f"batch=100: shape {J_np100.shape}")
     d_th = J_th100 - J_np100
@@ -173,6 +192,13 @@ def main() -> None:
         f"mean|diff|={np.mean(np.abs(d_cpp)):.3e}  "
         f"allclose={np.allclose(J_np100, J_c100, atol=atol, rtol=rtol)}"
     )
+    if J_pin100 is not None:
+        d_pin = J_pin100 - J_np100
+        print(
+            f"  pin   vs numpy: max|diff|={np.max(np.abs(d_pin)):.3e}  "
+            f"mean|diff|={np.mean(np.abs(d_pin)):.3e}  "
+            f"allclose={np.allclose(J_np100, J_pin100, atol=atol, rtol=rtol)}"
+        )
     print("=" * 72)
     print()
 
@@ -180,6 +206,7 @@ def main() -> None:
     for _ in range(20):
         jac_np.solve(q1, **tl_kw)
         jac_th.solve(q1, device=args.device, **tl_kw)
+    _cuda_sync(args.device)
     for _ in range(20):
         jac_cpp.solve(q1, method="analytic")
 
@@ -188,6 +215,7 @@ def main() -> None:
         lambda: jac_th.solve(q1, device=args.device, **tl_kw),
         repeats=args.repeats,
         inner_loops=args.inner_single,
+        sync=lambda: _cuda_sync(args.device),
     )
     t_cpp_1 = _bench(
         lambda: jac_cpp.solve(q1, method="analytic"), repeats=args.repeats, inner_loops=args.inner_single
@@ -198,6 +226,7 @@ def main() -> None:
         lambda: jac_th.solve(q100, device=args.device, **tl_kw),
         repeats=args.repeats,
         inner_loops=args.inner_batch,
+        sync=lambda: _cuda_sync(args.device),
     )
     t_cpp_100 = _bench(
         lambda: jac_cpp.solve(q100, method="analytic"), repeats=args.repeats, inner_loops=args.inner_batch
@@ -205,11 +234,8 @@ def main() -> None:
 
     t_pk_1 = t_pk_100 = t_pin_1 = t_pin_100 = None
     if not args.no_pk_pin and args.target_link is None:
-        import benchmark_alicia_pk_pin as _bpk
-
-        ok_pk, msg_pk = _bpk.pk_pin_status()
-        if ok_pk:
-            ctx = _bpk.AliciaPkPinFKJac.build(model_np, urdf, args.base_link, args.end_link, args.device)
+        if pk_pin_ctx is not None:
+            ctx = pk_pin_ctx
             for _ in range(20):
                 ctx.pk_jac1(q1)
                 ctx.pin_jac1(q1)
@@ -219,8 +245,8 @@ def main() -> None:
             t_pk_100 = _bench(lambda: ctx.pk_jac_batch(q100), repeats=args.repeats, inner_loops=args.inner_batch)
             t_pin_100 = _bench(lambda: ctx.pin_jac_batch(q100), repeats=args.repeats, inner_loops=args.inner_batch)
             ctx.sync_torch()
-        else:
-            print(f"(skip pytorch_kinematics/pinocchio Jacobian: {msg_pk})", flush=True)
+        elif pk_pin_skip_msg is not None:
+            print(f"(skip pytorch_kinematics/pinocchio Jacobian: {pk_pin_skip_msg})", flush=True)
     elif args.target_link is not None:
         print("(skip pytorch_kinematics/pinocchio Jacobian: PK chain is built for --end-link only)", flush=True)
 
@@ -228,7 +254,7 @@ def main() -> None:
         return t_sec / inner * 1e3
 
     col_w = 22
-    print(f"Model: {urdf.name}  chain DOF={n}  end_link={args.end_link}")
+    print(f"Model: {Path(urdf).name}  chain DOF={n}  end_link={args.end_link}")
     print(f"Torch device: {args.device}")
     print()
     print(f"{'backend':<22} {'batch=1 (ms/call)':<{col_w}} {'batch=100 (ms/call)':<24}")

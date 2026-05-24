@@ -11,9 +11,8 @@ Website: https://synriarobotics.ai
 """
 
 import numpy as np
-import torch
 import pytest
-from pathlib import Path
+torch = pytest.importorskip("torch")
 from robocore.modeling.robot_model import RobotModel
 from robocore.kinematics.ik import inverse_kinematics
 from robocore.kinematics.ik_utils.ik_solver_torch import IKSolverTorch
@@ -23,29 +22,19 @@ from robocore.kinematics.fk import forward_kinematics
 
 def random_q_in_limits(model, seed=42):
     """Generate random joint configuration within joint limits."""
+    return np.asarray(model.random_q(seed=seed), dtype=float)
+
+
+def nearby_q(q, seed=42, scale=0.02):
+    """Generate a nearby initial guess for a reachable IK target."""
     rng = np.random.default_rng(seed)
-    n = model.num_dof
-    q = np.zeros(n)
-    for js in model._chain_actuated:
-        lo, hi = -1.0, 1.0
-        if js.limit:
-            if js.limit[0] is not None:
-                lo = js.limit[0]
-            if js.limit[1] is not None:
-                hi = js.limit[1]
-        mid = 0.5 * (lo + hi)
-        span = 0.5 * (hi - lo) * 0.5
-        q[js.index] = rng.uniform(mid - span, mid + span)
-    return q
+    return np.asarray(q, dtype=float) + rng.normal(0.0, scale, size=len(q))
 
 
 @pytest.fixture(scope="module")
-def robot_model():
+def robot_model(alicia_urdf_path):
     """Load robot model for testing."""
-    urdf_path = Path('robocore/assets/robot_descriptions/urdf/Alicia-D_v5_5/alicia_duo_with_gripper.urdf')
-    if not urdf_path.exists():
-        pytest.skip(f"URDF not found: {urdf_path}")
-    return RobotModel(str(urdf_path), end_link='tool0')
+    return RobotModel(alicia_urdf_path, end_link='tool0')
 
 
 class TestIKAccuracy:
@@ -56,7 +45,7 @@ class TestIKAccuracy:
         seed = 42
         q_target = random_q_in_limits(robot_model, seed=seed)
         target_pose = forward_kinematics(robot_model, q_target, return_end=True)
-        q_init = random_q_in_limits(robot_model, seed=seed + 1)
+        q_init = nearby_q(q_target, seed=seed + 1)
         
         # NumPy solution
         robocore.set_backend('numpy')
@@ -95,7 +84,7 @@ class TestIKAccuracy:
         for i in range(n_samples):
             q = random_q_in_limits(robot_model, seed=seed+i)
             T = forward_kinematics(robot_model, q, return_end=True)
-            q_init = random_q_in_limits(robot_model, seed=seed+n_samples+i)
+            q_init = nearby_q(q, seed=seed+n_samples+i)
             
             q_batch.append(q_init)
             target_poses.append(T)

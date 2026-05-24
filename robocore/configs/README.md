@@ -2,20 +2,25 @@
 
 This directory contains example YAML configuration files for RoboCore.
 
+Built-in configs use robot-description URIs such as
+`synriard://Alicia_D/v5_6/gripper_100mm/urdf`. Install the description
+packages with `pip install "synria-robocore[descriptions]"`, or replace
+`robot.urdf_path` with a local URDF/MJCF path.
+
 ## Quick Start
 
 ```bash
 # Use default configuration (Alicia-D robot, NumPy backend, CPU)
-python examples/demo_with_config.py
+python examples/configs/demo_with_config.py
 
 # Load GPU-optimized configuration
-python examples/demo_with_config.py --config robocore/configs/gpu_config.yaml
+python examples/configs/demo_with_config.py --config robocore/configs/gpu_config.yaml
 
 # Load Bessica robot configuration
-python examples/demo_with_config.py --config robocore/configs/bessica_config.yaml
+python examples/configs/demo_with_config.py --config robocore/configs/bessica_config.yaml
 
 # Override specific parameters
-python examples/demo_with_config.py \
+python examples/configs/demo_with_config.py \
     --config robocore/configs/default.yaml \
     robot.end_link=Link7 \
     kinematics.ik.solver.max_iterations=200
@@ -32,7 +37,7 @@ Default configuration for Alicia-D robot with NumPy backend.
 - Single-sample computations
 
 **Key settings:**
-- Robot: Alicia-D v5.4 (6-DOF)
+- Robot: Alicia-D v5.6 (6-DOF arm, gripper variant)
 - Backend: NumPy
 - Device: CPU
 
@@ -59,7 +64,7 @@ Configuration for Bessica-D dual-arm robot.
 - Bessica robot projects
 
 **Key settings:**
-- Robot: Bessica-D v1.0 (7-DOF dual-arm)
+- Robot: Bessica-D v1.1 (7-DOF dual-arm)
 - End link: `left_arm_gripper_left_finger`
 - Backend: NumPy (for compatibility)
 
@@ -75,7 +80,7 @@ cp robocore/configs/default.yaml my_config.yaml
 nano my_config.yaml
 
 # Use it
-python examples/demo_with_config.py --config my_config.yaml
+python examples/configs/demo_with_config.py --config my_config.yaml
 ```
 
 ### Method 2: Python API
@@ -280,7 +285,8 @@ verbose: true          # bool, not "true"
 ## Documentation
 
 For full documentation, see:
-- `/docs/CONFIGURATION_GUIDE.md` - Complete configuration guide
+- `README.md` - installation, quick start, and release validation
+- `robocore/configs/README.md` - configuration guide
 - `robocore/configs/schemas.py` - Configuration schemas
 - `robocore/configs/config_manager.py` - ConfigManager API
 
@@ -288,31 +294,31 @@ For full documentation, see:
 
 ```bash
 # Example 1: Default configuration
-python examples/demo_with_config.py
+python examples/configs/demo_with_config.py
 
 # Example 2: GPU configuration with random joints
-python examples/demo_with_config.py \
+python examples/configs/demo_with_config.py \
     --config robocore/configs/gpu_config.yaml \
     --random --seed 42
 
 # Example 3: Bessica robot with custom joints
-python examples/demo_with_config.py \
+python examples/configs/demo_with_config.py \
     --config robocore/configs/bessica_config.yaml \
     --joints 0.5 -0.3 1.2 0.8 -0.5 1.5 0.0
 
 # Example 4: Override specific parameters
-python examples/demo_with_config.py \
+python examples/configs/demo_with_config.py \
     --config robocore/configs/default.yaml \
     robot.end_link=Link7 \
     kinematics.ik.solver.max_iterations=200 \
     compute.device=cpu
 
 # Example 5: Save modified configuration
-python examples/demo_with_config.py \
+python examples/configs/demo_with_config.py \
     --config robocore/configs/default.yaml \
     --save-config my_config.yaml
 ```
 
 ---
 
-**For more examples and API reference, see the main [Configuration Guide](/docs/CONFIGURATION_GUIDE.md).**
+For more examples, see `examples/configs/demo_with_config.py`.

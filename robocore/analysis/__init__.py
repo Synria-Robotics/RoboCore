@@ -1,18 +1,24 @@
-"""Analysis tools for robotics.
+"""Analysis tools for robotics."""
 
-Copyright (c) 2025 Synria Robotics Co., Ltd.
+from importlib import import_module
 
-Licensed under the MIT License.
+_LAZY_EXPORTS = {
+    "SingularityAnalyzer": ("robocore.analysis.singularity_analyzer", "SingularityAnalyzer"),
+    "WorkspaceAnalyzer": ("robocore.analysis.workspace_analyzer", "WorkspaceAnalyzer"),
+    "analyze_workspace_comparison": (
+        "robocore.analysis.workspace_analyzer",
+        "analyze_workspace_comparison",
+    ),
+}
 
-Author: Synria Robotics Team
-Website: https://synriarobotics.ai
-"""
 
-from .singularity_analyzer import SingularityAnalyzer
-from .workspace_analyzer import WorkspaceAnalyzer, analyze_workspace_comparison
+def __getattr__(name):
+    if name in _LAZY_EXPORTS:
+        module_name, attr_name = _LAZY_EXPORTS[name]
+        value = getattr(import_module(module_name), attr_name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
-__all__ = [
-    "SingularityAnalyzer",
-    "WorkspaceAnalyzer",
-    "analyze_workspace_comparison"
-]
+
+__all__ = list(_LAZY_EXPORTS)

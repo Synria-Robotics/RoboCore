@@ -25,11 +25,6 @@ except Exception:  # pragma: no cover
             return torch.device('cuda')
         return torch.device('cpu')
 
-from robocore.transform import (
-    rpy_to_matrix,
-    axis_angle_to_matrix,
-    make_transform,
-)
 from robocore.kinematics.utils import ensure_batch, restore_single
 
 if TYPE_CHECKING:
@@ -119,18 +114,20 @@ class FKSolverTorch:
                         poses[joint.parent] = torch.eye(4, dtype=dtype, device=device)
                     parent_pose = poses[joint.parent]
 
-                    R_o = rpy_to_matrix(
+                    R_o = self._rpy_to_matrix_torch(
                         torch.tensor(joint.origin_rpy[0], dtype=dtype, device=device),
                         torch.tensor(joint.origin_rpy[1], dtype=dtype, device=device),
                         torch.tensor(joint.origin_rpy[2], dtype=dtype, device=device),
                     )
                     t_o = torch.tensor(joint.origin_xyz, dtype=dtype, device=device)
-                    T_origin = make_transform(R_o, t_o)
+                    T_origin = self._make_transform_torch(R_o, t_o, device, dtype)
 
                     if joint.joint_type == "revolute":
-                        R_m = axis_angle_to_matrix(
+                        R_m = self._axis_angle_to_rotation_matrix_single(
                             torch.tensor(joint.axis, dtype=dtype, device=device),
-                            q_map.get(joint.name, torch.tensor(0.0, dtype=dtype, device=device))
+                            q_map.get(joint.name, torch.tensor(0.0, dtype=dtype, device=device)),
+                            device,
+                            dtype,
                         )
                         t_m = torch.zeros(3, dtype=dtype, device=device)
                     elif joint.joint_type == "prismatic":
@@ -141,7 +138,7 @@ class FKSolverTorch:
                         R_m = torch.eye(3, dtype=dtype, device=device)
                         t_m = torch.zeros(3, dtype=dtype, device=device)
 
-                    T_motion = make_transform(R_m, t_m)
+                    T_motion = self._make_transform_torch(R_m, t_m, device, dtype)
                     child_pose = parent_pose @ T_origin @ T_motion
                     poses[joint.child] = child_pose
 
@@ -198,7 +195,7 @@ class FKSolverTorch:
             # 2. Rotation from origin (roll-pitch-yaw)
             origin_rpy = torch.tensor(urdf_joint.origin_rpy, device=device, dtype=dtype)  # [3]
             origin_rpy_batch = origin_rpy.unsqueeze(0).repeat(batch_size, 1)  # [B, 3]
-            R_origin = rpy_to_matrix(
+            R_origin = self._rpy_to_matrix_torch(
                 origin_rpy_batch[:, 0],
                 origin_rpy_batch[:, 1],
                 origin_rpy_batch[:, 2]
@@ -241,6 +238,56 @@ class FKSolverTorch:
         return T_batch
     
     @staticmethod
+    def _rpy_to_matrix_torch(roll, pitch, yaw) -> torch.Tensor:
+        """Convert roll-pitch-yaw angles to torch rotation matrices."""
+        batch = roll.ndim > 0 or pitch.ndim > 0 or yaw.ndim > 0
+        if not batch:
+            roll = roll.reshape(1)
+            pitch = pitch.reshape(1)
+            yaw = yaw.reshape(1)
+
+        cr = torch.cos(roll)
+        sr = torch.sin(roll)
+        cp = torch.cos(pitch)
+        sp = torch.sin(pitch)
+        cy = torch.cos(yaw)
+        sy = torch.sin(yaw)
+
+        R = torch.zeros((roll.shape[0], 3, 3), dtype=roll.dtype, device=roll.device)
+        R[..., 0, 0] = cy * cp
+        R[..., 0, 1] = cy * sp * sr - sy * cr
+        R[..., 0, 2] = cy * sp * cr + sy * sr
+        R[..., 1, 0] = sy * cp
+        R[..., 1, 1] = sy * sp * sr + cy * cr
+        R[..., 1, 2] = sy * sp * cr - cy * sr
+        R[..., 2, 0] = -sp
+        R[..., 2, 1] = cp * sr
+        R[..., 2, 2] = cp * cr
+        return R if batch else R[0]
+
+    @staticmethod
+    def _make_transform_torch(R: torch.Tensor, t: torch.Tensor, device, dtype) -> torch.Tensor:
+        """Create a torch homogeneous transform without using global backend state."""
+        T = torch.eye(4, device=device, dtype=dtype)
+        T[:3, :3] = R
+        T[:3, 3] = t
+        return T
+
+    @staticmethod
+    def _axis_angle_to_rotation_matrix_single(
+        axis: torch.Tensor,
+        angle: torch.Tensor,
+        device,
+        dtype,
+    ) -> torch.Tensor:
+        return FKSolverTorch._axis_angle_to_rotation_matrix_batch(
+            axis,
+            angle.reshape(1),
+            device,
+            dtype,
+        )[0]
+
+    @staticmethod
     def _axis_angle_to_rotation_matrix_batch(
         axis: torch.Tensor,
         angles: torch.Tensor,
@@ -263,11 +310,12 @@ class FKSolverTorch:
         kx, ky, kz = axis[0], axis[1], axis[2]
         
         # Skew-symmetric matrix K (same for all samples)
-        K = torch.tensor([
-            [0, -kz, ky],
-            [kz, 0, -kx],
-            [-ky, kx, 0]
-        ], device=device, dtype=dtype)
+        zero = torch.zeros((), device=device, dtype=dtype)
+        K = torch.stack([
+            torch.stack([zero, -kz, ky]),
+            torch.stack([kz, zero, -kx]),
+            torch.stack([-ky, kx, zero]),
+        ])
         
         # K²
         K2 = torch.matmul(K, K)
@@ -364,19 +412,21 @@ class FKSolverTorch:
                             T_parent = transform_cache.get(parent_idx, torch.eye(4, dtype=dtype, device=device))
 
                         # Compute this joint's transform
-                        R_o = rpy_to_matrix(
+                        R_o = self._rpy_to_matrix_torch(
                             torch.tensor(joint_spec.origin_rpy[0], dtype=dtype, device=device),
                             torch.tensor(joint_spec.origin_rpy[1], dtype=dtype, device=device),
                             torch.tensor(joint_spec.origin_rpy[2], dtype=dtype, device=device),
                         )
                         t_o = torch.tensor(joint_spec.origin_xyz, dtype=dtype, device=device)
-                        T_origin = make_transform(R_o, t_o)
+                        T_origin = self._make_transform_torch(R_o, t_o, device, dtype)
 
                         # Joint motion
                         if joint_spec.joint_type == "revolute":
-                            R_m = axis_angle_to_matrix(
+                            R_m = self._axis_angle_to_rotation_matrix_single(
                                 torch.tensor(joint_spec.axis, dtype=dtype, device=device),
-                                q_map.get(joint_spec.name, torch.tensor(0.0, dtype=dtype, device=device))
+                                q_map.get(joint_spec.name, torch.tensor(0.0, dtype=dtype, device=device)),
+                                device,
+                                dtype,
                             )
                             t_m = torch.zeros(3, dtype=dtype, device=device)
                         elif joint_spec.joint_type == "prismatic":
@@ -387,7 +437,7 @@ class FKSolverTorch:
                             R_m = torch.eye(3, dtype=dtype, device=device)
                             t_m = torch.zeros(3, dtype=dtype, device=device)
 
-                        T_motion = make_transform(R_m, t_m)
+                        T_motion = self._make_transform_torch(R_m, t_m, device, dtype)
 
                         # Compose
                         T_link = T_parent @ T_origin @ T_motion

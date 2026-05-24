@@ -27,6 +27,7 @@ from robocore.planning.trajectory import (
     linear_joint_trajectory,
     multi_waypoint_trajectory
 )
+from robocore.configs import resolve_description_path
 
 try:
     from robocore.bridge.sim.mujoco.physics_simulator import PhysicsSimulator
@@ -39,32 +40,6 @@ except ImportError as e:
     MUJOCO_AVAILABLE = False
     print(f"⚠️  MuJoCo modules not available: {e}")
     print("Install with: pip install mujoco")
-
-
-def find_mjcf_file(robot_name: str) -> Path:
-    """Find MuJoCo MJCF file for robot."""
-    # Try common locations
-    possible_paths = [
-        Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot_descriptions' / 'mjcf',
-        Path(__file__).parent.parent / 'robocore' / 'assets' / 'robot' / 'mjcf',
-    ]
-    
-    for base_path in possible_paths:
-        if not base_path.exists():
-            continue
-        
-        patterns = [
-            f"{robot_name}*.xml",
-            f"{robot_name.upper()}*.xml",
-            f"{robot_name.lower()}*.xml",
-        ]
-        
-        for pattern in patterns:
-            mjcf_files = list(base_path.glob(pattern))
-            if mjcf_files:
-                return mjcf_files[0]
-    
-    return None
 
 
 def generate_trajectories(q_start: np.ndarray, q_end: np.ndarray, duration: float = 2.0):
@@ -449,7 +424,7 @@ if __name__ == '__main__':
                        help='Generate and display plots (default: True)')
     parser.add_argument('--no-plot', dest='plot', action='store_false',
                        help='Disable plot generation')
-    parser.add_argument('--visualize', action='store_false',
+    parser.add_argument('--visualize', action='store_true',
                        help='Show MuJoCo viewer for trajectory visualization')
     
     args = parser.parse_args()
@@ -457,12 +432,10 @@ if __name__ == '__main__':
     # Find MJCF file
     if args.mjcf:
         mjcf_path = Path(args.mjcf)
+    elif args.robot == "alicia":
+        mjcf_path = resolve_description_path("synriard://Alicia_D/v5_6/gripper_100mm/mjcf")
     else:
-        import synriard
-        if args.robot == "alicia":
-            mjcf_path = synriard.get_model_path("Alicia_D", version="v5_6", variant="gripper_100mm", model_format="mjcf")
-        else:
-            mjcf_path = synriard.get_model_path("Bessica_D", version="v1_0", variant="covered_interactive", model_format="mjcf")
+        mjcf_path = resolve_description_path("synriard://Bessica_D/v1_1/covered/mjcf")
         
     # Servo limits
     servo_limits = {}
@@ -479,4 +452,3 @@ if __name__ == '__main__':
         plot=args.plot,
         visualize=args.visualize
     )
-

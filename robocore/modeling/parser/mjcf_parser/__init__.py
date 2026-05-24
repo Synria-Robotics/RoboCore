@@ -15,8 +15,23 @@
 
 """PyMJCF: an MJCF object-model library."""
 
-from robocore.modeling.parser.mjcf_parser.parser import *
-from robocore.modeling.parser.mjcf_parser.wrapper import MJCFParser, load_mjcf
-from robocore.modeling.parser.mjcf_parser.mjcf import MJCF
+from importlib import import_module
 
-__all__ = ['MJCFParser', 'load_mjcf', 'from_path', 'MJCF']
+_LAZY_EXPORTS = {
+    'from_path': ('robocore.modeling.parser.mjcf_parser.parser', 'from_path'),
+    'MJCFParser': ('robocore.modeling.parser.mjcf_parser.wrapper', 'MJCFParser'),
+    'load_mjcf': ('robocore.modeling.parser.mjcf_parser.wrapper', 'load_mjcf'),
+    'MJCF': ('robocore.modeling.parser.mjcf_parser.mjcf', 'MJCF'),
+}
+
+
+def __getattr__(name):
+    if name in _LAZY_EXPORTS:
+        module_name, attr_name = _LAZY_EXPORTS[name]
+        value = getattr(import_module(module_name), attr_name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+__all__ = list(_LAZY_EXPORTS)
