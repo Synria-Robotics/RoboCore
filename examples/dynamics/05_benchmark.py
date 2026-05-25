@@ -46,7 +46,7 @@ def main(args):
     for _ in range(n_runs):
         dynamics.forward_dynamics(model, q, v, tau)
     t_fd = (time.perf_counter() - t0) / n_runs * 1000
-    beauty_print(f"Forward dynamics (ABA): {t_fd:.4f} ms")
+    beauty_print(f"Forward dynamics (mass-matrix solve): {t_fd:.4f} ms")
 
     # Mass matrix
     dynamics.mass_matrix(model, q)

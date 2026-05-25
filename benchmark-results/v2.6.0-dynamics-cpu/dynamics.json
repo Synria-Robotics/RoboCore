@@ -1,0 +1,205 @@
+{
+  "metadata": {
+    "created_at": "2026-05-25T04:10:42.619829+00:00",
+    "python": "3.11.13",
+    "platform": "Linux-5.15.0-139-generic-x86_64-with-glibc2.31",
+    "processor": "x86_64",
+    "robot": "alicia_d",
+    "urdf": "/home/ytyang/RoboCore/.venv311/lib/python3.11/site-packages/synriard/urdf/Alicia_D_v5_6/Alicia_D_v5_6_gripper_100mm.urdf",
+    "base_link": "base_link",
+    "end_link": "tool0",
+    "chain_dof": 6,
+    "samples": 200,
+    "seed": 0,
+    "repeats": 5,
+    "inner_single": 1000,
+    "inner_batch": 200,
+    "versions": {
+      "robocore": "2.5.0rc4",
+      "numpy": "2.4.6",
+      "pinocchio": "4.0.0"
+    }
+  },
+  "results": [
+    {
+      "operation": "id",
+      "backend": "cpp",
+      "mode": "single",
+      "ms_per_call": 0.006110351998358965,
+      "speedup_vs_cpp": 1.0,
+      "max_abs_error": 2.220446049250313e-16,
+      "status": "ok",
+      "message": "Matched NumPy reference."
+    },
+    {
+      "operation": "mass_matrix",
+      "backend": "cpp",
+      "mode": "single",
+      "ms_per_call": 0.005037118215113878,
+      "speedup_vs_cpp": 1.0,
+      "max_abs_error": 3.469446951953614e-18,
+      "status": "ok",
+      "message": "Matched NumPy reference."
+    },
+    {
+      "operation": "gravity",
+      "backend": "cpp",
+      "mode": "single",
+      "ms_per_call": 0.0074647883884608746,
+      "speedup_vs_cpp": 1.0,
+      "max_abs_error": 4.440892098500626e-16,
+      "status": "ok",
+      "message": "Matched NumPy reference."
+    },
+    {
+      "operation": "nle",
+      "backend": "cpp",
+      "mode": "single",
+      "ms_per_call": 0.007753964979201554,
+      "speedup_vs_cpp": 1.0,
+      "max_abs_error": 1.1102230246251565e-16,
+      "status": "ok",
+      "message": "Matched NumPy reference."
+    },
+    {
+      "operation": "fd",
+      "backend": "cpp",
+      "mode": "single",
+      "ms_per_call": 0.008911611046642065,
+      "speedup_vs_cpp": 1.0,
+      "max_abs_error": 2.091837814077735e-11,
+      "status": "ok",
+      "message": "Matched NumPy reference."
+    },
+    {
+      "operation": "id",
+      "backend": "cpp",
+      "mode": "batch",
+      "ms_per_call": 0.4431627946905792,
+      "speedup_vs_cpp": 1.0,
+      "max_abs_error": null,
+      "status": "ok",
+      "message": "C++ batch path executed."
+    },
+    {
+      "operation": "mass_matrix",
+      "backend": "cpp",
+      "mode": "batch",
+      "ms_per_call": 0.4362833849154413,
+      "speedup_vs_cpp": 1.0,
+      "max_abs_error": null,
+      "status": "ok",
+      "message": "C++ batch path executed."
+    },
+    {
+      "operation": "fd",
+      "backend": "cpp",
+      "mode": "batch",
+      "ms_per_call": 0.9628090308979154,
+      "speedup_vs_cpp": 1.0,
+      "max_abs_error": null,
+      "status": "ok",
+      "message": "C++ batch path executed."
+    },
+    {
+      "operation": "id",
+      "backend": "numpy",
+      "mode": "single",
+      "ms_per_call": 0.8623227849602699,
+      "speedup_vs_cpp": 141.12489512745924,
+      "max_abs_error": 0.0,
+      "status": "ok",
+      "message": "Matched NumPy reference."
+    },
+    {
+      "operation": "mass_matrix",
+      "backend": "numpy",
+      "mode": "single",
+      "ms_per_call": 0.8809249536134303,
+      "speedup_vs_cpp": 174.88669433451335,
+      "max_abs_error": 0.0,
+      "status": "ok",
+      "message": "Matched NumPy reference."
+    },
+    {
+      "operation": "gravity",
+      "backend": "numpy",
+      "mode": "single",
+      "ms_per_call": 0.8628631210885942,
+      "speedup_vs_cpp": 115.5911026791348,
+      "max_abs_error": 0.0,
+      "status": "ok",
+      "message": "Matched NumPy reference."
+    },
+    {
+      "operation": "nle",
+      "backend": "numpy",
+      "mode": "single",
+      "ms_per_call": 0.8624779852107167,
+      "speedup_vs_cpp": 111.23057526364121,
+      "max_abs_error": 0.0,
+      "status": "ok",
+      "message": "Matched NumPy reference."
+    },
+    {
+      "operation": "fd",
+      "backend": "numpy",
+      "mode": "single",
+      "ms_per_call": 1.757988004013896,
+      "speedup_vs_cpp": 197.26938202451214,
+      "max_abs_error": 0.0,
+      "status": "ok",
+      "message": "Matched NumPy reference."
+    },
+    {
+      "operation": "id",
+      "backend": "pinocchio",
+      "mode": "single",
+      "ms_per_call": 0.03554376168176532,
+      "speedup_vs_cpp": 5.81697448711812,
+      "max_abs_error": 4.440892098500626e-16,
+      "status": "ok",
+      "message": "Pinocchio projected-chain comparison."
+    },
+    {
+      "operation": "mass_matrix",
+      "backend": "pinocchio",
+      "mode": "single",
+      "ms_per_call": 0.03573341714218259,
+      "speedup_vs_cpp": 7.094019956681667,
+      "max_abs_error": 1.3877787807814457e-17,
+      "status": "ok",
+      "message": "Pinocchio projected-chain comparison."
+    },
+    {
+      "operation": "gravity",
+      "backend": "pinocchio",
+      "mode": "single",
+      "ms_per_call": 0.0358518878929317,
+      "speedup_vs_cpp": 4.802800297507671,
+      "max_abs_error": 4.440892098500626e-16,
+      "status": "ok",
+      "message": "Pinocchio projected-chain comparison."
+    },
+    {
+      "operation": "nle",
+      "backend": "pinocchio",
+      "mode": "single",
+      "ms_per_call": 0.03580400301143527,
+      "speedup_vs_cpp": 4.617508991525275,
+      "max_abs_error": 7.771561172376096e-16,
+      "status": "ok",
+      "message": "Pinocchio projected-chain comparison."
+    },
+    {
+      "operation": "fd",
+      "backend": "pinocchio",
+      "mode": "single",
+      "ms_per_call": 0.03595266072079539,
+      "speedup_vs_cpp": 4.034361523704798,
+      "max_abs_error": 7.275957614183426e-12,
+      "status": "ok",
+      "message": "Pinocchio projected-chain comparison."
+    }
+  ]
+}

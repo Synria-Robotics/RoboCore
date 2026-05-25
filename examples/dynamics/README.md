@@ -16,7 +16,7 @@ python examples/dynamics/01a_demo_id.py
 # With custom model and joint angles
 python examples/dynamics/01a_demo_id.py --model-path /path/to/robot.urdf --joint-angles 0 0 0 0 0 0
 
-# Forward dynamics: ddq = ABA(q, v, tau)
+# Forward dynamics: solve M(q) ddq = tau - nle(q, v)
 python examples/dynamics/02a_demo_fd.py
 
 # Mass matrix M(q) and M^{-1}(q)

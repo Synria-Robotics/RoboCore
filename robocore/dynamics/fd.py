@@ -1,4 +1,4 @@
-"""Forward dynamics and mass matrix: CRBA and ABA.
+"""Forward dynamics and mass matrix utilities.
 
 Copyright (c) 2025 Synria Robotics Co., Ltd.
 
@@ -99,7 +99,9 @@ def aba(
     tau: np.ndarray,
     fext: Optional[list] = None,
 ) -> np.ndarray:
-    """Forward dynamics: ddq = ABA(q, v, tau). Uses M from CRBA and nle from RNEA, then solve M @ ddq = tau - nle.
+    """Forward dynamics by mass-matrix solve.
+
+    Uses M from CRBA and nle from RNEA, then solves M @ ddq = tau - nle.
 
     :param model: DynamicsModel.
     :param q: Joint positions (nq,).

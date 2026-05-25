@@ -9,6 +9,7 @@ Website: https://synriarobotics.ai
 """
 
 import threading
+from contextlib import contextmanager
 from typing import Optional, Literal, Any
 import numpy as np
 
@@ -65,7 +66,9 @@ class BackendManager:
         self,
         backend: Literal['numpy', 'torch', 'cpp'] = 'numpy',
         device: Any = None,
-        dtype: Optional[Any] = None
+        dtype: Optional[Any] = None,
+        *,
+        verbose: bool = True,
     ):
         """
         Set the global backend.
@@ -128,7 +131,8 @@ class BackendManager:
                     # Already a numpy dtype
                     self._dtype = dtype
 
-        beauty_print(f"Backend set to {backend} on device {self._device} with dtype {self._dtype}")
+        if verbose:
+            beauty_print(f"Backend set to {backend} on device {self._device} with dtype {self._dtype}")
 
     def get_backend(self) -> str:
         """Get current backend name."""
@@ -252,7 +256,9 @@ def get_backend_manager() -> BackendManager:
 def set_backend(
     backend: Literal['numpy', 'torch', 'cpp'] = 'numpy',
     device: Any = None,
-    dtype: Optional[Any] = None
+    dtype: Optional[Any] = None,
+    *,
+    verbose: bool = True,
 ):
     """
     Set the global backend.
@@ -261,7 +267,7 @@ def set_backend(
     :param device: For torch: None auto-selects CUDA when available, else CPU. Explicit 'cpu' keeps CPU.
     :param dtype: Data type for arrays
     """
-    get_backend_manager().set_backend(backend, device, dtype)
+    get_backend_manager().set_backend(backend, device, dtype, verbose=verbose)
 
 
 def get_backend() -> str:
@@ -271,6 +277,30 @@ def get_backend() -> str:
     :return: 'numpy', 'torch', or 'cpp'
     """
     return get_backend_manager().get_backend()
+
+
+@contextmanager
+def backend_context(
+    backend: Literal['numpy', 'torch', 'cpp'] | None = None,
+    device: Any = None,
+    dtype: Optional[Any] = None,
+):
+    """Temporarily select a backend for one public API call.
+
+    Passing ``backend=None`` leaves the global backend unchanged.
+    """
+    mgr = get_backend_manager()
+    original_backend = mgr.get_backend()
+    original_device = mgr.get_device()
+    original_dtype = mgr.get_dtype()
+    changed = backend is not None
+    if changed:
+        mgr.set_backend(backend, device=device, dtype=dtype, verbose=False)
+    try:
+        yield mgr.get_backend()
+    finally:
+        if changed:
+            mgr.set_backend(original_backend, device=original_device, dtype=original_dtype, verbose=False)
 
 
 def ensure_array(data):

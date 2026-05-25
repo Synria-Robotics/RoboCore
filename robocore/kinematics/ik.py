@@ -16,7 +16,71 @@ import numpy as np
 
 from robocore.kinematics.ik_utils.ik_solver_numpy import IKSolverNumPy
 from robocore.kinematics.ik_utils.initial_guess import generate_initial_guesses
-from robocore.utils.backend import get_backend
+from robocore.utils.backend import backend_context, get_backend
+
+
+def _is_near_joint_limit(model: Any, q: Any, margin: float = 1e-6) -> bool:
+    """Return True when any chain joint sits on a finite limit."""
+    if q is None:
+        return False
+    try:
+        q_arr = np.asarray(q, dtype=np.float64).ravel()
+    except (TypeError, ValueError):
+        return False
+    if q_arr.size < getattr(model, "num_chain_dof", q_arr.size):
+        return False
+    for js in getattr(model, "_chain_dof_list", []):
+        idx = int(js.index)
+        if idx >= q_arr.size:
+            continue
+        if js.limit_lower is not None and q_arr[idx] <= float(js.limit_lower) + margin:
+            return True
+        if js.limit_upper is not None and q_arr[idx] >= float(js.limit_upper) - margin:
+            return True
+    return False
+
+
+def _normalize_one_ik_result(res: Dict[str, Any], *, model: Any, max_iters: int) -> Dict[str, Any]:
+    """Add stable status/message fields while preserving existing solver fields."""
+    if not isinstance(res, dict):
+        return res
+
+    success = bool(res.get("success", False))
+    pos_err = float(res.get("pos_err", np.inf))
+    ori_err = float(res.get("ori_err", np.inf))
+    err_norm = float(res.get("err_norm", pos_err + ori_err))
+    iters = int(res.get("iters", max_iters))
+
+    if success:
+        status = "success"
+        message = "IK converged within position and orientation tolerances."
+    elif not np.isfinite(err_norm) or not np.isfinite(pos_err) or not np.isfinite(ori_err):
+        status = "singular"
+        message = "IK failed because the solve produced a non-finite residual."
+    elif _is_near_joint_limit(model, res.get("q")):
+        status = "limit"
+        message = "IK failed while the solution was clamped near a joint limit."
+    elif iters >= max_iters:
+        status = "max_iters"
+        message = "IK failed to converge before max_iters."
+    else:
+        status = "unreachable"
+        message = "IK failed to reach the requested target from the provided initial guess."
+
+    res.setdefault("status", status)
+    res.setdefault("message", message)
+    res.setdefault("pos_err", pos_err)
+    res.setdefault("ori_err", ori_err)
+    res.setdefault("err_norm", err_norm)
+    return res
+
+
+def _normalize_ik_result(result: Any, *, model: Any, max_iters: int) -> Any:
+    if isinstance(result, list):
+        return [_normalize_one_ik_result(res, model=model, max_iters=max_iters) for res in result]
+    if isinstance(result, dict):
+        return _normalize_one_ik_result(result, model=model, max_iters=max_iters)
+    return result
 
 
 def inverse_kinematics(
@@ -37,6 +101,7 @@ def inverse_kinematics(
     targets: Optional[Dict[str, Sequence[Sequence[float]] | np.ndarray]] = None,
     end_links: Optional[Sequence[str]] = None,
     row_mask: Optional[Sequence[int | bool]] = None,
+    backend: Optional[str] = None,
     # Redundancy / nullspace parameters
     nullspace_gain: float = 0.0,
     joint_centering: bool = True,
@@ -66,9 +131,37 @@ def inverse_kinematics(
     :param end_link: End link name (single-chain mode, if specified, uses dynamic path and full config space)
     :param targets: Multi-chain mode - dict mapping end_link to target pose {end_link: 4x4 or [B, 4, 4]}
     :param end_links: Multi-chain mode - list of end link names
+    :param backend: Optional per-call backend override: 'cpp', 'numpy', or 'torch'
     :param solver_kwargs: Extra kwargs passed to solver
     :return: IK result dict (single) or list of dicts (batch), with 'q' in full config space
     """
+    if backend is not None:
+        with backend_context(backend, device=torch_device, dtype=torch_dtype):
+            return inverse_kinematics(
+                model,
+                target_pose,
+                q0,
+                method=method,
+                num_initial_guesses=num_initial_guesses,
+                initial_guess_strategy=initial_guess_strategy,
+                initial_guess_scale=initial_guess_scale,
+                random_seed=random_seed,
+                target_link=target_link,
+                base_link=base_link,
+                end_link=end_link,
+                targets=targets,
+                end_links=end_links,
+                row_mask=row_mask,
+                backend=None,
+                nullspace_gain=nullspace_gain,
+                joint_centering=joint_centering,
+                joint_center_gain=joint_center_gain,
+                joint_center_weights=joint_center_weights,
+                torch_device=torch_device,
+                torch_dtype=torch_dtype,
+                **solver_kwargs,
+            )
+
     backend = get_backend()
     
     # Check if multi-chain mode is requested
@@ -77,7 +170,7 @@ def inverse_kinematics(
         if targets is None or end_links is None:
             raise ValueError("Multi-chain mode requires both 'targets' and 'end_links' parameters")
         
-        return _solve_multichain_ik(
+        return _normalize_ik_result(_solve_multichain_ik(
             model, targets, end_links, q0,
             base_link=base_link,
             method=method,
@@ -86,7 +179,7 @@ def inverse_kinematics(
             initial_guess_scale=initial_guess_scale,
             random_seed=random_seed,
             **solver_kwargs
-        )
+        ), model=model, max_iters=int(solver_kwargs.get('max_iters', 200)))
     
     # Single-chain mode
     if target_pose is None:
@@ -130,21 +223,31 @@ def inverse_kinematics(
     is_batch = target_arr.ndim == 3 and target_arr.shape[1:] == (4, 4)
     batch_size = target_arr.shape[0] if is_batch else 1
 
-    # Prepare q0 (optional, used as base for some strategies)
+    # Prepare q0 (optional, used as exact initial guess or as base for strategies)
     n_dof = model.num_chain_dof
-    base_q0 = np.asarray(q0) if q0 is not None else np.zeros(n_dof)
-    if base_q0.ndim == 2:
-        base_q0 = base_q0[0]  # Use first config as base
-
-    # Generate initial guesses - ALWAYS use strategy
-    initial_guesses = generate_initial_guesses(
-        model,
-        num_initial_guesses,
-        strategy=initial_guess_strategy,
-        seed=random_seed,
-        scale=initial_guess_scale,
-        base_q0=base_q0 if initial_guess_strategy in ('random', 'uniform') else None,
-    )
+    q0_arr = np.asarray(q0, dtype=np.float64) if q0 is not None else None
+    if q0_arr is not None and num_initial_guesses == 1:
+        if is_batch:
+            if q0_arr.ndim == 1:
+                initial_guesses = q0_arr.reshape(1, n_dof)
+            elif q0_arr.ndim == 2 and q0_arr.shape[0] == batch_size:
+                initial_guesses = q0_arr.reshape(1, batch_size, n_dof)
+            else:
+                raise ValueError(f"Batch IK q0 must have shape ({n_dof},) or ({batch_size}, {n_dof})")
+        else:
+            initial_guesses = q0_arr.reshape(1, n_dof)
+    else:
+        base_q0 = q0_arr if q0_arr is not None else np.zeros(n_dof)
+        if base_q0.ndim == 2:
+            base_q0 = base_q0[0]
+        initial_guesses = generate_initial_guesses(
+            model,
+            num_initial_guesses,
+            strategy=initial_guess_strategy,
+            seed=random_seed,
+            scale=initial_guess_scale,
+            base_q0=base_q0 if initial_guess_strategy in ('random', 'uniform') else None,
+        )
 
     # Route to backend
     try:
@@ -207,7 +310,7 @@ def inverse_kinematics(
                     q_full[chain_indices] = q_chain
                     result['q'] = q_full.tolist()
         
-        return result
+        return _normalize_ik_result(result, model=model, max_iters=int(solver_kwargs.get('max_iters', 200)))
     finally:
         # Restore original end_link and base_link if we modified them
         if original_end is not None:
@@ -233,6 +336,7 @@ def _solve_cpp(
 
     solver = IKSolverCpp(
         model,
+        target_link=target_link,
         max_iters=solver_kwargs.pop('max_iters', 200),
         pos_tol=solver_kwargs.pop('pos_tol', 1e-3),
         ori_tol=solver_kwargs.pop('ori_tol', 1e-3),
@@ -263,7 +367,8 @@ def _solve_cpp(
             return min(successes, key=lambda c: c.get('err_norm', float('inf')))
         return min(candidates, key=lambda c: c.get('err_norm', float('inf')))
 
-    num_guesses = len(initial_guesses)
+    initial_guesses = np.asarray(initial_guesses, dtype=np.float64)
+    num_guesses = initial_guesses.shape[0]
 
     if not is_batch:
         if num_guesses == 1:
@@ -274,7 +379,7 @@ def _solve_cpp(
     batch_size = target_arr.shape[0]
 
     if num_guesses == 1:
-        q0_batch = np.tile(initial_guesses[0], (batch_size, 1))
+        q0_batch = initial_guesses[0] if initial_guesses.ndim == 3 else np.tile(initial_guesses[0], (batch_size, 1))
         res = solver.solve(target_arr, q0_batch, **common_kwargs)
         if isinstance(res, dict):
             results = []
@@ -291,8 +396,8 @@ def _solve_cpp(
             return results
         return res
 
-    num_guesses = len(initial_guesses)
-    q0_first = np.tile(initial_guesses[0], (batch_size, 1))
+    num_guesses = initial_guesses.shape[0]
+    q0_first = initial_guesses[0] if initial_guesses.ndim == 3 else np.tile(initial_guesses[0], (batch_size, 1))
     first_results = solver.solve(target_arr, q0_first, **common_kwargs)
 
     if isinstance(first_results, dict):
@@ -421,7 +526,8 @@ def _solve_numpy(
             return min(successes, key=lambda c: c.get('err_norm', float('inf')))
         return min(candidates, key=lambda c: c.get('err_norm', float('inf')))
 
-    num_guesses = len(initial_guesses)
+    initial_guesses = np.asarray(initial_guesses, dtype=np.float64)
+    num_guesses = initial_guesses.shape[0]
 
     if not is_batch:
         # Single target
@@ -435,7 +541,7 @@ def _solve_numpy(
 
     if num_guesses == 1:
         # Single guess per target - use true batch solver
-        q0_batch = np.tile(initial_guesses[0], (batch_size, 1))
+        q0_batch = initial_guesses[0] if initial_guesses.ndim == 3 else np.tile(initial_guesses[0], (batch_size, 1))
         res = solver.solve(target_arr, q0_batch, **common_kwargs)
         # Convert batch result to list of dicts
         if isinstance(res, dict):
@@ -459,10 +565,10 @@ def _solve_numpy(
     # 1. Batch process all targets with first guess (fast, vectorized)
     # 2. For failed targets, try remaining guesses in batches
     # 3. This combines batch efficiency with early exit benefits
-    num_guesses = len(initial_guesses)
+    num_guesses = initial_guesses.shape[0]
 
     # Initialize results with first guess for all targets
-    q0_first = np.tile(initial_guesses[0], (batch_size, 1))
+    q0_first = initial_guesses[0] if initial_guesses.ndim == 3 else np.tile(initial_guesses[0], (batch_size, 1))
     first_results = solver.solve(target_arr, q0_first, **common_kwargs)
 
     # Convert to list format if needed
@@ -638,7 +744,8 @@ def _solve_torch(
             return min(successes, key=lambda c: c.get('err_norm', float('inf')))
         return min(candidates, key=lambda c: c.get('err_norm', float('inf')))
 
-    num_guesses = len(initial_guesses)
+    initial_guesses = np.asarray(initial_guesses, dtype=np.float64)
+    num_guesses = initial_guesses.shape[0]
 
     if not is_batch:
         # Single target
@@ -652,7 +759,7 @@ def _solve_torch(
 
     if num_guesses == 1:
         # Single guess per target - use true batch solver
-        q0_batch = np.tile(initial_guesses[0], (batch_size, 1))
+        q0_batch = initial_guesses[0] if initial_guesses.ndim == 3 else np.tile(initial_guesses[0], (batch_size, 1))
         target_torch = to_torch(target_arr)
         q0_torch = to_torch(q0_batch)
 
