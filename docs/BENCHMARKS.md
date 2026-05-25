@@ -40,15 +40,15 @@ Policy:
 | NumPy | 2.4.6 |
 | Pinocchio | 4.0.0 |
 
-Single-call CPU results:
+Single-call CPU results. `C++ advantage` is `other_time / robocore_cpp_time`.
 
-| Operation | RoboCore C++ ms | RoboCore NumPy ms | NumPy speedup vs C++ | Pinocchio ms | Pinocchio speedup vs C++ | Max error vs reference |
+| Operation | **RoboCore C++** (ms) | NumPy (ms) | C++ vs NumPy | Pinocchio (ms) | C++ vs Pinocchio | Max error |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| RNEA inverse dynamics | 0.006 | 0.862 | 141.1x | 0.036 | 5.8x | 4.44e-16 |
-| CRBA mass matrix | 0.005 | 0.881 | 174.9x | 0.036 | 7.1x | 1.39e-17 |
-| Gravity | 0.007 | 0.863 | 115.6x | 0.036 | 4.8x | 4.44e-16 |
-| Nonlinear effects | 0.008 | 0.862 | 111.2x | 0.036 | 4.6x | 7.77e-16 |
-| Forward dynamics solve | 0.009 | 1.758 | 197.3x | 0.036 | 4.0x | 7.28e-12 |
+| RNEA inverse dynamics | **0.006** | 0.862 | 141.1x | 0.036 | 5.8x | 4.44e-16 |
+| CRBA mass matrix | **0.005** | 0.881 | 174.9x | 0.036 | 7.1x | 1.39e-17 |
+| Gravity | **0.007** | 0.863 | 115.6x | 0.036 | 4.8x | 4.44e-16 |
+| Nonlinear effects | **0.008** | 0.862 | 111.2x | 0.036 | 4.6x | 7.77e-16 |
+| Forward dynamics solve | **0.009** | 1.758 | 197.3x | 0.036 | 4.0x | 7.28e-12 |
 
 C++ batch path results for 200 samples per call:
 

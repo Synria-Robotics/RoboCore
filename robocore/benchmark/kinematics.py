@@ -132,7 +132,7 @@ def _max_abs(ref: np.ndarray, other: np.ndarray) -> float:
 
 def _format_table(cases: list[BenchmarkCase]) -> str:
     lines = [
-        "| Operation | Backend | Mode | ms/call | C++ speedup | Error | Validation |",
+        "| Operation | Backend | Mode | ms/call | C++ advantage | Error | Validation |",
         "| --- | --- | --- | ---: | ---: | ---: | --- |",
     ]
     for c in cases:

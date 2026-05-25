@@ -1,6 +1,6 @@
 # RoboCore Dynamics Benchmark
 
-Fixed-base rigid-body dynamics CPU benchmark. Speedup is normalized to the RoboCore C++/Eigen backend for the same operation and mode.
+Fixed-base rigid-body dynamics CPU benchmark. C++ advantage is normalized to the RoboCore C++/Eigen backend for the same operation and mode.
 
 ## Policy
 
@@ -22,7 +22,7 @@ Fixed-base rigid-body dynamics CPU benchmark. Speedup is normalized to the RoboC
 
 ## Results
 
-| Operation | Backend | Mode | ms/call | C++ speedup | Error | Status |
+| Operation | Backend | Mode | ms/call | C++ advantage | Error | Status |
 | --- | --- | --- | ---: | ---: | ---: | --- |
 | id | **cpp** | single | 0.006 | 1.0x | 2.22e-16 | ok |
 | mass_matrix | **cpp** | single | 0.005 | 1.0x | 3.47e-18 | ok |

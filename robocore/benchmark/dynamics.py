@@ -114,7 +114,7 @@ def _pin_ops(ctx, q, v, a, tau):
 
 def _format_table(cases: list[DynamicsBenchmarkCase]) -> str:
     lines = [
-        "| Operation | Backend | Mode | ms/call | C++ speedup | Error | Status |",
+        "| Operation | Backend | Mode | ms/call | C++ advantage | Error | Status |",
         "| --- | --- | --- | ---: | ---: | ---: | --- |",
     ]
     for case in cases:
@@ -246,8 +246,9 @@ def run_dynamics_benchmark(args: Any) -> int:
     table = _format_table(cases)
     markdown = (
         "# RoboCore Dynamics Benchmark\n\n"
-        "Fixed-base rigid-body dynamics CPU benchmark. Speedup is normalized to "
-        "the RoboCore C++/Eigen backend for the same operation and mode.\n\n"
+        "Fixed-base rigid-body dynamics CPU benchmark. C++ advantage is "
+        "normalized to the RoboCore C++/Eigen backend for the same operation "
+        "and mode.\n\n"
         "## Policy\n\n"
         f"{_format_metadata(metadata)}\n\n"
         "## Results\n\n"
