@@ -115,6 +115,7 @@ print(tau_g.shape)      # (model.num_chain_dof,)
 Benchmarks below are CPU results on Python `3.11.13`, Alicia-D v5.6 6-DOF arm
 chains. **RoboCore C++/Eigen** is the recommended default backend. Pinocchio and
 pytorch_kinematics are external comparison libraries, not RoboCore backends.
+Rows prefixed with `RoboCore` are built-in backends.
 
 `C++ advantage` is `other_time / robocore_cpp_time`; larger values mean the
 RoboCore C++ backend is faster. FK/Jacobian values match NumPy within `1e-9`.
@@ -123,37 +124,37 @@ RoboCore C++ backend is faster. FK/Jacobian values match NumPy within `1e-9`.
 
 Chain: `base_link -> link6`. Batch call processes 100 joint configurations.
 
-| Implementation | Single call (ms) | C++ advantage | Batch call, 100 samples (ms) | C++ advantage |
+| Backend | Single call (ms) | C++ advantage | Batch call, 100 samples (ms) | C++ advantage |
 | --- | ---: | ---: | ---: | ---: |
-| **RoboCore C++/Eigen backend** | **0.003** | **1.0x** | **0.055** | **1.0x** |
-| RoboCore NumPy backend | 0.459 | 144.2x | 0.866 | 15.6x |
-| RoboCore PyTorch CPU backend | 2.497 | 783.8x | 3.017 | 54.5x |
-| Pinocchio external comparison | 0.005 | 1.5x | 0.523 | 9.5x |
-| pytorch_kinematics CPU external comparison | 0.547 | 171.5x | 1.063 | 19.2x |
+| **RoboCore C++/Eigen** | **0.003** | **1.0x** | **0.055** | **1.0x** |
+| RoboCore NumPy | 0.459 | 144.2x | 0.866 | 15.6x |
+| RoboCore PyTorch CPU | 2.497 | 783.8x | 3.017 | 54.5x |
+| Pinocchio | 0.005 | 1.5x | 0.523 | 9.5x |
+| pytorch_kinematics CPU | 0.547 | 171.5x | 1.063 | 19.2x |
 
 ### Analytic Jacobian
 
 Chain: `base_link -> link6`. Batch call processes 100 joint configurations.
 
-| Implementation | Single call (ms) | C++ advantage | Batch call, 100 samples (ms) | C++ advantage |
+| Backend | Single call (ms) | C++ advantage | Batch call, 100 samples (ms) | C++ advantage |
 | --- | ---: | ---: | ---: | ---: |
-| **RoboCore C++/Eigen backend** | **0.003** | **1.0x** | **0.063** | **1.0x** |
-| RoboCore NumPy backend | 0.389 | 140.6x | 29.591 | 466.5x |
-| RoboCore PyTorch CPU backend | 2.535 | 917.2x | 6.393 | 100.8x |
-| Pinocchio external comparison | 0.008 | 2.9x | 0.829 | 13.1x |
-| pytorch_kinematics CPU external comparison | 0.560 | 202.6x | 0.969 | 15.3x |
+| **RoboCore C++/Eigen** | **0.003** | **1.0x** | **0.063** | **1.0x** |
+| RoboCore NumPy | 0.389 | 140.6x | 29.591 | 466.5x |
+| RoboCore PyTorch CPU | 2.535 | 917.2x | 6.393 | 100.8x |
+| Pinocchio | 0.008 | 2.9x | 0.829 | 13.1x |
+| pytorch_kinematics CPU | 0.560 | 202.6x | 0.969 | 15.3x |
 
 ### Inverse Kinematics
 
 Chain: `base_link -> link6`. Batch call solves 50 reachable targets.
 
-| Implementation | Single solve (ms) | C++ advantage | Batch solve, 50 targets (ms) | C++ advantage | Success |
+| Backend | Single solve (ms) | C++ advantage | Batch solve, 50 targets (ms) | C++ advantage | Success |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| **RoboCore C++/Eigen DLS backend** | **0.016** | **1.0x** | **0.400** | **1.0x** | **50/50** |
-| RoboCore NumPy DLS backend | 3.715 | 230.8x | 83.483 | 208.9x | 50/50 |
-| RoboCore PyTorch CPU DLS backend | 18.952 | 1177.4x | 251.934 | 630.6x | 50/50 |
-| Pinocchio CLIK external comparison | 2.566 | 159.4x | 643.515 | 1610.6x | sanity |
-| pytorch_kinematics PseudoInverseIK CPU comparison | 310.299 | 19278.0x | 509.076 | 1274.1x | timing only |
+| **RoboCore C++/Eigen DLS** | **0.016** | **1.0x** | **0.400** | **1.0x** | **50/50** |
+| RoboCore NumPy DLS | 3.715 | 230.8x | 83.483 | 208.9x | 50/50 |
+| RoboCore PyTorch CPU DLS | 18.952 | 1177.4x | 251.934 | 630.6x | 50/50 |
+| Pinocchio CLIK | 2.566 | 159.4x | 643.515 | 1610.6x | sanity |
+| pytorch_kinematics CPU | 310.299 | 19278.0x | 509.076 | 1274.1x | timing only |
 
 ### Fixed-Base Dynamics
 
