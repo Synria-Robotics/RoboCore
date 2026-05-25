@@ -58,9 +58,9 @@ class TestFKConsistency:
         max_diff = np.abs(T_np - T_torch_np).max()
         assert max_diff < 1e-9, f"FK mismatch: max_diff={max_diff}"
     
-    @pytest.mark.skip(reason="Batch FK implementation has numerical differences - acceptable for production use")
     def test_batch_mode_torch(self, robot_model):
         """Test PyTorch batch FK computation."""
+        pytest.importorskip("torch")
         n_samples = 10
         q_batch_list = [random_q_in_limits(robot_model, seed=i) for i in range(n_samples)]
         
@@ -81,8 +81,10 @@ class TestFKConsistency:
         for i in range(n_samples):
             T_ind = T_individual[i]
             T_bat = T_batch['end'][i] if isinstance(T_batch, dict) else T_batch[i]
-            
-            max_diff = torch.abs(T_ind - T_bat).max().item()
+
+            T_ind_np = T_ind.detach().cpu().numpy() if torch.is_tensor(T_ind) else np.asarray(T_ind)
+            T_bat_np = T_bat.detach().cpu().numpy() if torch.is_tensor(T_bat) else np.asarray(T_bat)
+            max_diff = np.abs(T_ind_np - T_bat_np).max()
             # Relax tolerance for batch FK - numerical differences are acceptable
             assert max_diff < 1e-6, f"Batch FK sample {i} mismatch: max_diff={max_diff}"
     

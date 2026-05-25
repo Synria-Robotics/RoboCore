@@ -99,3 +99,55 @@ def test_gravity_equals_rnea_zero_vel_acc(robot_model):
     g = dynamics.gravity(robot_model, q)
     tau_zero = dynamics.inverse_dynamics(robot_model, q, np.zeros(nq), np.zeros(nq))
     assert np.allclose(g, tau_zero, atol=1e-12)
+
+
+def test_cpp_dynamics_matches_numpy(robot_model):
+    """C++ dynamics backend should match the NumPy reference implementation."""
+    pytest.importorskip("robocore.dynamics._dynamics_core")
+    nq = robot_model.num_chain_dof
+    rng = np.random.default_rng(45)
+    q = rng.uniform(-0.4, 0.4, nq)
+    v = rng.uniform(-0.1, 0.1, nq)
+    a = rng.uniform(-0.1, 0.1, nq)
+    tau = rng.uniform(-0.5, 0.5, nq)
+
+    assert np.allclose(
+        dynamics.inverse_dynamics(robot_model, q, v, a, backend="cpp"),
+        dynamics.inverse_dynamics(robot_model, q, v, a, backend="numpy"),
+        atol=1e-10,
+    )
+    assert np.allclose(
+        dynamics.mass_matrix(robot_model, q, backend="cpp"),
+        dynamics.mass_matrix(robot_model, q, backend="numpy"),
+        atol=1e-10,
+    )
+    assert np.allclose(
+        dynamics.gravity(robot_model, q, backend="cpp"),
+        dynamics.gravity(robot_model, q, backend="numpy"),
+        atol=1e-10,
+    )
+    assert np.allclose(
+        dynamics.nonlinear_effects(robot_model, q, v, backend="cpp"),
+        dynamics.nonlinear_effects(robot_model, q, v, backend="numpy"),
+        atol=1e-10,
+    )
+    assert np.allclose(
+        dynamics.forward_dynamics(robot_model, q, v, tau, backend="cpp"),
+        dynamics.forward_dynamics(robot_model, q, v, tau, backend="numpy"),
+        atol=1e-8,
+    )
+
+
+def test_cpp_dynamics_batch_shapes(robot_model):
+    """C++ dynamics backend supports batch ID, CRBA, and FD."""
+    pytest.importorskip("robocore.dynamics._dynamics_core")
+    nq = robot_model.num_chain_dof
+    rng = np.random.default_rng(46)
+    q = rng.uniform(-0.4, 0.4, (4, nq))
+    v = rng.uniform(-0.1, 0.1, (4, nq))
+    a = rng.uniform(-0.1, 0.1, (4, nq))
+    tau = rng.uniform(-0.5, 0.5, (4, nq))
+
+    assert dynamics.inverse_dynamics(robot_model, q, v, a, backend="cpp").shape == (4, nq)
+    assert dynamics.mass_matrix(robot_model, q, backend="cpp").shape == (4, nq, nq)
+    assert dynamics.forward_dynamics(robot_model, q, v, tau, backend="cpp").shape == (4, nq)

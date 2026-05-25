@@ -18,6 +18,7 @@ from robocore.dynamics.model import DynamicsModel, build_dynamics_model
 from robocore.dynamics.id import rnea, gravity as _gravity, nonlinear_effects as _nonlinear_effects
 from robocore.dynamics.fd import crba, aba, mass_matrix_inverse as _mass_matrix_inverse
 from robocore.dynamics.utils import coriolis_matrix as _coriolis_matrix, static_torque as _static_torque
+from robocore.utils.backend import get_backend
 
 
 def _get_dynamics_model(robot_model: Any) -> DynamicsModel:
@@ -27,12 +28,29 @@ def _get_dynamics_model(robot_model: Any) -> DynamicsModel:
     return robot_model._dynamics_model
 
 
+def _resolve_dynamics_backend(backend: Optional[str]) -> str:
+    selected = backend or get_backend()
+    if selected == "cpp":
+        return "cpp"
+    if selected in ("numpy", "torch"):
+        return "numpy"
+    raise ValueError("Dynamics backend must be 'numpy' or 'cpp'")
+
+
+def _get_cpp_solver(robot_model: Any):
+    from robocore.dynamics.cpp import get_cpp_dynamics_solver
+
+    return get_cpp_dynamics_solver(robot_model)
+
+
 def inverse_dynamics(
     model: Any,
     q: Union[Sequence[float], np.ndarray],
     v: Union[Sequence[float], np.ndarray],
     a: Union[Sequence[float], np.ndarray],
     fext: Optional[List[np.ndarray]] = None,
+    *,
+    backend: Optional[str] = None,
 ) -> np.ndarray:
     """Inverse dynamics: tau = RNEA(q, v, a).
 
@@ -43,10 +61,15 @@ def inverse_dynamics(
     :param fext: Optional list of 6D forces per body (in body frame).
     :return: Joint torques (nq,).
     """
+    q_arr = np.asarray(q, dtype=np.float64)
+    v_arr = np.asarray(v, dtype=np.float64)
+    a_arr = np.asarray(a, dtype=np.float64)
+    if _resolve_dynamics_backend(backend) == "cpp" and fext is None:
+        return _get_cpp_solver(model).inverse_dynamics(q_arr, v_arr, a_arr)
+    q = q_arr.ravel()
+    v = v_arr.ravel()
+    a = a_arr.ravel()
     dm = _get_dynamics_model(model)
-    q = np.asarray(q, dtype=np.float64).ravel()
-    v = np.asarray(v, dtype=np.float64).ravel()
-    a = np.asarray(a, dtype=np.float64).ravel()
     return rnea(dm, q, v, a, fext=fext)
 
 
@@ -56,8 +79,10 @@ def forward_dynamics(
     v: Union[Sequence[float], np.ndarray],
     tau: Union[Sequence[float], np.ndarray],
     fext: Optional[List[np.ndarray]] = None,
+    *,
+    backend: Optional[str] = None,
 ) -> np.ndarray:
-    """Forward dynamics: ddq = ABA(q, v, tau).
+    """Forward dynamics: solve M(q) @ ddq = tau - nle(q, v).
 
     :param model: RobotModel instance.
     :param q: Joint positions (nq,).
@@ -66,27 +91,42 @@ def forward_dynamics(
     :param fext: Optional external forces per body.
     :return: Joint accelerations (nq,).
     """
+    q_arr = np.asarray(q, dtype=np.float64)
+    v_arr = np.asarray(v, dtype=np.float64)
+    tau_arr = np.asarray(tau, dtype=np.float64)
+    if _resolve_dynamics_backend(backend) == "cpp" and fext is None:
+        return _get_cpp_solver(model).forward_dynamics(q_arr, v_arr, tau_arr)
+    q = q_arr.ravel()
+    v = v_arr.ravel()
+    tau = tau_arr.ravel()
     dm = _get_dynamics_model(model)
-    q = np.asarray(q, dtype=np.float64).ravel()
-    v = np.asarray(v, dtype=np.float64).ravel()
-    tau = np.asarray(tau, dtype=np.float64).ravel()
     return aba(dm, q, v, tau, fext=fext)
 
 
-def mass_matrix(model: Any, q: Union[Sequence[float], np.ndarray]) -> np.ndarray:
+def mass_matrix(
+    model: Any,
+    q: Union[Sequence[float], np.ndarray],
+    *,
+    backend: Optional[str] = None,
+) -> np.ndarray:
     """Mass matrix M(q) via CRBA.
 
     :param model: RobotModel instance.
     :param q: Joint positions (nq,).
     :return: M (nq, nq).
     """
+    q_arr = np.asarray(q, dtype=np.float64)
+    if _resolve_dynamics_backend(backend) == "cpp":
+        return _get_cpp_solver(model).mass_matrix(q_arr)
     dm = _get_dynamics_model(model)
-    return crba(dm, np.asarray(q, dtype=np.float64).ravel())
+    return crba(dm, q_arr.ravel())
 
 
 def mass_matrix_inverse(
     model: Any,
     q: Union[Sequence[float], np.ndarray],
+    *,
+    backend: Optional[str] = None,
 ) -> np.ndarray:
     """Inverse mass matrix M^{-1}(q).
 
@@ -94,25 +134,38 @@ def mass_matrix_inverse(
     :param q: Joint positions (nq,).
     :return: Minv (nq, nq).
     """
+    q_arr = np.asarray(q, dtype=np.float64)
+    if _resolve_dynamics_backend(backend) == "cpp":
+        return _get_cpp_solver(model).mass_matrix_inverse(q_arr)
     dm = _get_dynamics_model(model)
-    return _mass_matrix_inverse(dm, np.asarray(q, dtype=np.float64).ravel())
+    return _mass_matrix_inverse(dm, q_arr.ravel())
 
 
-def gravity(model: Any, q: Union[Sequence[float], np.ndarray]) -> np.ndarray:
+def gravity(
+    model: Any,
+    q: Union[Sequence[float], np.ndarray],
+    *,
+    backend: Optional[str] = None,
+) -> np.ndarray:
     """Generalized gravity g(q).
 
     :param model: RobotModel instance.
     :param q: Joint positions (nq,).
     :return: Joint torques due to gravity (nq,).
     """
+    q_arr = np.asarray(q, dtype=np.float64)
+    if _resolve_dynamics_backend(backend) == "cpp":
+        return _get_cpp_solver(model).gravity(q_arr)
     dm = _get_dynamics_model(model)
-    return _gravity(dm, np.asarray(q, dtype=np.float64).ravel())
+    return _gravity(dm, q_arr.ravel())
 
 
 def nonlinear_effects(
     model: Any,
     q: Union[Sequence[float], np.ndarray],
     v: Union[Sequence[float], np.ndarray],
+    *,
+    backend: Optional[str] = None,
 ) -> np.ndarray:
     """Nonlinear effects nle = C(q,v)*v + g(q) = RNEA(q, v, 0).
 
@@ -121,8 +174,12 @@ def nonlinear_effects(
     :param v: Joint velocities (nq,).
     :return: nle (nq,).
     """
+    q_arr = np.asarray(q, dtype=np.float64)
+    v_arr = np.asarray(v, dtype=np.float64)
+    if _resolve_dynamics_backend(backend) == "cpp":
+        return _get_cpp_solver(model).nonlinear_effects(q_arr, v_arr)
     dm = _get_dynamics_model(model)
-    return _nonlinear_effects(dm, np.asarray(q, dtype=np.float64).ravel(), np.asarray(v, dtype=np.float64).ravel())
+    return _nonlinear_effects(dm, q_arr.ravel(), v_arr.ravel())
 
 
 def coriolis_matrix(
@@ -130,6 +187,7 @@ def coriolis_matrix(
     q: Union[Sequence[float], np.ndarray],
     v: Union[Sequence[float], np.ndarray],
     epsilon: float = 1e-7,
+    backend: Optional[str] = None,
 ) -> np.ndarray:
     """Coriolis matrix C(q,v) such that C @ v = nle - g.
 
@@ -148,6 +206,7 @@ def static_torque(
     q: Union[Sequence[float], np.ndarray],
     fext: Optional[np.ndarray] = None,
     end_link: Optional[str] = None,
+    backend: Optional[str] = None,
 ) -> np.ndarray:
     """Static torque g(q) - J^T f_ext.
 

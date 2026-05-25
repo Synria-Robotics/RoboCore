@@ -3,3 +3,4 @@ include robocore/kinematics/fk_utils/_fk_chain_core.cpp
 include robocore/kinematics/jacobian_utils/_jacobian_chain_core.cpp
 include robocore/kinematics/ik_utils/_ik_chain_core.cpp
 include robocore/kinematics/ik_utils/_multichain_ik_core.cpp
+include robocore/dynamics/_dynamics_core.cpp

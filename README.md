@@ -22,7 +22,7 @@ robot-description assets installed.
 | Modeling | URDF and MJCF parsing, robot model abstraction, chain and multi-chain helpers |
 | Kinematics | FK, analytic/numeric Jacobian, DLS/pinv/transpose IK, batch APIs |
 | Backends | C++/Eigen pybind11 backend (recommended), NumPy, PyTorch CPU/CUDA |
-| Dynamics | Inverse dynamics, forward dynamics, mass matrix, gravity, nonlinear effects |
+| Dynamics | RNEA, CRBA, forward dynamics by mass-matrix solve, gravity, nonlinear effects |
 | Transform | SO(3), SE(3), RPY, quaternion, axis-angle conversions |
 | Planning | Joint-space and Cartesian path utilities, velocity profiles |
 | Analysis | Workspace sampling, reachability, singularity metrics |
@@ -90,6 +90,7 @@ separately when it is available.
 import robocore as rc
 from robocore.configs import resolve_description_path
 from robocore.modeling import RobotModel
+from robocore import dynamics
 from robocore.kinematics import forward_kinematics, jacobian, inverse_kinematics
 
 urdf = resolve_description_path("synriard://Alicia_D/v5_6/gripper_100mm/urdf")
@@ -98,77 +99,103 @@ model = RobotModel(urdf, base_link="base_link", end_link="tool0")
 q = model.random_q(seed=0)
 
 rc.set_backend("cpp")
-T = forward_kinematics(model, q, return_end=True)
-J = jacobian(model, q, method="analytic")
-ik = inverse_kinematics(model, T, q, method="dls")
+T = forward_kinematics(model, q, return_end=True, backend="cpp")
+J = jacobian(model, q, method="analytic", backend="cpp")
+ik = inverse_kinematics(model, T, q, method="dls", backend="cpp")
+tau_g = dynamics.gravity(model, q, backend="cpp")
 
 print(T.shape)          # (4, 4)
 print(J.shape)          # (6, model.num_chain_dof)
 print(ik["success"])    # True for this reachable target
+print(tau_g.shape)      # (model.num_chain_dof,)
 ```
 
 ## Benchmark Results
 
-Representative rc4 CPU benchmark: Python `3.11.13`, Intel Xeon Gold 5320,
-Alicia-D v5.6 6-DOF arm chain, `end_link=link6`.
+Benchmarks below are CPU results on Python `3.11.13`, Alicia-D v5.6 6-DOF arm
+chains. **RoboCore C++/Eigen** is the recommended default backend. Pinocchio and
+pytorch_kinematics are external comparison libraries, not RoboCore backends.
+Rows prefixed with `RoboCore` are built-in backends.
 
-RoboCore provides three kinematics backends: **C++/Eigen**, NumPy, and PyTorch.
-Pinocchio and pytorch_kinematics are external comparison libraries, not RoboCore
-backends. Speedup is normalized to **RoboCore C++/Eigen**:
-`speedup = backend_time / cpp_time`. Larger speedup means C++ is faster.
-
-FK/Jacobian results match the NumPy reference within `1e-9`. IK targets are
-reachable; RoboCore C++/Eigen, NumPy, and PyTorch CPU all solved `50/50`
-targets.
+`C++ advantage` is `other_time / robocore_cpp_time`; larger values mean the
+RoboCore C++ backend is faster. FK/Jacobian values match NumPy within `1e-9`.
 
 ### Forward Kinematics
 
-| Backend | Type | batch=1 ms | C++ speedup | batch=100 ms | C++ speedup |
-| --- | --- | ---: | ---: | ---: | ---: |
-| **RoboCore C++/Eigen** | **RoboCore backend** | **0.003** | **1.0x** | **0.055** | **1.0x** |
-| RoboCore NumPy | RoboCore backend | 0.459 | 144.2x | 0.866 | 15.6x |
-| RoboCore PyTorch CPU | RoboCore backend | 2.497 | 783.8x | 3.017 | 54.5x |
-| Pinocchio | External comparison | 0.005 | 1.5x | 0.523 | 9.5x |
-| pytorch_kinematics CPU | External comparison | 0.547 | 171.5x | 1.063 | 19.2x |
+Chain: `base_link -> link6`. Batch call processes 100 joint configurations.
+
+| Backend | Single call (ms) | C++ advantage | Batch call, 100 samples (ms) | C++ advantage |
+| --- | ---: | ---: | ---: | ---: |
+| **RoboCore C++/Eigen** | **0.003** | **1.0x** | **0.055** | **1.0x** |
+| RoboCore NumPy | 0.459 | 144.2x | 0.866 | 15.6x |
+| RoboCore PyTorch CPU | 2.497 | 783.8x | 3.017 | 54.5x |
+| Pinocchio | 0.005 | 1.5x | 0.523 | 9.5x |
+| pytorch_kinematics CPU | 0.547 | 171.5x | 1.063 | 19.2x |
 
 ### Analytic Jacobian
 
-| Backend | Type | batch=1 ms | C++ speedup | batch=100 ms | C++ speedup |
-| --- | --- | ---: | ---: | ---: | ---: |
-| **RoboCore C++/Eigen** | **RoboCore backend** | **0.003** | **1.0x** | **0.063** | **1.0x** |
-| RoboCore NumPy | RoboCore backend | 0.389 | 140.6x | 29.591 | 466.5x |
-| RoboCore PyTorch CPU | RoboCore backend | 2.535 | 917.2x | 6.393 | 100.8x |
-| Pinocchio | External comparison | 0.008 | 2.9x | 0.829 | 13.1x |
-| pytorch_kinematics CPU | External comparison | 0.560 | 202.6x | 0.969 | 15.3x |
+Chain: `base_link -> link6`. Batch call processes 100 joint configurations.
+
+| Backend | Single call (ms) | C++ advantage | Batch call, 100 samples (ms) | C++ advantage |
+| --- | ---: | ---: | ---: | ---: |
+| **RoboCore C++/Eigen** | **0.003** | **1.0x** | **0.063** | **1.0x** |
+| RoboCore NumPy | 0.389 | 140.6x | 29.591 | 466.5x |
+| RoboCore PyTorch CPU | 2.535 | 917.2x | 6.393 | 100.8x |
+| Pinocchio | 0.008 | 2.9x | 0.829 | 13.1x |
+| pytorch_kinematics CPU | 0.560 | 202.6x | 0.969 | 15.3x |
 
 ### Inverse Kinematics
 
-| Backend | Type | batch=1 ms | C++ speedup | batch=50 ms | C++ speedup | Validation |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| **RoboCore C++/Eigen DLS** | **RoboCore backend** | **0.016** | **1.0x** | **0.400** | **1.0x** | **50/50** |
-| RoboCore NumPy DLS | RoboCore backend | 3.715 | 230.8x | 83.483 | 208.9x | 50/50 |
-| RoboCore PyTorch CPU DLS | RoboCore backend | 18.952 | 1177.4x | 251.934 | 630.6x | 50/50 |
-| Pinocchio CLIK | External comparison | 2.566 | 159.4x | 643.515 | 1610.6x | sanity |
-| pytorch_kinematics PseudoInverseIK CPU | External comparison | 310.299 | 19278.0x | 509.076 | 1274.1x | timing only |
+Chain: `base_link -> link6`. Batch call solves 50 reachable targets.
 
-For low-latency FK/Jacobian/IK, use `rc.set_backend("cpp")` by default. The
-PyTorch backend remains useful for tensor workflows and larger batched pipelines.
-Pinocchio and pytorch_kinematics are included only as external references.
+| Backend | Single solve (ms) | C++ advantage | Batch solve, 50 targets (ms) | C++ advantage | Success |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **RoboCore C++/Eigen DLS** | **0.016** | **1.0x** | **0.400** | **1.0x** | **50/50** |
+| RoboCore NumPy DLS | 3.715 | 230.8x | 83.483 | 208.9x | 50/50 |
+| RoboCore PyTorch CPU DLS | 18.952 | 1177.4x | 251.934 | 630.6x | 50/50 |
+| Pinocchio CLIK | 2.566 | 159.4x | 643.515 | 1610.6x | sanity |
+| pytorch_kinematics CPU | 310.299 | 19278.0x | 509.076 | 1274.1x | timing only |
 
-Run the same benchmark locally:
+### Fixed-Base Dynamics
+
+The dynamics benchmark below is the v2.6.0 development baseline. Chain:
+`base_link -> tool0`. CPU only, `samples=200`, `repeats=5`,
+`inner-single=1000`, Pinocchio `4.0.0`.
+
+| Operation | **RoboCore C++** (ms) | NumPy (ms) | C++ vs NumPy | Pinocchio (ms) | C++ vs Pinocchio | Max error |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| RNEA inverse dynamics | **0.006** | 0.862 | 141.1x | 0.036 | 5.8x | 4.44e-16 |
+| CRBA mass matrix | **0.005** | 0.881 | 174.9x | 0.036 | 7.1x | 1.39e-17 |
+| Gravity | **0.007** | 0.863 | 115.6x | 0.036 | 4.8x | 4.44e-16 |
+| Nonlinear effects | **0.008** | 0.862 | 111.2x | 0.036 | 4.6x | 7.77e-16 |
+| Forward dynamics solve | **0.009** | 1.758 | 197.3x | 0.036 | 4.0x | 7.28e-12 |
+
+For low-latency FK/Jacobian/IK and fixed-base dynamics, use
+`rc.set_backend("cpp")` by default. The PyTorch backend remains useful for tensor
+workflows and larger batched pipelines. Pinocchio and pytorch_kinematics are
+included only as external references.
+
+Full benchmark policy, commands, and raw artifacts are recorded in
+[`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+
+Run the reproducible benchmark suite locally:
 
 ```bash
-python examples/kinematics/benchmark_fk_alicia_d_backends.py \
-  --device cpu --repeats 5 --inner-single 1000 --inner-batch 100
+python -m robocore.benchmark kinematics \
+  --robot alicia_d \
+  --backends cpp,numpy,torch,pinocchio \
+  --device cpu \
+  --output-dir benchmark-results
 
-python examples/kinematics/benchmark_jacobian_alicia_d_backends.py \
-  --device cpu --repeats 5 --inner-single 1000 --inner-batch 100
-
-python examples/kinematics/benchmark_ik_alicia_d_backends.py \
-  --device cpu --batch 50 --repeats 3 --inner-single 40 --inner-batch 4
+python -m robocore.benchmark dynamics \
+  --robot alicia_d \
+  --backends cpp,numpy,pinocchio \
+  --output-dir benchmark-results
 ```
 
-Add `--no-pk-pin` to skip the optional pytorch_kinematics/Pinocchio comparison.
+The CLI writes JSON and Markdown reports under `benchmark-results/` with
+Python/package versions, CPU/platform, robot model, chain links, batch sizes,
+seeds, tolerances, and timings.
 
 ## Examples
 
@@ -184,6 +211,7 @@ python examples/dynamics/01a_demo_id.py
 python examples/dynamics/02a_demo_fd.py
 python examples/dynamics/03a_demo_mass_matrix.py
 python examples/dynamics/05_benchmark.py
+python examples/dynamics/07_validate_pinocchio.py  # requires benchmark extra
 
 # Configs and analysis
 python examples/configs/demo_with_config.py
@@ -210,6 +238,14 @@ Current rc4 local validation covers Python `3.11`, `3.12`, and `3.13`; build,
 twine check, core unit tests, integration smoke tests, C++ backend smoke tests,
 and optional CUDA torch subset have passed. Skipped tests require optional
 robot-description assets, visualization runtimes, or extra simulation packages.
+
+Dynamics is currently treated as a fixed-base rigid-body dynamics beta surface.
+RNEA/inverse dynamics, CRBA/mass matrix, forward dynamics by solving
+`M(q) ddq = tau - nle(q, v)`, gravity, and nonlinear effects are supported by
+the NumPy and C++/Eigen backends and can be checked against Pinocchio with the
+`benchmark` extra. True O(n) ABA, floating-base dynamics, contact dynamics,
+dynamics derivatives, and constrained dynamics are not part of the current
+public guarantee.
 
 ## Project Layout
 

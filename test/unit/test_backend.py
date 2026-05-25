@@ -127,7 +127,7 @@ class TestBackendHelpers:
     def test_get_backend(self):
         """Test get_backend returns valid backend."""
         backend = get_backend()
-        assert backend in ['numpy', 'torch']
+        assert backend in ['numpy', 'torch', 'cpp']
     
     def test_set_backend_persistence(self):
         """Test set_backend persists across calls."""

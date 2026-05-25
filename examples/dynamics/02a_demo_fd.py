@@ -37,7 +37,7 @@ def main(args):
         if len(tau) != nq:
             tau = np.resize(tau, nq) if len(tau) < nq else tau[:nq]
 
-    beauty_print("Forward Dynamics: ddq = ABA(q, v, tau)", type="module")
+    beauty_print("Forward Dynamics: solve M(q) ddq = tau - nle(q, v)", type="module")
     beauty_print("Joint configuration q (rad):")
     print(f"  {beauty_print_array(q)}")
     beauty_print("Joint velocity v (rad/s):")

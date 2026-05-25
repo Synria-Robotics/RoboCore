@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Setuptools entry: Eigen + pybind11 FK, Jacobian, and IK extensions (required if sources present)."""
+"""Setuptools entry: Eigen + pybind11 native extensions."""
 
 from __future__ import annotations
 
@@ -42,6 +42,7 @@ _NATIVE_CPPS = (
     "robocore/kinematics/jacobian_utils/_jacobian_chain_core.cpp",
     "robocore/kinematics/ik_utils/_ik_chain_core.cpp",
     "robocore/kinematics/ik_utils/_multichain_ik_core.cpp",
+    "robocore/dynamics/_dynamics_core.cpp",
 )
 
 _NATIVE_EXTENSION_SPECS: tuple[tuple[str, str], ...] = (
@@ -55,6 +56,7 @@ _NATIVE_EXTENSION_SPECS: tuple[tuple[str, str], ...] = (
         "robocore.kinematics.ik_utils._multichain_ik_core",
         "robocore/kinematics/ik_utils/_multichain_ik_core.cpp",
     ),
+    ("robocore.dynamics._dynamics_core", "robocore/dynamics/_dynamics_core.cpp"),
 )
 
 
@@ -63,7 +65,7 @@ def _ext_modules():
         return []
     if Pybind11Extension is None:
         raise RuntimeError(
-            "pybind11 is required to build native kinematics extensions. "
+            "pybind11 is required to build native extensions. "
             "Use `pip install -e .` (PEP 517 installs pybind11 from pyproject.toml) "
             "or `pip install pybind11` before `python setup.py build_ext`."
         )

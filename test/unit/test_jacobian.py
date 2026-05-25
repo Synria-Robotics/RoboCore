@@ -57,9 +57,9 @@ class TestJacobianConsistency:
         max_diff = np.abs(J_np - J_torch_np).max()
         assert max_diff < 1e-10, f"Jacobian mismatch: max_diff={max_diff}"
     
-    @pytest.mark.skip(reason="Batch Jacobian implementation pending - single mode works correctly")
     def test_batch_vs_single_torch(self, robot_model):
         """Test that batch mode Jacobian matches single mode."""
+        pytest.importorskip("torch")
         q_test = random_q_in_limits(robot_model, seed=42)
         
         solver = JacobianSolverTorch(robot_model)
