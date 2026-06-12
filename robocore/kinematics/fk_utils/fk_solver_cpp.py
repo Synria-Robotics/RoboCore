@@ -8,13 +8,14 @@ Copyright (c) 2025 Synria Robotics Co., Ltd.
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Dict, Sequence
 
 import numpy as np
 
 from robocore.kinematics.utils import ensure_batch, restore_single
 
-from . import _fk_chain_core
+_fk_chain_core = import_module("robocore.kinematics.fk_utils._fk_chain_core")
 
 
 def _rpy_to_R(roll: float, pitch: float, yaw: float) -> np.ndarray:

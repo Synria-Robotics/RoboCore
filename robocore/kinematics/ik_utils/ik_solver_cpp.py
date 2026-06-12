@@ -18,6 +18,7 @@ Copyright (c) 2025 Synria Robotics Co., Ltd.
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import TYPE_CHECKING, Any, Dict
 
 import numpy as np
@@ -29,7 +30,7 @@ from robocore.kinematics.utils import ensure_batch, restore_single
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
 
-from . import _ik_chain_core
+_ik_chain_core = import_module("robocore.kinematics.ik_utils._ik_chain_core")
 
 
 class IKSolverCpp:

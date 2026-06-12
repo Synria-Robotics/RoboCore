@@ -8,6 +8,7 @@ Copyright (c) 2025 Synria Robotics Co., Ltd.
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
@@ -18,7 +19,7 @@ from robocore.kinematics.utils import ensure_batch, restore_single
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
 
-from . import _jacobian_chain_core
+_jacobian_chain_core = import_module("robocore.kinematics.jacobian_utils._jacobian_chain_core")
 
 
 def stop_chain_index(model: "RobotModel", target_link: str | None) -> int:
