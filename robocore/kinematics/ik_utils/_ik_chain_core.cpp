@@ -94,6 +94,66 @@ static Eigen::VectorXd solve_dls(const Eigen::MatrixXd &J, const Eigen::VectorXd
   return J.transpose() * y;
 }
 
+/// Gauss-Newton of ‖J dq − e‖² + λ²‖dq‖² + Σ w_i (q_i+dq_i − q_prev_i)².
+/// When every w_i ≤ 0 this is exactly ``solve_dls``. Per-joint w is the
+/// Mink/Pink PostureTask: it uniquely selects the spherical-wrist nullspace
+/// (j3↔j5 trade when j4≈0) without uniformly fighting the 6D task.
+static Eigen::VectorXd solve_dls_smooth(const Eigen::MatrixXd &J, const Eigen::VectorXd &e, double lam,
+                                        const Eigen::VectorXd &w, const Eigen::VectorXd &q,
+                                        const Eigen::VectorXd &q_prev) {
+  const int n = static_cast<int>(J.cols());
+  if (w.size() != n || w.maxCoeff() <= 0.0) {
+    return solve_dls(J, e, lam);
+  }
+  Eigen::MatrixXd A = J.transpose() * J;
+  A.diagonal().array() += lam * lam + w.array();
+  Eigen::VectorXd b = J.transpose() * e + w.cwiseProduct(q_prev - q);
+  return A.ldlt().solve(b);
+}
+
+static Eigen::VectorXd parse_smooth_weight(const py::object &obj, int n) {
+  Eigen::VectorXd w = Eigen::VectorXd::Zero(n);
+  if (obj.is_none()) {
+    return w;
+  }
+  if (py::isinstance<py::float_>(obj) || py::isinstance<py::int_>(obj)) {
+    w.setConstant(obj.cast<double>());
+    return w;
+  }
+  py::array_t<double> arr = py::array_t<double>::ensure(obj);
+  py::buffer_info b = arr.request();
+  if (b.ndim == 0 || (b.ndim == 1 && b.shape[0] == 1)) {
+    w.setConstant(*static_cast<const double *>(b.ptr));
+    return w;
+  }
+  if (b.ndim == 1 && static_cast<int>(b.shape[0]) == n) {
+    const double *p = static_cast<const double *>(b.ptr);
+    const ssize_t stride = (b.strides[0] == 0) ? 1 : b.strides[0] / static_cast<ssize_t>(sizeof(double));
+    for (int i = 0; i < n; ++i) {
+      w[i] = p[i * stride];
+    }
+    return w;
+  }
+  throw std::runtime_error("smooth_weight must be a scalar or a vector of n_dof");
+}
+
+/// Extra PostureTask on wrist roll/yaw when pitch (j4) is near 0.
+/// s=1 at singularity, ~0 by |j4|≳3σ. Default σ=0.2 rad.
+static void apply_wrist_singularity_lock(Eigen::VectorXd &w, const Eigen::VectorXd &q, double gain,
+                                         double sigma = 0.2) {
+  if (!(gain > 0.0) || w.size() < 6 || q.size() < 5) {
+    return;
+  }
+  const double q4 = q[4];
+  const double s = std::exp(-(q4 * q4) / (sigma * sigma));
+  w[3] += gain * s;
+  w[5] += gain * s;
+}
+
+static bool prior_active(const Eigen::VectorXd &w, double wrist_gain) {
+  return (w.size() > 0 && w.maxCoeff() > 0.0) || (wrist_gain > 0.0);
+}
+
 static double adaptive_damping_value(const Eigen::MatrixXd &J, double pos_err, double ori_err,
                                      double min_d, double max_d) {
   // Cheap condition proxy: 6*||JJt||_F^2 / tr(JJt)^2 in [1,6].
@@ -207,11 +267,17 @@ public:
   IkSolveOneResult solve_one(const Eigen::Matrix4d &T_tgt, const Eigen::VectorXd &q0_in,
                              std::int32_t max_iters, double pos_tol, double ori_tol, double min_damping,
                              double max_damping, double base_step, double pos_weight, double ori_weight,
-                             bool adaptive_damping, bool adaptive_step, double max_step_norm) const {
+                             bool adaptive_damping, bool adaptive_step, double max_step_norm,
+                             const Eigen::VectorXd &w_base, double wrist_gain,
+                             const Eigen::VectorXd &q_prev_in) const {
     Eigen::Matrix3d R_tgt = T_tgt.block<3, 3>(0, 0);
     Eigen::Vector3d p_tgt = T_tgt.block<3, 1>(0, 3);
 
     Eigen::VectorXd q = q0_in;
+    Eigen::VectorXd q_prev = q_prev_in;
+    if (q_prev.size() != q.size()) {
+      q_prev = q0_in;
+    }
     Eigen::VectorXd best_q = q;
     double best_err = std::numeric_limits<double>::infinity();
 
@@ -266,7 +332,9 @@ public:
           adaptive_damping ? adaptive_damping_value(J, pos_norm, ori_norm, min_damping, max_damping)
                            : 0.5 * (min_damping + max_damping);
 
-      Eigen::VectorXd dq = solve_dls(J, e, damp);
+      Eigen::VectorXd w = w_base;
+      apply_wrist_singularity_lock(w, q, wrist_gain);
+      Eigen::VectorXd dq = solve_dls_smooth(J, e, damp, w, q, q_prev);
 
       double step = adaptive_step ? adaptive_step_value(pos_norm, ori_norm, base_step) : base_step;
       Eigen::VectorXd dq_step = dq * step;
@@ -283,7 +351,15 @@ public:
     }
 
     if (!success) {
-      q = best_q;
+      Eigen::Matrix4d T_best = fk_end(best_q);
+      const double pos_best = (p_tgt - T_best.block<3, 1>(0, 3)).norm();
+      const double ori_best = rotation_error_compact(T_best.block<3, 3>(0, 0), R_tgt).norm();
+      const bool close = (pos_best <= 10.0 * pos_tol) && (ori_best <= 10.0 * ori_tol);
+      if (prior_active(w_base, wrist_gain) && !close) {
+        q = q0_in;
+      } else {
+        q = best_q;
+      }
     }
 
     Eigen::Matrix4d T_final = fk_end(q);
@@ -305,7 +381,8 @@ public:
   py::dict solve(py::array_t<double> target_pose, py::array_t<double> q0, std::int32_t max_iters,
                  double pos_tol, double ori_tol, double min_damping, double max_damping, double base_step,
                  double pos_weight, double ori_weight, bool adaptive_damping, bool adaptive_step,
-                 double max_step_norm) const {
+                 double max_step_norm, py::object smooth_weight_obj, py::object q_prev_obj,
+                 double wrist_singularity_gain) const {
     py::buffer_info tp = target_pose.request();
     py::buffer_info q0b = q0.request();
     if (tp.ndim != 2 || tp.shape[0] != 4 || tp.shape[1] != 4) {
@@ -319,10 +396,19 @@ public:
         static_cast<const double *>(tp.ptr));
     Eigen::VectorXd q_init =
         Eigen::Map<const Eigen::VectorXd>(static_cast<const double *>(q0b.ptr), n_dof_);
+    Eigen::VectorXd q_pref = q_init;
+    if (!q_prev_obj.is_none()) {
+      py::array_t<double> qp = q_prev_obj.cast<py::array_t<double>>();
+      py::buffer_info pb = qp.request();
+      if (pb.ndim == 1 && static_cast<std::int32_t>(pb.shape[0]) == n_dof_) {
+        q_pref = Eigen::Map<const Eigen::VectorXd>(static_cast<const double *>(pb.ptr), n_dof_);
+      }
+    }
 
+    Eigen::VectorXd w_base = parse_smooth_weight(smooth_weight_obj, n_dof_);
     IkSolveOneResult sr = solve_one(T_tgt, q_init, max_iters, pos_tol, ori_tol, min_damping, max_damping,
                                     base_step, pos_weight, ori_weight, adaptive_damping, adaptive_step,
-                                    max_step_norm);
+                                    max_step_norm, w_base, wrist_singularity_gain, q_pref);
 
     py::list q_py;
     for (std::int32_t i = 0; i < n_dof_; ++i) {
@@ -345,7 +431,9 @@ public:
   py::dict solve_batch(py::array_t<double> target_poses, py::array_t<double> q0_batch,
                        std::int32_t max_iters, double pos_tol, double ori_tol, double min_damping,
                        double max_damping, double base_step, double pos_weight, double ori_weight,
-                       bool adaptive_damping, bool adaptive_step, double max_step_norm) const {
+                       bool adaptive_damping, bool adaptive_step, double max_step_norm,
+                       py::object smooth_weight_obj, py::object q_prev_obj,
+                       double wrist_singularity_gain) const {
     py::buffer_info tpb = target_poses.request();
     py::buffer_info q0b = q0_batch.request();
     if (tpb.ndim != 3 || tpb.shape[1] != 4 || tpb.shape[2] != 4) {
@@ -377,6 +465,22 @@ public:
     const ssize_t qstride0 = q0b.strides[0];
     const ssize_t qstride1 = q0b.strides[1];
 
+    Eigen::VectorXd w_base = parse_smooth_weight(smooth_weight_obj, n_dof_);
+
+    bool have_prev_batch = false;
+    bool have_prev_vec = false;
+    py::array_t<double> q_prev_arr;
+    py::buffer_info prevb;
+    if (!q_prev_obj.is_none()) {
+      q_prev_arr = q_prev_obj.cast<py::array_t<double>>();
+      prevb = q_prev_arr.request();
+      if (prevb.ndim == 2 && prevb.shape[0] == B && static_cast<std::int32_t>(prevb.shape[1]) == n_dof_) {
+        have_prev_batch = true;
+      } else if (prevb.ndim == 1 && static_cast<std::int32_t>(prevb.shape[0]) == n_dof_) {
+        have_prev_vec = true;
+      }
+    }
+
     for (ssize_t b = 0; b < B; ++b) {
       Eigen::Matrix4d T_tgt;
       for (int r = 0; r < 4; ++r) {
@@ -392,9 +496,20 @@ public:
         q_init[j] = *reinterpret_cast<const double *>(qj);
       }
 
+      Eigen::VectorXd q_pref = q_init;
+      if (have_prev_batch) {
+        for (std::int32_t j = 0; j < n_dof_; ++j) {
+          const char *pj = reinterpret_cast<const char *>(prevb.ptr) + b * prevb.strides[0] +
+                           j * prevb.strides[1];
+          q_pref[j] = *reinterpret_cast<const double *>(pj);
+        }
+      } else if (have_prev_vec) {
+        q_pref = Eigen::Map<const Eigen::VectorXd>(static_cast<const double *>(prevb.ptr), n_dof_);
+      }
+
       IkSolveOneResult sr = solve_one(T_tgt, q_init, max_iters, pos_tol, ori_tol, min_damping,
                                       max_damping, base_step, pos_weight, ori_weight, adaptive_damping,
-                                      adaptive_step, max_step_norm);
+                                      adaptive_step, max_step_norm, w_base, wrist_singularity_gain, q_pref);
       const size_t bi = static_cast<size_t>(b);
       for (std::int32_t j = 0; j < n_dof_; ++j) {
         q_flat[bi * static_cast<size_t>(n_dof_) + static_cast<size_t>(j)] = sr.q[j];
@@ -641,10 +756,13 @@ PYBIND11_MODULE(_ik_chain_core, m) {
            py::arg("pos_tol") = 1e-3, py::arg("ori_tol") = 1e-3, py::arg("min_damping") = 1e-4,
            py::arg("max_damping") = 5e-2, py::arg("base_step") = 1.0, py::arg("pos_weight") = 1.0,
            py::arg("ori_weight") = 1.0, py::arg("adaptive_damping") = true, py::arg("adaptive_step") = true,
-           py::arg("max_step_norm") = 0.5)
+           py::arg("max_step_norm") = 0.5, py::arg("smooth_weight") = 0.0,
+           py::arg("q_prev") = py::none(), py::arg("wrist_singularity_gain") = 0.0)
       .def("solve_batch", &ChainIKDls::solve_batch, py::arg("target_poses"), py::arg("q0_batch"),
            py::arg("max_iters") = 200, py::arg("pos_tol") = 1e-3, py::arg("ori_tol") = 1e-3,
            py::arg("min_damping") = 1e-4, py::arg("max_damping") = 5e-2, py::arg("base_step") = 1.0,
            py::arg("pos_weight") = 1.0, py::arg("ori_weight") = 1.0, py::arg("adaptive_damping") = true,
-           py::arg("adaptive_step") = true, py::arg("max_step_norm") = 0.5);
+           py::arg("adaptive_step") = true, py::arg("max_step_norm") = 0.5,
+           py::arg("smooth_weight") = 0.0, py::arg("q_prev") = py::none(),
+           py::arg("wrist_singularity_gain") = 0.0);
 }

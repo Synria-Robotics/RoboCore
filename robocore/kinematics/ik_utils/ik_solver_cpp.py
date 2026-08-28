@@ -18,8 +18,9 @@ Copyright (c) 2025 Synria Robotics Co., Ltd.
 
 from __future__ import annotations
 
+import re
 from importlib import import_module
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Sequence
 
 import numpy as np
 
@@ -31,6 +32,35 @@ if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
 
 _ik_chain_core = import_module("robocore.kinematics.ik_utils._ik_chain_core")
+
+_PYBIND_ARG_RE = re.compile(r"(?:^|[,(]\s*)([a-z_][a-z0-9_]*)\s*:")
+
+
+def _pybind_arg_names(fn: Any) -> frozenset[str]:
+    """Parse pybind11 ``__doc__`` parameter names (inspect.signature fails on these)."""
+    doc = (getattr(fn, "__doc__", None) or "").replace("\n", " ")
+    names = set(_PYBIND_ARG_RE.findall(doc.split("->", 1)[0]))
+    names.discard("self")
+    return frozenset(names)
+
+
+def _invoke_native(fn: Any, **kwargs: Any) -> Any:
+    """Call a pybind IK method, dropping kwargs the compiled module does not accept.
+
+    Python can get ahead of a stale ``_ik_chain_core*.so`` (e.g. ``wrist_singularity_gain``).
+    Filter by the binding docstring first; on TypeError strip unknown keys and retry.
+    """
+    names = _pybind_arg_names(fn)
+    call = {k: v for k, v in kwargs.items() if not names or k in names}
+    try:
+        return fn(**call)
+    except TypeError as exc:
+        msg = str(exc)
+        if "incompatible function arguments" not in msg and "unexpected keyword" not in msg:
+            raise
+        for drop in ("wrist_singularity_gain",):
+            call.pop(drop, None)
+        return fn(**call)
 
 
 class IKSolverCpp:
@@ -93,6 +123,9 @@ class IKSolverCpp:
         method: str = "dls",
         max_step_norm: float = 0.5,
         target_link: str | None = None,
+        smooth_weight: float | np.ndarray | Sequence[float] = 0.0,
+        q_prev: np.ndarray | None = None,
+        wrist_singularity_gain: float = 0.0,
         **_: Any,
     ) -> Dict[str, Any] | Dict[str, list]:
         """Solve IK (same signature subset as ``IKSolverNumPy.solve``).
@@ -106,6 +139,10 @@ class IKSolverCpp:
         :param method: only ``dls`` supported.
         :param max_step_norm: step clip when ``adaptive_step`` is True.
         :param target_link: must match constructor.
+        :param smooth_weight: Mink/Pink PostureTask weight toward ``q_prev``
+            (scalar or per-joint vector; 0 disables).
+        :param q_prev: previous solution; defaults to ``q0``.
+        :param wrist_singularity_gain: extra weight on j3/j5 when j4≈0.
         :return: result dict (single or batch lists like NumPy).
         """
         if method.lower() != "dls":
@@ -131,21 +168,28 @@ class IKSolverCpp:
             raise ValueError("Batch size mismatch: target_pose vs q0")
 
         B = target_pose.shape[0]
+        native_kwargs = dict(
+            max_iters=int(self.max_iters),
+            pos_tol=float(self.pos_tol),
+            ori_tol=float(self.ori_tol),
+            min_damping=float(self.min_damping),
+            max_damping=float(self.max_damping),
+            base_step=float(self.base_step),
+            pos_weight=float(pos_weight),
+            ori_weight=float(ori_weight),
+            adaptive_damping=bool(adaptive_damping),
+            adaptive_step=bool(adaptive_step),
+            max_step_norm=float(max_step_norm),
+            smooth_weight=smooth_weight,
+            q_prev=None if q_prev is None else np.asarray(q_prev, dtype=np.float64),
+            wrist_singularity_gain=float(wrist_singularity_gain),
+        )
         if B == 1:
-            r = self._ik.solve(
-                target_pose[0],
-                q0[0],
-                int(self.max_iters),
-                float(self.pos_tol),
-                float(self.ori_tol),
-                float(self.min_damping),
-                float(self.max_damping),
-                float(self.base_step),
-                float(pos_weight),
-                float(ori_weight),
-                bool(adaptive_damping),
-                bool(adaptive_step),
-                float(max_step_norm),
+            r = _invoke_native(
+                self._ik.solve,
+                target_pose=target_pose[0],
+                q0=q0[0],
+                **native_kwargs,
             )
             out_q = [r["q"]]
             out_success = [bool(r["success"])]
@@ -154,20 +198,11 @@ class IKSolverCpp:
             out_pos = [float(r["pos_err"])]
             out_ori = [float(r["ori_err"])]
         else:
-            raw = self._ik.solve_batch(
-                target_pose,
-                q0,
-                int(self.max_iters),
-                float(self.pos_tol),
-                float(self.ori_tol),
-                float(self.min_damping),
-                float(self.max_damping),
-                float(self.base_step),
-                float(pos_weight),
-                float(ori_weight),
-                bool(adaptive_damping),
-                bool(adaptive_step),
-                float(max_step_norm),
+            raw = _invoke_native(
+                self._ik.solve_batch,
+                target_poses=target_pose,
+                q0_batch=q0,
+                **native_kwargs,
             )
             qm = np.asarray(raw["q"], dtype=np.float64)
             succ_u8 = np.asarray(raw["success"], dtype=np.uint8)

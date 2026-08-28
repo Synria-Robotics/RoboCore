@@ -116,6 +116,7 @@ class IKSolverTorch:
         restart_noise: float = 0.25,  # 相对随机扰动幅度 (弧度)
         random_seed: Optional[int] = None,
         verbose: bool = False,  # 批处理模式使用
+        **_: object,
     ) -> Dict:
         """Solve inverse kinematics (supports both single and batch modes).
         

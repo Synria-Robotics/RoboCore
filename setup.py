@@ -43,6 +43,7 @@ _NATIVE_CPPS = (
     "robocore/kinematics/ik_utils/_ik_chain_core.cpp",
     "robocore/kinematics/ik_utils/_multichain_ik_core.cpp",
     "robocore/dynamics/_dynamics_core.cpp",
+    "robocore/dynamics/native/chain_dynamics.cpp",
 )
 
 _NATIVE_EXTENSION_SPECS: tuple[tuple[str, str], ...] = (
@@ -56,7 +57,10 @@ _NATIVE_EXTENSION_SPECS: tuple[tuple[str, str], ...] = (
         "robocore.kinematics.ik_utils._multichain_ik_core",
         "robocore/kinematics/ik_utils/_multichain_ik_core.cpp",
     ),
-    ("robocore.dynamics._dynamics_core", "robocore/dynamics/_dynamics_core.cpp"),
+    ("robocore.dynamics._dynamics_core", (
+        "robocore/dynamics/_dynamics_core.cpp",
+        "robocore/dynamics/native/chain_dynamics.cpp",
+    )),
 )
 
 
@@ -77,12 +81,16 @@ def _ext_modules():
         extra.append("-stdlib=libc++")
     exts = []
     for mod_name, rel_path in _NATIVE_EXTENSION_SPECS:
-        if (ROOT / rel_path).is_file():
+        if isinstance(rel_path, str):
+            sources = [rel_path]
+        else:
+            sources = list(rel_path)
+        if all((ROOT / src).is_file() for src in sources):
             exts.append(
                 Pybind11Extension(
                     mod_name,
-                    [rel_path],
-                    include_dirs=[],
+                    sources,
+                    include_dirs=[str(ROOT / "robocore" / "dynamics")],
                     cxx_std=17,
                     extra_compile_args=extra,
                 )

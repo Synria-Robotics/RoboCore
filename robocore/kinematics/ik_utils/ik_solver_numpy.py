@@ -11,7 +11,7 @@ Website: https://synriarobotics.ai
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Dict, Sequence
+from typing import TYPE_CHECKING, Dict, Sequence, Union
 import numpy as np
 from ..jacobian_utils.jacobian_solver_numpy import JacobianSolverNumPy
 from ..fk_utils.fk_solver_numpy import FKSolverNumPy
@@ -21,6 +21,47 @@ from robocore.kinematics.utils import ensure_batch, restore_single
 
 if TYPE_CHECKING:
     from robocore.modeling.robot_model import RobotModel
+
+SmoothWeight = Union[float, Sequence[float], np.ndarray]
+
+
+def coerce_smooth_weights(smooth_weight: SmoothWeight | None, n: int) -> np.ndarray:
+    """Broadcast a scalar or per-joint PostureTask weight to ``(n,)``."""
+    if smooth_weight is None:
+        return np.zeros(int(n), dtype=np.float64)
+    a = np.asarray(smooth_weight, dtype=np.float64).reshape(-1)
+    if a.size == 1:
+        return np.full(int(n), float(a[0]), dtype=np.float64)
+    if a.size != int(n):
+        raise ValueError(f"smooth_weight must be scalar or length {n}, got {a.size}")
+    return np.ascontiguousarray(a, dtype=np.float64)
+
+
+def apply_wrist_singularity_lock(
+    w: np.ndarray,
+    q: np.ndarray,
+    gain: float,
+    sigma: float = 0.2,
+) -> np.ndarray:
+    """Add PostureTask weight on j3/j5 when wrist pitch j4 is near 0."""
+    out = np.asarray(w, dtype=np.float64).reshape(-1).copy()
+    if not (float(gain) > 0.0) or out.size < 6:
+        return out
+    qv = np.asarray(q, dtype=np.float64).reshape(-1)
+    if qv.size < 5:
+        return out
+    q4 = float(qv[4])
+    s = float(np.exp(-(q4 * q4) / (float(sigma) * float(sigma))))
+    out[3] += float(gain) * s
+    out[5] += float(gain) * s
+    return out
+
+
+def smooth_prior_active(smooth_weight: SmoothWeight | None, wrist_gain: float = 0.0) -> bool:
+    if float(wrist_gain) > 0.0:
+        return True
+    a = np.asarray(0.0 if smooth_weight is None else smooth_weight, dtype=np.float64).reshape(-1)
+    return bool(a.size and np.any(a > 0.0))
 
 
 class IKSolverNumPy:
@@ -89,6 +130,9 @@ class IKSolverNumPy:
         joint_centering: bool = True,
         joint_center_gain: float = 0.2,
         joint_center_weights: Sequence[float] | None = None,
+        smooth_weight: SmoothWeight = 0.0,
+        q_prev: np.ndarray | None = None,
+        wrist_singularity_gain: float = 0.0,
     ) -> Dict[str, object] | Dict[str, list]:
         """Solve IK with selectable method (supports both single and batch).
 
@@ -150,6 +194,9 @@ class IKSolverNumPy:
             joint_centering=joint_centering,
             joint_center_gain=joint_center_gain,
             joint_center_weights=joint_center_weights,
+            smooth_weight=smooth_weight,
+            q_prev=q_prev,
+            wrist_singularity_gain=wrist_singularity_gain,
         )
 
         return restore_single(result, was_single)
@@ -177,6 +224,9 @@ class IKSolverNumPy:
         joint_centering: bool = True,
         joint_center_gain: float = 0.2,
         joint_center_weights: Sequence[float] | None = None,
+        smooth_weight: SmoothWeight = 0.0,
+        q_prev: np.ndarray | None = None,
+        wrist_singularity_gain: float = 0.0,
     ) -> Dict[str, list]:
         """Solve IK for batch of configurations (vectorized).
         
@@ -188,6 +238,7 @@ class IKSolverNumPy:
         n = self.n
 
         q = q0_batch.copy()
+        q_prev_batch = self._coerce_q_prev(q_prev, q0_batch, n)
         best_q = q.copy()
         best_err = np.full(B, np.inf)
         success = np.zeros(B, dtype=bool)
@@ -309,7 +360,19 @@ class IKSolverNumPy:
                 Jk_projected = self._project_jacobian_for_limits(Jk, qk, ek, lam[k], method)
 
                 if method == "dls":
-                    dq[k] = self._solve_dls(Jk_projected, ek, lam[k])
+                    w_k = apply_wrist_singularity_lock(
+                        coerce_smooth_weights(smooth_weight, n),
+                        qk,
+                        wrist_singularity_gain,
+                    )
+                    dq[k] = self._solve_dls(
+                        Jk_projected,
+                        ek,
+                        lam[k],
+                        q=qk,
+                        q_prev=q_prev_batch[act_idx[k]],
+                        smooth_weight=w_k,
+                    )
                 elif method == "pinv":
                     dq[k] = self._solve_pinv(Jk_projected, ek, lam[k])
                 else:  # transpose
@@ -389,7 +452,12 @@ class IKSolverNumPy:
         remaining = np.where(active)[0]
         if len(remaining) > 0:
             iters[remaining] = self.max_iters
-            q[remaining] = best_q[remaining]
+            if smooth_prior_active(smooth_weight, wrist_singularity_gain):
+                thresh = 10.0 * (float(self.pos_tol) + float(self.ori_tol))
+                use_best = np.isfinite(best_err[remaining]) & (best_err[remaining] <= thresh)
+                q[remaining] = np.where(use_best[:, None], best_q[remaining], q0_batch[remaining])
+            else:
+                q[remaining] = best_q[remaining]
 
         # Final errors
         T_final = self.fk_solver.solve(q, return_end_only=True)
@@ -448,6 +516,9 @@ class IKSolverNumPy:
         joint_centering: bool = True,
         joint_center_gain: float = 0.2,
         joint_center_weights: Sequence[float] | None = None,
+        smooth_weight: SmoothWeight = 0.0,
+        q_prev: np.ndarray | None = None,
+        wrist_singularity_gain: float = 0.0,
     ) -> Dict[str, object]:
         """Solve IK for single configuration (original implementation)."""
         method = method.lower()
@@ -462,6 +533,7 @@ class IKSolverNumPy:
         p_target = target_pose[:3, 3]
         
         q = q0.copy()
+        q_pref = self._coerce_q_prev(q_prev, q0, self.n)
         q_initial = q.copy()  # Track initial configuration to detect large cumulative jumps
         best_q = q.copy()
         best_err = np.inf
@@ -596,7 +668,19 @@ class IKSolverNumPy:
 
             # Solve per method
             if method == "dls":
-                dq = self._solve_dls(J_eff_projected, err, damping)
+                w_it = apply_wrist_singularity_lock(
+                    coerce_smooth_weights(smooth_weight, self.n),
+                    q,
+                    wrist_singularity_gain,
+                )
+                dq = self._solve_dls(
+                    J_eff_projected,
+                    err,
+                    damping,
+                    q=q,
+                    q_prev=q_pref,
+                    smooth_weight=w_it,
+                )
             elif method == "pinv":
                 dq = self._solve_pinv(J_eff_projected, err, damping)
             else:  # transpose
@@ -712,8 +796,21 @@ class IKSolverNumPy:
         
         # Return best solution found
         # 失败：返回迭代中最优残差对应的 pos/ori 误差（若未更新保持最后一次计算）
-        if not np.isfinite(best_pos_err) or not np.isfinite(best_ori_err):
-            fk_best = forward_kinematics(self.model, best_q.tolist(), return_end=True)
+        # Near-miss: keep best_q so a tight ori_tol does not freeze the seed.
+        # Unreachable: hold q0 when a temporal prior is active (no wild jump).
+        if smooth_prior_active(smooth_weight, wrist_singularity_gain):
+            close = np.isfinite(best_pos_err) and np.isfinite(best_ori_err)
+            close = close and best_pos_err <= 10.0 * float(self.pos_tol)
+            close = close and best_ori_err <= 10.0 * float(self.ori_tol)
+            q_out = best_q if close else q0
+        else:
+            q_out = best_q
+        if (
+            not np.isfinite(best_pos_err)
+            or not np.isfinite(best_ori_err)
+            or q_out is q0
+        ):
+            fk_best = forward_kinematics(self.model, q_out.tolist(), return_end=True)
             if isinstance(fk_best, np.ndarray):
                 R_best = fk_best[:3, :3]; p_best = fk_best[:3, 3]
             else:
@@ -722,7 +819,7 @@ class IKSolverNumPy:
             best_pos_err = float(np.linalg.norm(p_target - p_best))
             best_ori_err = float(np.linalg.norm(rotation_error(R_best, R_target)))
         return {
-            "q": best_q.tolist(),
+            "q": q_out.tolist(),
             "success": False,
             "iters": self.max_iters,
             "err_norm": float(best_err),
@@ -733,24 +830,56 @@ class IKSolverNumPy:
         }
 
 
-    def _solve_dls(self, J: np.ndarray, err: np.ndarray, damping: float) -> np.ndarray:
+    @staticmethod
+    def _coerce_q_prev(q_prev, q0: np.ndarray, n: int) -> np.ndarray:
+        """Broadcast ``q_prev`` to the same shape as ``q0``; fall back to ``q0``."""
+        q0a = np.asarray(q0, dtype=np.float64)
+        if q_prev is None:
+            return q0a.copy()
+        qp = np.asarray(q_prev, dtype=np.float64)
+        if q0a.ndim == 1:
+            if qp.size == n:
+                return qp.reshape(n).copy()
+            return q0a.copy()
+        batch = q0a.shape[0]
+        if qp.ndim == 1 and qp.size == n:
+            return np.broadcast_to(qp.reshape(n), (batch, n)).copy()
+        if qp.ndim == 2 and qp.shape == (batch, n):
+            return qp.copy()
+        return q0a.copy()
+
+    def _solve_dls(
+        self,
+        J: np.ndarray,
+        err: np.ndarray,
+        damping: float,
+        q: np.ndarray | None = None,
+        q_prev: np.ndarray | None = None,
+        smooth_weight: SmoothWeight = 0.0,
+    ) -> np.ndarray:
         """Solve damped least squares: dq = J^T (J J^T + λ²I)^{-1} err.
 
-        :param J: 6×n Jacobian matrix.
-        :param err: 6 error vector.
-        :param damping: damping factor λ.
-        :return: n joint velocity vector.
+        When ``smooth_weight > 0`` and ``q``/``q_prev`` are set, uses the n×n
+        Gauss-Newton form of ‖J dq − e‖² + λ²‖dq‖² + w‖q+dq − q_prev‖².
         """
-        # A = J @ J^T + λ²I (6×6 matrix)
-        A = J @ J.T + (damping ** 2) * np.eye(6, dtype=np.float64)
-        
-        # Solve A @ y = err for y
-        y = np.linalg.solve(A, err)
-        
-        # dq = J^T @ y
-        dq = J.T @ y
-        
-        return dq
+        n = int(J.shape[1])
+        w = coerce_smooth_weights(smooth_weight, n) if q is not None and q_prev is not None else None
+        if w is None or not np.any(w > 0.0):
+            # A = J @ J^T + λ²I (task-space, typically 6×6)
+            A = J @ J.T + (damping ** 2) * np.eye(J.shape[0], dtype=np.float64)
+            y = np.linalg.solve(A, err)
+            return J.T @ y
+
+        A = J.T @ J
+        A.flat[:: n + 1] += damping ** 2 + w
+        b = J.T @ err + w * (
+            np.asarray(q_prev, dtype=np.float64).reshape(n)
+            - np.asarray(q, dtype=np.float64).reshape(n)
+        )
+        try:
+            return np.linalg.solve(A, b)
+        except np.linalg.LinAlgError:
+            return np.linalg.lstsq(A, b, rcond=None)[0]
 
     def _compute_adaptive_damping(self, J: np.ndarray, pos_err: float, ori_err: float) -> float:
         """Adaptive damping based on condition number and current error."""
